@@ -214,8 +214,12 @@ jobs:
         run: |
           DIGEST=$(docker buildx imagetools inspect "$IMAGE:$PG_FULL" \
             --format '{{json .Manifest}}' | jq -r .digest)
-          docker run --rm \
-            -v "$HOME/.docker:/root/.docker" \
+          # cosign's image runs as nonroot and can't read the mounted docker
+          # config; numeric 0:0 + explicit DOCKER_CONFIG (same workaround as
+          # the grype step). ro mount: cosign only reads credentials.
+          docker run --rm --user 0:0 \
+            -v "$HOME/.docker:/root/.docker:ro" \
+            -e DOCKER_CONFIG=/root/.docker \
             -e GITHUB_ACTIONS \
             -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
             ghcr.io/sigstore/cosign/cosign:latest sign --yes "$IMAGE@$DIGEST"
