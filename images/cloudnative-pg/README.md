@@ -33,6 +33,19 @@ docker run --rm --user root \
 
 Drop `--arch` to build both `x86_64` + `aarch64` from the config for a push.
 
+## Publish
+
+`.github/workflows/cloudnative-pg.yml` publishes the multi-arch index
+(`x86_64` + `aarch64`) to ghcr on pushes touching this directory (or manually):
+
+```
+ghcr.io/<owner>/containers/cloudnativepg:18-minimal
+```
+
+The workflow smoke-tests the published image with `test.sh` afterwards. If the
+repo is private, the package inherits private visibility — pull it from a
+cluster with a ghcr imagePullSecret.
+
 ## Test
 
 ```sh
