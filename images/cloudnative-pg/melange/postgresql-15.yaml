@@ -11,7 +11,7 @@
 package:
   name: postgresql-15
   version: 15.19
-  epoch: 0
+  epoch: 100
   description: "PostgreSQL 15 built from PGDG source for CloudNativePG images"
   copyright:
     - license: PostgreSQL

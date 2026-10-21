@@ -11,7 +11,7 @@
 package:
   name: postgresql-18
   version: 18.6
-  epoch: 0
+  epoch: 100
   description: "PostgreSQL 18 built from PGDG source for CloudNativePG images"
   copyright:
     - license: PostgreSQL

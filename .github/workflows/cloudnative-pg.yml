@@ -137,12 +137,14 @@ jobs:
               --output "/work/build/pg-$PG_MAJOR.lock.json"
           RESOLVED=$(jq -r --arg p "postgresql-$PG_MAJOR" \
             '.contents.packages[] | select(.name==$p) | .version' "build/pg-$PG_MAJOR.lock.json" | head -1)
-          # provider-priority must beat Wolfi's stale same-named package —
-          # if this ever fires, the melange package lost resolution.
-          case "$RESOLVED" in
-            "$PG_FULL"-r*) ;;
-            *) echo "apko resolved postgresql-$PG_MAJOR as '$RESOLVED', expected '$PG_FULL-rN'"; exit 1 ;;
-          esac
+          # provider-priority is only consulted when the VERSION ties, and Wolfi
+          # can tie (e.g. our 18.6-rN vs its 18.6-r5 rebuild). The configs'
+          # epoch: 100 keeps our pkgver strictly above any Wolfi -rN; require
+          # the exact pkgver so a Wolfi same-version slip can never ship.
+          EPOCH=$(awk '/^  epoch:/{print $2; exit}' "images/cloudnative-pg/melange/postgresql-$PG_MAJOR.yaml")
+          if [ "$RESOLVED" != "${PG_FULL}-r${EPOCH}" ]; then
+            echo "apko resolved postgresql-$PG_MAJOR as '$RESOLVED', expected '${PG_FULL}-r${EPOCH}' (the melange package lost resolution to Wolfi)"; exit 1
+          fi
 
       # Nested package names (owner/repo/image) — works with GITHUB_TOKEN since
       # the parent owner/repository package exists; CR_PAT (packages:write)

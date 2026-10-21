@@ -11,7 +11,7 @@
 package:
   name: postgresql-16
   version: 16.15
-  epoch: 0
+  epoch: 100
   description: "PostgreSQL 16 built from PGDG source for CloudNativePG images"
   copyright:
     - license: PostgreSQL
