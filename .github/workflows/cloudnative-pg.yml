@@ -184,8 +184,11 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      matrix:
-        include: ${{ fromJSON(needs.detect-changes.outputs.pg-matrix) }}
+      # NOTE: the whole matrix: key must carry the fromJSON expression — an
+      # expression on matrix.include: alone silently drops the job at
+      # scheduling time (burned a full run before the debug echoes proved the
+      # outputs were valid). Same shape as the minimal repo's build.yml.
+      matrix: ${{ fromJSON(needs.detect-changes.outputs.pg-matrix) }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -267,8 +270,7 @@ jobs:
     timeout-minutes: 45
     strategy:
       fail-fast: false
-      matrix:
-        include: ${{ fromJSON(needs.detect-changes.outputs.build-pg-matrix) }}
+      matrix: ${{ fromJSON(needs.detect-changes.outputs.build-pg-matrix) }}
     permissions:
       contents: read
       packages: write
