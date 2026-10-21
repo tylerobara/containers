@@ -54,8 +54,15 @@ pipeline:
       # No vendor/ dir in the tarball, so modules resolve from the network.
       export CGO_ENABLED=0 GOTOOLCHAIN=local
       export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.27/bin"
+      # fullVersion is the unexported stamp upstream's release CI overrides
+      # (scripts/build.sh alone only sets GitCommit/CommitDate; a tarball
+      # build without it self-reports the dev default "2.0.0-HEAD").
+      # VersionMetadata is the sanctioned downstream knob (no leading v:
+      # "v" + version would double the v in `bao version`).
       go build -trimpath -buildvcs=false -tags openbao \
         -ldflags "-s -w \
+          -X github.com/openbao/openbao/v2/internal/version.fullVersion=${{package.version}} \
+          -X github.com/openbao/openbao/v2/internal/version.VersionMetadata=wolfi \
           -X github.com/openbao/openbao/v2/internal/version.GitCommit=unknown \
           -X github.com/openbao/openbao/v2/internal/version.CommitDate=$(date -u +%FT%TZ)" \
         -o bao .
