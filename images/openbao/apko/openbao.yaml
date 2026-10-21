@@ -1,0 +1,47 @@
+# OpenBao image, assembled by apko (no Dockerfile). The bao binary is built
+# from upstream source by melange (see ../melange/openbao.yaml); everything
+# else is Wolfi.
+#
+# Reference: the alpine target of the upstream Dockerfile
+# (github.com/openbao/openbao/blob/main/Dockerfile): /usr/bin/bao, nonroot,
+# server on 8200. Differences from upstream, on purpose:
+#   - busybox+ca-certs Wolfi base instead of alpine (no apk-tools at runtime)
+#   - nonroot 65532 instead of the adduser-assigned uid
+#   - default args are `server` (production posture, mount your own
+#     /openbao/config) instead of upstream's dev-mode CMD
+# No setcap for mlock lives here (no libcap in base): run the server either
+# with the IPC_LOCK capability or mlock=false — see README.md.
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    # Debug shell only — bao is a static Go binary. ca-certificates for
+    # upstream TLS (ACME, OIDC issuers, SMTP), tzdata-free: it speaks UTC.
+    - busybox
+    - ca-certificates
+    # Built by melange; supplied via --repository-append at build time.
+    - openbao
+
+accounts:
+  groups:
+    - groupname: openbao
+      gid: 65532
+  users:
+    - username: openbao
+      uid: 65532
+      gid: 65532
+      shell: /bin/false
+  run-as: 65532
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+
+entrypoint:
+  command: /usr/bin/bao
+  args: ["server"]
+
+ports:
+  - 8200

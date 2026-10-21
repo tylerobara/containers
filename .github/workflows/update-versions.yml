@@ -1,12 +1,12 @@
 name: update-versions
 
 # Version bump bot — the minimal repo's update-versions.yml pattern scaled to
-# this repo's two image families. Checks upstream (PGDG ftp for each tracked
-# postgresql-<major>.yaml, GitHub releases for the operator) and opens a PR
-# bumping `version` + `vars.sha256` in the melange config. Nothing is merged
-# or published here: review the PR, validate it with cloudnative-pg.yml
-# workflow_dispatch (ref = PR branch, validate_only = true), then merge — the
-# merge push rebuilds and publishes just that image.
+# this repo's image families. Checks upstream (PGDG ftp for each tracked
+# postgresql-<major>.yaml, GitHub releases for the operator and openbao) and
+# opens a PR bumping `version` + `vars.sha256` in the melange config. Nothing
+# is merged or published here: review the PR, validate it with
+# cloudnative-pg.yml workflow_dispatch (ref = PR branch, validate_only = true),
+# then merge — the merge push rebuilds and publishes just that image.
 #
 # GITHUB_TOKEN-authored PRs don't auto-run checks (GitHub's anti-recursion
 # rule). If you install a GitHub App and set APP_ID/APP_PRIVATE_KEY secrets,
@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       only:
-        description: "Comma-separated rows to check, e.g. postgresql-16,operator (blank = all)"
+        description: "Comma-separated rows to check, e.g. postgresql-16,operator,openbao (blank = all)"
         required: false
         default: ""
 
@@ -122,6 +122,18 @@ jobs:
             fi
             bump_row operator "$yaml" "$latest" \
               "https://github.com/cloudnative-pg/cloudnative-pg/archive/refs/tags/v${latest}.tar.gz"
+          fi
+
+          # --- openbao: latest GitHub release ---
+          if want openbao; then
+            yaml=images/openbao/melange/openbao.yaml
+            latest=$(gh api repos/openbao/openbao/releases/latest --jq '.tag_name | ltrimstr("v")')
+            if [ -z "$latest" ]; then
+              echo "::error::openbao: no release found upstream"
+              FAILED=1
+            fi
+            bump_row openbao "$yaml" "$latest" \
+              "https://github.com/openbao/openbao/archive/refs/tags/v${latest}.tar.gz"
           fi
 
           exit $FAILED

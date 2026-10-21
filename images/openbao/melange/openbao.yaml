@@ -1,0 +1,68 @@
+# Melange build for OpenBao (github.com/openbao/openbao) — same from-source
+# pattern as the operator image: static Go binary off the release tarball,
+# packaged as `openbao` so grype/secdb name-match. Wolfi has no openbao
+# package today, so provider-priority/epoch are belt-and-suspenders in case
+# one ever appears with the same name.
+#
+# Bump `version` + `vars.sha256` on each release
+# (https://github.com/openbao/openbao/releases) — the update-versions bot
+# covers this row.
+
+package:
+  name: openbao
+  version: 2.7.1
+  epoch: 100
+  description: "OpenBao secrets management built from upstream source"
+  copyright:
+    - license: MPL-2.0
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the GitHub release tarball
+  sha256: 4d69328fa9110734f7740547f5aa7fc77f32141eaab9f7e965abb4f748c4a81a
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      # .go-version wants 1.27.1; Wolfi go-1.27 is 1.27.3.
+      - go-1.27
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/openbao/openbao/archive/refs/tags/v${{package.version}}.tar.gz" \
+        -o /home/build/openbao.tar.gz
+      echo "${{vars.sha256}}  /home/build/openbao.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf openbao.tar.gz
+      rm openbao.tar.gz
+
+  - working-directory: /home/build/openbao-${{package.version}}
+    runs: |
+      # Mirrors scripts/build.sh (go build -tags openbao . -o bin/bao + the
+      # internal/version ldflags); built-in plugin binaries and the web UI
+      # are skipped — same as upstream's image, which ships only bao.
+      # No vendor/ dir in the tarball, so modules resolve from the network.
+      export CGO_ENABLED=0 GOTOOLCHAIN=local
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.27/bin"
+      go build -trimpath -buildvcs=false -tags openbao \
+        -ldflags "-s -w \
+          -X github.com/openbao/openbao/v2/internal/version.GitCommit=unknown \
+          -X github.com/openbao/openbao/v2/internal/version.CommitDate=$(date -u +%FT%TZ)" \
+        -o bao .
+      install -Dm755 bao "${{targets.destdir}}/usr/bin/bao"
+      # Upstream ships a vault compat symlink.
+      ln -sfn bao "${{targets.destdir}}/usr/bin/vault"
+
+  - runs: |
+      # Verify the build actually produced this version
+      "${{targets.destdir}}/usr/bin/bao" version | grep -q "${{package.version}}"

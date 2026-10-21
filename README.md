@@ -9,6 +9,7 @@ base. **No Dockerfiles anywhere.**
 |---|---|---|
 | PostgreSQL 15–18 (PGDG source) | `ghcr.io/tylerobara/containers/cnpg-postgres` | [`images/cloudnative-pg/`](images/cloudnative-pg/) |
 | CloudNativePG operator | `ghcr.io/tylerobara/containers/cloudnative-pg` | [`images/cloudnative-pg-operator/`](images/cloudnative-pg-operator/) |
+| OpenBao | `ghcr.io/tylerobara/containers/openbao` | [`images/openbao/`](images/openbao/) |
 
 Catalog + grype scan results: <https://tylerobara.github.io/containers/>
 (includes a sha-pinned `ClusterImageCatalog` for CNPG, copy-paste `docker pull`
@@ -27,7 +28,8 @@ smoke test, scan) — see `lint.yml` and `update-versions.yml` alongside it.
 ## Version updates
 
 The **update-versions** workflow checks upstream daily (PGDG ftp for each
-tracked `postgresql-<major>`, GitHub releases for the operator) and opens a PR
+tracked `postgresql-<major>`, GitHub releases for the operator and openbao) and
+opens a PR
 bumping `version` + `vars.sha256` in the melange config. Review the PR, then:
 
 1. *(optional pre-merge check)* Run **cloudnative-pg.yml** manually with
