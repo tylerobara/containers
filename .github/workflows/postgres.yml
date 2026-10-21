@@ -442,9 +442,16 @@ jobs:
           files=(data/*.json)
           if [ ${#files[@]} -gt 0 ]; then jq -s '.' "${files[@]}" > /tmp/new.json
           else echo '[]' > /tmp/new.json; fi
-          # Previous deployment (first deploy: none yet; Pages can lag by a
-          # build or two — worst case a stale entry heals on the next build).
-          curl -fsSL --retry 3 "https://tylerobara.github.io/containers/data/index.json" -o /tmp/old.json 2>/dev/null || echo '[]' > /tmp/old.json
+          # Previous deployment. Read the gh-pages BRANCH (ground truth the
+          # moment any sibling workflow pushes it), not the Pages URL — that
+          # cache can lag ~10 min, and sibling workflows deploying minutes
+          # apart would otherwise resurrect each other's stale entries (the
+          # split push lost openbao's entry exactly this way; the URL stays
+          # only as fallback for the very first fetch failure).
+          git fetch -q --depth 1 origin gh-pages 2>/dev/null || true
+          { git show FETCH_HEAD:data/index.json 2>/dev/null \
+            || curl -fsSL --retry 3 "https://tylerobara.github.io/containers/data/index.json" 2>/dev/null \
+            || echo '[]'; } > /tmp/old.json
           jq -e . /tmp/old.json >/dev/null 2>&1 || echo '[]' > /tmp/old.json
           jq -s '(.[0] // []) as $old | .[1] as $new
                  | reduce ($old + $new)[] as $e ({}; .[($e.image + "/" + ($e.major|tostring))] = $e)
