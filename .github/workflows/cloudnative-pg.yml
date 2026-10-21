@@ -135,9 +135,17 @@ jobs:
             '{include: [$m[] as $maj | [{"arch":"x86_64","runner":"ubuntu-latest"},{"arch":"aarch64","runner":"ubuntu-24.04-arm"}][] | . + {major: $maj}]}')
           BUILD_PG_MATRIX=$(jq -cn --argjson m "$MAJ_JSON" '{include: [$m[] as $maj | {major: $maj}]}')
 
+          # Values go to $GITHUB_OUTPUT only (invisible in logs); mirror them to
+          # stdout — this whole step's matrix outputs decide job scheduling, and
+          # a bad fromJSON value fails the run with no job to blame.
+          echo "DEBUG ALL_MAJORS=[$ALL_MAJORS] MAJORS=[$MAJORS]"
+          echo "DEBUG MAJ_JSON=$MAJ_JSON"
+          echo "DEBUG PG_MATRIX=$PG_MATRIX"
+          echo "DEBUG BUILD_PG_MATRIX=$BUILD_PG_MATRIX"
+
           {
-            echo "pg-matrix=$PG_MATRIX"
-            echo "build-pg-matrix=$BUILD_PG_MATRIX"
+            echo "pg-matrix=$(tr -d '\n\r' <<<"$PG_MATRIX")"
+            echo "build-pg-matrix=$(tr -d '\n\r' <<<"$BUILD_PG_MATRIX")"
             echo "has-pg=$(jq 'length > 0' <<<"$MAJ_JSON")"
             echo "has-op=$HAS_OP"
             echo "has-pages=$HAS_PAGES"
