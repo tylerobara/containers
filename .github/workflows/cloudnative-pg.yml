@@ -87,7 +87,7 @@ jobs:
           mkdir -p scans
           # registry: source pulls via the OCI API — no docker daemon needed;
           # docker config is mounted for ghcr auth should the package be private.
-          docker run --rm --user root \
+          docker run --rm --user 0:0 \
             -v "$PWD/scans:/out" \
             -v "$HOME/.docker:/root/.docker:ro" \
             ghcr.io/anchore/grype:latest "registry:$IMAGE:$PG_FULL" \
@@ -128,7 +128,11 @@ jobs:
           merge-multiple: true
 
       - name: Assemble index
-        run: jq -s 'sort_by(.major) | reverse' data/*.json > data/index.json
+        run: |
+          shopt -s nullglob
+          files=(data/*.json)
+          if [ ${#files[@]} -gt 0 ]; then jq -s 'sort_by(.major) | reverse' "${files[@]}" > data/index.json
+          else echo '[]' > data/index.json; fi
 
       - name: Deploy to gh-pages
         run: |
