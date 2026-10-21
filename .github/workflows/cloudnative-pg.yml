@@ -110,7 +110,7 @@ jobs:
           - arch: aarch64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install melange
         run: go install chainguard.dev/melange@${{ env.MELANGE_VERSION }}
@@ -128,7 +128,7 @@ jobs:
             --out-dir ./packages \
             --runner docker
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: packages-operator-${{ matrix.arch }}
           path: |
@@ -295,12 +295,16 @@ jobs:
     if: ${{ !cancelled() && needs.keygen.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # only for cosign keyless below
     env:
       OP_IMAGE: ghcr.io/${{ github.repository }}/cloudnative-pg
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: packages-operator-*
           path: .
@@ -325,7 +329,7 @@ jobs:
             echo "apko resolved cloudnative-pg as '$RESOLVED', expected '${VER}-r${EPOCH}'"; exit 1
           fi
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
