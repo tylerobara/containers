@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>containers — image catalog & vulnerability scans</title>
+<style>
+  :root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --fg:#e6edf3; --dim:#8b949e;
+          --crit:#f85149; --high:#f0883e; --med:#d29922; --low:#58a6ff; --neg:#3fb950; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; }
+  main { max-width:1080px; margin:0 auto; padding:2rem 1rem; }
+  h1 { font-size:1.5rem; } a { color:var(--low); } .dim { color:var(--dim); font-size:.85rem; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:1rem 1.25rem; margin:1rem 0; }
+  .row { display:flex; flex-wrap:wrap; gap:.5rem 1.5rem; align-items:baseline; }
+  .row h2 { margin:.25rem 0; font-size:1.15rem; }
+  code, .mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.85rem; }
+  .tags span { display:inline-block; background:#21262d; border:1px solid var(--border); border-radius:14px; padding:0 .6rem; margin:.15rem .2rem 0 0; }
+  .sev { display:inline-block; border-radius:10px; padding:0 .55rem; margin-right:.35rem; font-size:.8rem; color:#0d1117; font-weight:600; }
+  .sev.Critical{background:var(--crit);color:#fff}.sev.High{background:var(--high)}.sev.Medium{background:var(--med)}
+  .sev.Low{background:var(--low);color:#fff}.sev.Negligible{background:var(--neg)}.sev.Unknown{background:var(--dim)}
+  table { border-collapse:collapse; width:100%; margin-top:.5rem; }
+  th, td { text-align:left; padding:.25rem .6rem .25rem 0; border-bottom:1px solid var(--border); }
+  th { color:var(--dim); font-weight:600; font-size:.8rem; text-transform:uppercase; }
+  summary { cursor:pointer; }
+  .pull { user-select:all; background:#0d1117; border:1px solid var(--border); border-radius:6px; padding:.2rem .5rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Image catalog &amp; vulnerability scans</h1>
+  <p class="dim">CloudNativePG-compatible PostgreSQL images built from Wolfi packages with
+    <a href="https://github.com/chainguard-dev/apko">apko</a> (no Dockerfile).
+    Scanned with <a href="https://github.com/anchore/grype">grype</a> after publish.
+    <span id="updated"></span></p>
+  <div id="catalog">Loading…</div>
+</main>
+<script>
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const SEVS = ['Critical','High','Medium','Low','Negligible','Unknown'];
+
+function sevCounts(scan) {
+  const c = {};
+  for (const m of (scan?.matches ?? [])) {
+    const s = m.vulnerability?.severity ?? 'Unknown';
+    c[s] = (c[s] ?? 0) + 1;
+  }
+  return c;
+}
+
+function sevBadges(c) {
+  const tot = Object.values(c).reduce((a, b) => a + b, 0);
+  if (!tot) return '<span class="sev Negligible">0 vulns</span>';
+  return SEVS.filter(s => c[s]).map(s => `<span class="sev ${s}">${c[s]} ${s}</span>`).join('');
+}
+
+function vulnTable(scan) {
+  const rows = (scan?.matches ?? [])
+    .map(m => ({
+      id: m.vulnerability?.id, sev: m.vulnerability?.severity ?? 'Unknown',
+      pkg: m.artifact?.name, ver: m.artifact?.version,
+      fix: m.vulnerability?.fix?.state === 'fixed'
+           ? (m.vulnerability?.fix?.versions ?? []).join(', ') : m.vulnerability?.fix?.state ?? '?'
+    }))
+    .sort((a, b) => (SEVS.indexOf(a.sev) - SEVS.indexOf(b.sev)) || String(a.id).localeCompare(String(b.id)));
+  if (!rows.length) return '<p class="dim">No vulnerabilities reported.</p>';
+  const shown = rows.slice(0, 300);
+  return `<table><thead><tr><th>ID</th><th>Severity</th><th>Package</th><th>Installed</th><th>Fixed in</th></tr></thead>
+    <tbody>${shown.map(r => `<tr><td class="mono">${esc(r.id)}</td><td><span class="sev ${esc(r.sev)}">${esc(r.sev)}</span></td>
+      <td class="mono">${esc(r.pkg)}-${esc(r.ver)}</td><td class="mono">${esc(r.ver)}</td><td class="mono">${esc(r.fix)}</td></tr>`).join('')}</tbody></table>
+    ${rows.length > shown.length ? `<p class="dim">${rows.length - shown.length} more not shown.</p>` : ''}`;
+}
+
+async function main() {
+  let entries;
+  try {
+    entries = await (await fetch('data/index.json')).json();
+  } catch {
+    document.getElementById('catalog').innerHTML =
+      '<p class="dim">No builds yet — run the <em>cloudnative-pg</em> workflow.</p>';
+    return;
+  }
+  document.getElementById('updated').textContent =
+    entries.length ? 'Last build: ' + entries.map(e => e.built).sort().pop() : '';
+  document.getElementById('catalog').innerHTML = entries.map(e => {
+    const c = sevCounts(e.scan);
+    return `<div class="card">
+      <div class="row"><h2><span class="mono">${esc(e.image)}</span> : ${esc(e.version)}</h2>
+      <span class="dim">digest ${esc((e.digest ?? '').slice(0, 19))}… · built ${esc(e.built)}</span></div>
+      <div class="tags">${(e.tags ?? []).map(t => `<span class="mono">${esc(t)}</span>`).join('')}</div>
+      <p>${sevBadges(c)} · ${e.scan?.descriptor?.version ? 'grype ' + esc(e.scan.descriptor.version) : ''}</p>
+      <p><span class="pull mono">docker pull ${esc(e.image)}:${esc(e.version)}</span></p>
+      <details><summary>Vulnerability findings (${Object.values(c).reduce((a, b) => a + b, 0)})</summary>
+      ${vulnTable(e.scan)}</details>
+    </div>`;
+  }).join('') || '<p class="dim">No builds yet.</p>';
+}
+main();
+</script>
+</body>
+</html>

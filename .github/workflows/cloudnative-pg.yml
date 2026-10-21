@@ -1,54 +1,143 @@
 name: cloudnative-pg
 
-# Publishes the apko-built CloudNativePG image to ghcr.io.
-# No Dockerfile: apko pushes the multi-arch OCI index straight to the registry.
+# Publishes apko-built (Wolfi, no Dockerfile) CloudNativePG PostgreSQL images
+# to ghcr for every PGDG-supported major, scans them with grype, and deploys
+# the catalog + scan report to GitHub Pages from the gh-pages branch.
 
 on:
   push:
     branches: [main]
     paths:
       - images/cloudnative-pg/**
+      - pages/**
       - .github/workflows/cloudnative-pg.yml
+  schedule:
+    - cron: '0 6 * * *' # daily — republishes tags so Wolfi CVE patches land within a day
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  # Tag must start with the PG major (CNPG operator auto-detection).
-  # GITHUB_TOKEN may only create a package named owner/repository (unlinked or
-  # nested names get DENIED), so variants live in tags, not sub-packages.
-  IMAGE: ghcr.io/${{ github.repository }}
-  TAG: 18-minimal
+  IMAGE: ghcr.io/${{ github.repository }}/cnpg-postgres
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
-  publish:
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        major: [15, 16, 17, 18]
+    env:
+      PG_MAJOR: ${{ matrix.major }}
     steps:
       - uses: actions/checkout@v4
 
+      - name: Render apko config for PG ${{ matrix.major }}
+        run: |
+          mkdir -p build
+          sed "s/@@MAJOR@@/$PG_MAJOR/g" images/cloudnative-pg/apko/postgresql.yaml.tpl > "build/postgresql-$PG_MAJOR.yaml"
+
+      - name: Resolve package versions (apko lock)
+        run: |
+          docker run --rm --user root \
+            -v "$PWD/build:/build" \
+            cgr.dev/chainguard/apko lock "/build/postgresql-$PG_MAJOR.yaml" \
+              --arch x86_64 --arch aarch64 --output "/build/pg-$PG_MAJOR.lock.json"
+          # e.g. 18.6-r5 -> 18.6 ; the tags we publish must match reality.
+          PG_FULL=$(jq -r --arg p "postgresql-$PG_MAJOR" \
+            '.contents.packages[] | select(.name==$p) | .version' "build/pg-$PG_MAJOR.lock.json" \
+            | head -1 | sed -E 's/-r[0-9]+$//')
+          case "$PG_FULL" in
+            "$PG_MAJOR".[0-9]*) echo "PG_FULL=$PG_FULL" >> "$GITHUB_ENV" ;;
+            *) echo "resolved unexpected version '$PG_FULL' for major $PG_MAJOR"; exit 1 ;;
+          esac
+          echo "Publishing tags: $PG_MAJOR, $PG_FULL, $PG_MAJOR-wolfi, $PG_FULL-wolfi"
+
+      # Nested package names (owner/repo/image) cannot be created by GITHUB_TOKEN —
+      # set a CR_PAT secret (fine-grained: packages:write on this repo).
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
 
-      - name: Build and publish with apko (x86_64 + aarch64)
+      - name: Publish multi-arch image to ghcr
         run: |
-          # Mount the docker config so apko (running as root in-container)
-          # sees the ghcr credentials login-action stored under $HOME.
+          M=$PG_MAJOR V=$PG_FULL
           docker run --rm --user root \
-            -v "$PWD/images/cloudnative-pg/apko:/apko:ro" \
+            -v "$PWD/build:/build:ro" \
             -v "$HOME/.docker:/root/.docker:ro" \
-            cgr.dev/chainguard/apko publish \
-            /apko/postgresql-minimal.yaml "$IMAGE:$TAG" \
-            --arch x86_64,aarch64
+            cgr.dev/chainguard/apko publish "/build/postgresql-$M.yaml" \
+              "$IMAGE:$M" "$IMAGE:$V" "$IMAGE:$M-wolfi" "$IMAGE:$V-wolfi" \
+              --arch x86_64,aarch64 --lockfile "/build/pg-$M.lock.json"
 
       - name: Smoke test published image
         run: |
-          docker pull --platform linux/amd64 "$IMAGE:$TAG"
-          IMAGE="$IMAGE:$TAG" ./images/cloudnative-pg/test.sh
+          docker pull --platform linux/amd64 "$IMAGE:$PG_FULL"
+          IMAGE="$IMAGE:$PG_FULL" PG_MAJOR="$PG_MAJOR" ./images/cloudnative-pg/test.sh
+
+      - name: Scan published image with grype
+        run: |
+          mkdir -p scans
+          # registry: source pulls via the OCI API — no docker daemon needed;
+          # docker config is mounted for ghcr auth should the package be private.
+          docker run --rm --user root \
+            -v "$PWD/scans:/out" \
+            -v "$HOME/.docker:/root/.docker:ro" \
+            ghcr.io/anchore/grype:latest "registry:$IMAGE:$PG_FULL" \
+              --output json --file "/out/cnpg-postgres-$PG_MAJOR.json"
+
+      - name: Build pages data
+        run: |
+          DIGEST=$(docker buildx imagetools inspect "$IMAGE:$PG_FULL" \
+            --format '{{json .Manifest}}' | jq -r .digest)
+          jq -n \
+            --arg image "$IMAGE" --argjson major "$PG_MAJOR" --arg version "$PG_FULL" \
+            --arg digest "$DIGEST" --arg built "$(date -u +%FT%TZ)" \
+            --arg tags "$PG_MAJOR $PG_FULL $PG_MAJOR-wolfi $PG_FULL-wolfi" \
+            --slurpfile scan "scans/cnpg-postgres-$PG_MAJOR.json" \
+            '{image: $image, major: $major, version: $version,
+              tags: ($tags | split(" ")), digest: $digest, built: $built,
+              scan: $scan[0]}' > "scans/cnpg-postgres-$PG_MAJOR.json.tmp"
+          mv "scans/cnpg-postgres-$PG_MAJOR.json.tmp" "scans/cnpg-postgres-$PG_MAJOR.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pages-data-pg-${{ matrix.major }}
+          path: scans/cnpg-postgres-${{ matrix.major }}.json
+
+  pages:
+    if: ${{ !cancelled() }} # deploy whatever scans exist, even if some matrix legs failed
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the generated gh-pages branch
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pages-data-pg-*
+          path: data
+          merge-multiple: true
+
+      - name: Assemble index
+        run: jq -s 'sort_by(.major) | reverse' data/*.json > data/index.json
+
+      - name: Deploy to gh-pages
+        run: |
+          dst=$(mktemp -d)
+          git -C "$dst" init -q
+          cp pages/index.html "$dst/index.html"
+          cp -r data "$dst/data"
+          git -C "$dst" add -A
+          git -C "$dst" -c user.name=github-actions[bot] \
+                           -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
+            commit -qm "Deploy $(date -u +%FT%TZ)"
+          git -C "$dst" push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/$GITHUB_REPOSITORY.git" HEAD:gh-pages

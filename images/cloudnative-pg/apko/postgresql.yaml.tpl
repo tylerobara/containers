@@ -2,6 +2,10 @@
 # rtvkiz/minimal images/postgres-slim: apko + Wolfi packages, no Dockerfile,
 # CVE patches within 24-48h via Wolfi.
 #
+# Template: @@MAJOR@@ is replaced with the PostgreSQL major (15|16|17|18) by
+# the build workflow. libicu78/icu78-data-full track Wolfi's current ICU; all
+# postgres majors there link the same ICU.
+#
 # CNPG image contract (https://cloudnative-pg.github.io/docs/container_images/):
 #   - initdb, postgres, pg_ctl, pg_controldata, pg_basebackup on PATH
 #     (+ pg_rewind, pg_isready, psql used by the instance manager)
@@ -9,7 +13,7 @@
 #   - uid/gid 26:26 (CNPG runs instances as the postgres account, 26)
 #   - sensible locale; no entrypoint/command needed (operator's instance
 #     manager always overrides them)
-#   - image tag must start with the PG major version (e.g. 18.6-minimal)
+#   - image tag must start with the PG major version (e.g. 18.6)
 
 contents:
   repositories:
@@ -30,11 +34,11 @@ contents:
     # PostgreSQL from Wolfi (CVE-patched). -base carries the libs/sharedir,
     # -client carries psql/pg_basebackup/pg_isready, the server package
     # postgres/initdb/pg_ctl/pg_controldata/pg_rewind.
-    - postgresql-18
-    - postgresql-18-base
-    - postgresql-18-client
-    - postgresql-18-client-base
-    - libpq-18
+    - postgresql-@@MAJOR@@
+    - postgresql-@@MAJOR@@-base
+    - postgresql-@@MAJOR@@-client
+    - postgresql-@@MAJOR@@-client-base
+    - libpq-@@MAJOR@@
 
     # Core libraries
     - glibc
@@ -142,7 +146,7 @@ paths:
 
 annotations:
   org.opencontainers.image.title: "cloudnative-pg-postgres-minimal"
-  org.opencontainers.image.description: "CloudNativePG-compatible PostgreSQL 18 image built on Wolfi with daily CVE patches"
+  org.opencontainers.image.description: "CloudNativePG-compatible PostgreSQL image built on Wolfi with daily CVE patches"
   org.opencontainers.image.url: "https://github.com/tylerobara/containers"
   org.opencontainers.image.source: "https://github.com/tylerobara/containers/tree/main/images/cloudnative-pg"
   org.opencontainers.image.licenses: "Apache-2.0"

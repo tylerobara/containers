@@ -1,12 +1,14 @@
 #!/bin/bash
 # Smoke test for the CloudNativePG-compatible Wolfi image.
 # Mirrors rtvkiz/minimal images/postgres-slim/test.sh.
+# Usage: IMAGE=<ref> [PG_MAJOR=18] ./test.sh
 set -euo pipefail
 : "${IMAGE:?IMAGE env var required}"
+: "${PG_MAJOR:=18}"
 
-echo "Testing CNPG image tag convention (must start with PG major)..."
+echo "Testing CNPG image tag convention (must start with PG major $PG_MAJOR)..."
 tag=${IMAGE##*:}
-echo "$tag" | grep -qE '^18(\.[0-9]+)?([-_.]|$)' \
+echo "$tag" | grep -qE "^$PG_MAJOR(\.[0-9]+)?([-_.]|$)" \
   || { echo "FAIL: tag '$tag' breaks CNPG major-version auto-detection"; exit 1; }
 
 echo "Testing CNPG-required binaries on PATH..."
@@ -16,8 +18,8 @@ for bin in initdb postgres pg_ctl pg_controldata pg_basebackup pg_rewind pg_isre
   docker run --rm --entrypoint "/usr/bin/$bin" "$IMAGE" --version >/dev/null \
     || { echo "FAIL: $bin missing or not runnable"; exit 1; }
 done
-docker run --rm --entrypoint /usr/bin/postgres "$IMAGE" --version | grep -qiE 'PostgreSQL\) 18\.' \
-  || { echo "FAIL: postgres 18 version string not found"; exit 1; }
+docker run --rm --entrypoint /usr/bin/postgres "$IMAGE" --version | grep -qiE "PostgreSQL\) $PG_MAJOR\." \
+  || { echo "FAIL: postgres $PG_MAJOR version string not found"; exit 1; }
 
 echo "Testing initdb can initialise a fresh PGDATA..."
 # REGRESSION GUARD: initdb runs `"postgres" -V` via popen(), which execs /bin/sh.

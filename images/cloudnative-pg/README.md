@@ -14,45 +14,55 @@ CNPG contract covered (see [image requirements](https://cloudnative-pg.github.io
   `pg_rewind`, `pg_isready`, `psql` and friends the instance manager execs
 - `du` and the shell applets the instance manager shells out to — busybox only
 - uid/gid **26** (CNPG convention, not Wolfi's 70), `run-as: 26`
-- `LANG=en_US.UTF-8`; tag starts with the PG major so operator auto-detection works
+- `LANG=en_US.UTF-8`; tags start with the PG major so operator auto-detection works
 - No barman: native barman-cloud support is deprecated in CNPG 1.26 in favour of
   the Barman Cloud Plugin, which ships its own sidecar image
 
-## Build
+## Majors & tags
+
+`apko/postgresql.yaml.tpl` is rendered per major (**15, 16, 17, 18**); the exact
+`MAJOR.MINOR` comes from the `apko lock` resolution at build time, never from a
+hand-maintained number. Each build publishes four tags pointing at one digest:
+
+```
+ghcr.io/tylerobara/containers/cnpg-postgres:18        ghcr.io/.../cnpg-postgres:18-wolfi
+ghcr.io/tylerobara/containers/cnpg-postgres:18.6      ghcr.io/.../cnpg-postgres:18.6-wolfi
+```
+
+## CI/CD (`.github/workflows/cloudnative-pg.yml`)
+
+- **Daily** (`cron 06:00 UTC`) + on pushes touching this directory + manual
+  dispatch. Matrix over the majors; `apko lock` pins the build, the published
+  tags match the resolved versions.
+- **grype** scans each published image; results feed the catalog page.
+- **GitHub Pages**: the `pages` job pushes a generated `gh-pages` branch
+  (`pages/index.html` + `data/*.json`) — enable it once under
+  Settings → Pages → Source: **Deploy from a branch** → `gh-pages` / `(root)`.
+  Catalog: https://tylerobara.github.io/containers/
+- **ghcr auth**: nested package names (`owner/repo/image`) cannot be created by
+  `GITHUB_TOKEN` — add a **`CR_PAT`** repo secret (fine-grained PAT, this repo,
+  `packages: Write`; or classic with `write:packages`).
+
+## Build locally
 
 Runs apko's official container so the Linux build pipelines work on macOS too:
 
 ```sh
-docker run --rm --user root \
-  -v "$PWD/images/cloudnative-pg/apko:/apko:ro" \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  cgr.dev/chainguard/apko publish \
-  /apko/postgresql-minimal.yaml cnpg-postgresql:18.6-minimal \
-  --arch aarch64 --local
+MAJOR=18
+mkdir -p build
+sed "s/@@MAJOR@@/$MAJOR/g" apko/postgresql.yaml.tpl > "build/postgresql-$MAJOR.yaml"
+docker run --rm --user root -v "$PWD/build:/build" \
+  cgr.dev/chainguard/apko lock "/build/postgresql-$MAJOR.yaml" \
+    --arch aarch64 --output "/build/pg-$MAJOR.lock.json"
+docker run --rm --user root -v "$PWD/build:/build:ro" \
+  cgr.dev/chainguard/apko publish "/build/postgresql-$MAJOR.yaml" \
+    "cnpg-postgres:18-minimal" --arch aarch64 --local --lockfile "/build/pg-$MAJOR.lock.json"
 ```
-
-Drop `--arch` to build both `x86_64` + `aarch64` from the config for a push.
-
-## Publish
-
-Publishes the multi-arch index
-(`x86_64` + `aarch64`) to ghcr on pushes touching this directory (or manually):
-
-```
-ghcr.io/tylerobara/containers:18-minimal
-```
-
-One package per repo (`GITHUB_TOKEN` can only create the `owner/repository`
-package), so image variants are distinguished by their major-version tags.
-
-The workflow smoke-tests the published image with `test.sh` afterwards. If the
-repo is private, the package inherits private visibility — pull it from a
-cluster with a ghcr imagePullSecret.
 
 ## Test
 
 ```sh
-IMAGE=cnpg-postgresql:18.6-minimal ./test.sh
+IMAGE=cnpg-postgres:18-minimal PG_MAJOR=18 ./test.sh
 ```
 
 Checks the CNPG tag convention, required binaries, initdb-against-empty-volume
@@ -63,5 +73,5 @@ Checks the CNPG tag convention, required binaries, initdb-against-empty-volume
 
 - `-dev` variant (bash, apk-tools, gosu, curl, socat, jq) — copy the pattern from
   the minimal repo's `postgres-slim-dev.yaml`
-- `postgresql-18-contrib` / `pgaudit-18` / `pgvector-18` — CNPG `standard` equivalents,
-  one line each in `contents.packages`
+- `postgresql-N-contrib` / `pgaudit-N` / `pgvector-N` — CNPG `standard` equivalents,
+  one line each in the template's `contents.packages`
