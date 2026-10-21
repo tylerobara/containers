@@ -37,8 +37,11 @@ jobs:
 
       - name: Build and publish with apko (x86_64 + aarch64)
         run: |
+          # Mount the docker config so apko (running as root in-container)
+          # sees the ghcr credentials login-action stored under $HOME.
           docker run --rm --user root \
             -v "$PWD/images/cloudnative-pg/apko:/apko:ro" \
+            -v "$HOME/.docker:/root/.docker:ro" \
             cgr.dev/chainguard/apko publish \
             /apko/postgresql-minimal.yaml "$IMAGE:$TAG" \
             --arch x86_64,aarch64
