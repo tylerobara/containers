@@ -73,18 +73,19 @@ pipeline:
         -Dsysconfdir=/etc \
         -Dbindir=/usr/bin \
         -Dlibdir=/usr/lib \
-        -Dicu=true \
-        -Dopenssl=true \
-        -Dxml=true \
-        -Dxslt=true \
-        -Dlz4=true \
-        -Dzstd=true \
-        -Dldap=true \
-        -Dkerberos=true \
-        -Dpam=true \
+        -Dicu=enabled \
+        -Dssl=openssl \
+        -Dlibxml=enabled \
+        -Dlibxslt=enabled \
+        -Dlz4=enabled \
+        -Dzstd=enabled \
+        -Dldap=enabled \
+        -Dgssapi=enabled \
+        -Dpam=enabled \
         -Duuid=e2fs \
-        -Dreadline=true \
-        -Dsystem-tzdata=/usr/share/zoneinfo
+        -Dreadline=enabled \
+        -Ddocs=disabled \
+        -Dsystem_tzdata=/usr/share/zoneinfo
       meson compile -C build
 
   - working-directory: /home/build/postgresql-${{package.version}}

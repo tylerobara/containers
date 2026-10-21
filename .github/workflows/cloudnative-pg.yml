@@ -66,13 +66,17 @@ jobs:
           - arch: aarch64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install melange
         run: go install chainguard.dev/melange@${{ env.MELANGE_VERSION }}
 
       - name: Restore signing key
-        run: echo '${{ needs.keygen.outputs.priv }}' | base64 -d > melange.rsa && chmod 600 melange.rsa
+        # melange signs with the private key but never re-derives the .pub,
+        # so write it here — it ships in the artifact for apko's keyring.
+        run: |
+          echo '${{ needs.keygen.outputs.priv }}' | base64 -d > melange.rsa && chmod 600 melange.rsa
+          echo '${{ needs.keygen.outputs.pub }}' | base64 -d > melange.rsa.pub
 
       - name: Build postgresql-${{ matrix.major }} (${{ matrix.arch }})
         run: |
@@ -82,7 +86,7 @@ jobs:
             --out-dir ./packages \
             --runner docker
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: packages-pg-${{ matrix.major }}-${{ matrix.arch }}
           path: |
@@ -103,9 +107,9 @@ jobs:
     env:
       PG_MAJOR: ${{ matrix.major }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: packages-pg-${{ matrix.major }}-*
           path: .
@@ -143,7 +147,7 @@ jobs:
       # Nested package names (owner/repo/image) — works with GITHUB_TOKEN since
       # the parent owner/repository package exists; CR_PAT (packages:write)
       # overrides if ever needed.
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -198,7 +202,7 @@ jobs:
               scan: $scan[0]}' > "scans/cnpg-postgres-$PG_MAJOR.json.tmp"
           mv "scans/cnpg-postgres-$PG_MAJOR.json.tmp" "scans/cnpg-postgres-$PG_MAJOR.json"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pages-data-pg-${{ matrix.major }}
           path: scans/cnpg-postgres-${{ matrix.major }}.json
@@ -210,9 +214,9 @@ jobs:
     permissions:
       contents: write # push the generated gh-pages branch
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: pages-data-pg-*
           path: data
