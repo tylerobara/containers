@@ -1,0 +1,40 @@
+name: lint
+
+# Guardrail (minimal's lint.yml rationale): most of our workflows only run on
+# push/schedule, so a broken run: block or matrix expression would otherwise
+# detonate on the next scheduled run on main — this catches it on the PR.
+# actionlint also shellchecks embedded run: scripts.
+
+on:
+  pull_request:
+    paths:
+      - .github/**
+      - images/**/test.sh
+  push:
+    branches: [main]
+    paths:
+      - .github/**
+      - images/**/test.sh
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: actionlint (workflows + embedded shells)
+        run: |
+          docker run --rm -v "$PWD:/work:ro" -w /work \
+            rhysd/actionlint:1.7.12 -color
+
+      - name: shellcheck (per-image smoke tests)
+        run: |
+          docker run --rm -v "$PWD:/work:ro" -w /work \
+            koalaman/shellcheck:stable images/*/test.sh

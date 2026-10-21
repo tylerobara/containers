@@ -1,15 +1,25 @@
 name: cloudnative-pg
 
-# Publishes apko-assembled (Wolfi base, no Dockerfile) CloudNativePG PostgreSQL
-# images to ghcr for every PGDG-supported major, scanned with grype, cataloged
-# on GitHub Pages from the gh-pages branch. The CloudNativePG operator image
-# (Go manager binary built from upstream source by melange) is in
-# images/cloudnative-pg-operator/.
+# Publishes apko-assembled (Wolfi base, no Dockerfile) CloudNativePG images to
+# ghcr, scanned with grype, cataloged on GitHub Pages from the gh-pages branch.
+# Structure follows the minimal repo (rtvkiz/minimal):
 #
-# PostgreSQL itself is NOT the stale Wolfi prebuild (15.6/16.14/17.10) — it is
-# compiled from current PGDG source by melange (see images/cloudnative-pg/melange/),
-# packaged as postgresql-<major> with provider-priority so apko picks it.
-# PGDG minor releases are picked up by bumping version+sha256 in those configs.
+#   - detect-changes generates the build matrices from the repo contents + the
+#     event's diff, so a version-bump PR/push only rebuilds the image whose
+#     melange config moved, and adding a new PGDG major = just drop a new
+#     images/cloudnative-pg/melange/postgresql-<N>.yaml file.
+#   - pull_request runs the whole pipeline WITHOUT publish/sign/pages (PRs have
+#     no trusted secrets and must never push tags): melange build, apko lock
+#     guard, local apko build, test.sh, grype — so bump PRs are proven green
+#     before merge. The same validate-only path is available on demand via
+#     workflow_dispatch (ref + validate_only), which is how you validate a
+#     bot-opened PR (GITHUB_TOKEN-authored PRs don't auto-run checks).
+#   - schedule/workflow_dispatch always full-rebuild; push/PR cancel stale runs.
+#
+# PostgreSQL is NOT the stale Wolfi prebuild (15.6/16.14/17.10) — it is compiled
+# from current PGDG source by melange, packaged as postgresql-<major> with
+# provider-priority + epoch 100 so apko can never pick Wolfi's over ours.
+# Upstream releases are turned into bump PRs by update-versions.yml.
 
 on:
   push:
@@ -19,13 +29,26 @@ on:
       - images/cloudnative-pg-operator/**
       - pages/**
       - .github/workflows/cloudnative-pg.yml
+  pull_request:
+    branches: [main]
   schedule:
     - cron: '0 6 * * *' # daily — republishes tags so Wolfi CVE patches land within a day
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "Ref to build (defaults to the branch dispatched from). Use a bump-PR branch to validate it."
+        required: false
+        default: ""
+      validate_only:
+        description: "Build + scan without publishing/signing/deploying pages"
+        type: boolean
+        default: false
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # schedule/dispatch get unique groups (never cancelled mid-publish);
+  # push/PR runs cancel their superseded predecessor on the same ref.
+  group: cloudnative-pg-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}/cnpg-postgres
@@ -36,6 +59,98 @@ permissions:
   packages: write
 
 jobs:
+  # ----------------------------------------------------------------------------
+  # DETECT WHAT CHANGED — full rebuild on cron/dispatch/workflow-edits, surgical
+  # per-image builds on push/PR (minimal's detect-changes pattern, with the
+  # matrix derived from the melange configs on disk instead of a hand-maintained
+  # list: PG19 support = add postgresql-19.yaml, no workflow edit).
+  # ----------------------------------------------------------------------------
+  detect-changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      pg-matrix: ${{ steps.filter.outputs.pg-matrix }}
+      build-pg-matrix: ${{ steps.filter.outputs.build-pg-matrix }}
+      has-pg: ${{ steps.filter.outputs.has-pg }}
+      has-op: ${{ steps.filter.outputs.has-op }}
+      has-pages: ${{ steps.filter.outputs.has-pages }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed images and build matrices
+        id: filter
+        run: |
+          set -euo pipefail
+          EVENT='${{ github.event_name }}'
+          OP_YAML=images/cloudnative-pg-operator/melange/cloudnative-pg.yaml
+          ALL_MAJORS=$(find images/cloudnative-pg/melange -name 'postgresql-*.yaml' 2>/dev/null \
+            | sed -nE 's|.*/postgresql-([0-9]+)\.yaml$|\1|p' || true)
+          FULL=false; HAS_OP=false; HAS_PAGES=false; MAJORS=""
+
+          if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; then
+            FULL=true
+          else
+            if [ "$EVENT" = pull_request ]; then
+              BASE='${{ github.event.pull_request.base.sha }}'
+            else
+              BASE='${{ github.event.before }}'
+            fi
+            if [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+              FULL=true
+            else
+              CHANGED=$(git diff --name-only "$BASE" '${{ github.sha }}')
+              echo "Changed files:"; echo "${CHANGED:-}" | sed '/^$/d; s/^/  /'
+              [ -z "${CHANGED:-}" ] && FULL=true
+              # Any change to the pipeline itself → trust nothing, rebuild all.
+              echo "${CHANGED:-}" | grep -qE '^\.github/' && FULL=true
+              echo "${CHANGED:-}" | grep -q '^images/cloudnative-pg-operator/' && HAS_OP=true
+              echo "${CHANGED:-}" | grep -q '^pages/' && HAS_PAGES=true
+              PG_CHANGED=$(echo "${CHANGED:-}" | grep '^images/cloudnative-pg/' || true)
+              if [ -n "$PG_CHANGED" ]; then
+                if echo "$PG_CHANGED" | grep -qvE '^images/cloudnative-pg/melange/postgresql-[0-9]+\.yaml$'; then
+                  # shared piece moved (apko template, test.sh, ...) → all majors
+                  MAJORS="$ALL_MAJORS"
+                else
+                  MAJORS=$(echo "$PG_CHANGED" | sed -nE 's|.*postgresql-([0-9]+)\.yaml$|\1|p' | sort -u)
+                fi
+              fi
+            fi
+          fi
+
+          if [ "$FULL" = true ]; then
+            MAJORS="$ALL_MAJORS"; HAS_OP=true; HAS_PAGES=true
+          fi
+          # Only build images whose configs actually exist on the checked-out ref.
+          if [ "$HAS_OP" = true ] && [ ! -f "$OP_YAML" ]; then HAS_OP=false; fi
+          # comm wants sorted line streams; normalize either value (space- or
+          # newline-separated) and drop anything that is not a plain number.
+          numstream() { tr ' ' '\n' <<< "${1:-}" | grep -E '^[0-9]+$' | sort -u; }
+          MAJ_JSON=$(comm -12 <(numstream "$MAJORS") <(numstream "$ALL_MAJORS") \
+            | jq -R . | jq -sc . || true)
+          MAJ_JSON=${MAJ_JSON:-[]}; [ "$(jq -c . <<<"$MAJ_JSON")" ] || MAJ_JSON='[]'
+
+          PG_MATRIX=$(jq -cn --argjson m "$MAJ_JSON" \
+            '{include: [$m[] as $maj | [{"arch":"x86_64","runner":"ubuntu-latest"},{"arch":"aarch64","runner":"ubuntu-24.04-arm"}][] | . + {major: $maj}]}')
+          BUILD_PG_MATRIX=$(jq -cn --argjson m "$MAJ_JSON" '{include: [$m[] as $maj | {major: $maj}]}')
+
+          {
+            echo "pg-matrix=$PG_MATRIX"
+            echo "build-pg-matrix=$BUILD_PG_MATRIX"
+            echo "has-pg=$(jq 'length > 0' <<<"$MAJ_JSON")"
+            echo "has-op=$HAS_OP"
+            echo "has-pages=$HAS_PAGES"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Build plan"
+            echo "- postgres majors: $(jq -c . <<<"$MAJ_JSON")"
+            echo "- operator: $HAS_OP"
+            echo "- pages deploy: $HAS_PAGES"
+            echo "- full rebuild: $FULL ($EVENT)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # One signing key for the whole run: apko verifies every arch's package
   # index, so all melange jobs must sign with the same key. Ephemeral is fine —
   # the key's only consumer is this run's apko step.
@@ -55,21 +170,18 @@ jobs:
           { echo "pub=$(base64 -w0 melange.rsa.pub)"; echo "priv=$(base64 -w0 melange.rsa)"; } >> "$GITHUB_OUTPUT"
 
   melange:
-    needs: keygen
+    needs: [keygen, detect-changes]
+    if: ${{ !cancelled() && needs.keygen.result == 'success' && needs.detect-changes.outputs.has-pg == 'true' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        major: [15, 16, 17, 18]
-        arch: [x86_64, aarch64]
-        include:
-          - arch: x86_64
-            runner: ubuntu-latest
-          - arch: aarch64
-            runner: ubuntu-24.04-arm
+        include: ${{ fromJSON(needs.detect-changes.outputs.pg-matrix) }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - name: Install melange
         run: go install chainguard.dev/melange@${{ env.MELANGE_VERSION }}
@@ -97,7 +209,8 @@ jobs:
             melange.rsa.pub
 
   melange-operator:
-    needs: keygen
+    needs: [keygen, detect-changes]
+    if: ${{ !cancelled() && needs.keygen.result == 'success' && needs.detect-changes.outputs.has-op == 'true' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
@@ -111,6 +224,8 @@ jobs:
             runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - name: Install melange
         run: go install chainguard.dev/melange@${{ env.MELANGE_VERSION }}
@@ -136,24 +251,30 @@ jobs:
             melange.rsa.pub
 
   build:
-    # Run even if one melange leg failed — its major fails alone at publish
-    # time instead of blocking the other three.
-    if: ${{ !cancelled() && needs.keygen.result == 'success' }}
-    needs: [keygen, melange]
+    # Run even if one melange leg failed — its major fails alone instead of
+    # blocking the others.
+    if: ${{ !cancelled() && needs.keygen.result == 'success' && needs.detect-changes.outputs.has-pg == 'true' }}
+    needs: [keygen, melange, detect-changes]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        major: [15, 16, 17, 18]
+        include: ${{ fromJSON(needs.detect-changes.outputs.build-pg-matrix) }}
     permissions:
       contents: read
       packages: write
       id-token: write # only for cosign keyless below
     env:
       PG_MAJOR: ${{ matrix.major }}
+      # Registry writes happen only from trusted main-lineage runs; PRs and
+      # validate-only dispatches build locally instead (same lesson as minimal:
+      # every publish/sign/attest step hangs off this).
+      PUBLISH: ${{ github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.validate_only != true) }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - uses: actions/download-artifact@v8
         with:
@@ -195,46 +316,78 @@ jobs:
       # Nested package names (owner/repo/image) — works with GITHUB_TOKEN since
       # the parent owner/repository package exists; CR_PAT (packages:write)
       # overrides if ever needed.
-      - uses: docker/login-action@v4
+      - name: Log in to ghcr
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Publish multi-arch image to ghcr
+        if: env.PUBLISH == 'true'
         run: |
           M=$PG_MAJOR V=$PG_FULL
-          docker run --rm --user root \
-            -v "$PWD/build:/work/build:ro" \
-            -v "$PWD/packages:/work/packages:ro" \
-            -v "$PWD/melange.rsa.pub:/work/melange.rsa.pub:ro" \
-            -v "$HOME/.docker:/root/.docker:ro" \
-            cgr.dev/chainguard/apko publish "/work/build/postgresql-$M.yaml" \
-              "$IMAGE:$M" "$IMAGE:$V" "$IMAGE:$M-wolfi" "$IMAGE:$V-wolfi" \
-              --arch x86_64,aarch64 \
-              --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
-              --lockfile "/work/build/pg-$M.lock.json"
+          # ghcr intermittently 500s/transient-DENIES on publish (first push
+          # into a brand-new nested package races its own creation — cost us a
+          # whole run) — retry before believing the failure.
+          for i in 1 2 3; do
+            if docker run --rm --user root \
+              -v "$PWD/build:/work/build:ro" \
+              -v "$PWD/packages:/work/packages:ro" \
+              -v "$PWD/melange.rsa.pub:/work/melange.rsa.pub:ro" \
+              -v "$HOME/.docker:/root/.docker:ro" \
+              cgr.dev/chainguard/apko publish "/work/build/postgresql-$M.yaml" \
+                "$IMAGE:$M" "$IMAGE:$V" "$IMAGE:$M-wolfi" "$IMAGE:$V-wolfi" \
+                --arch x86_64,aarch64 \
+                --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
+                --lockfile "/work/build/pg-$M.lock.json"; then
+              break
+            fi
+            [ "$i" = 3 ] && { echo "apko publish failed after 3 attempts"; exit 1; }
+            echo "publish attempt $i failed; retrying in 15s"; sleep 15
+          done
+          echo "IMG_REF=$IMAGE:$PG_FULL" >> "$GITHUB_ENV"
+          echo "GRYPE_SRC=registry:$IMAGE:$PG_FULL" >> "$GITHUB_ENV"
 
-      - name: Smoke test published image
+      - name: Build image locally (validate-only, no registry)
+        if: env.PUBLISH != 'true'
         run: |
-          docker pull --platform linux/amd64 "$IMAGE:$PG_FULL"
-          IMAGE="$IMAGE:$PG_FULL" PG_MAJOR="$PG_MAJOR" ./images/cloudnative-pg/test.sh
+          # Native arch is enough to prove the assembly + smoke test on PRs;
+          # the multi-arch lock guard above already proved both resolve.
+          docker run --rm --user root \
+            -v "$PWD:/work" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            cgr.dev/chainguard/apko publish "/work/build/postgresql-$PG_MAJOR.yaml" \
+              "cnpg-pg-$PG_MAJOR:validate" \
+              --arch x86_64 \
+              --local \
+              --repository-append /work/packages --keyring-append /work/melange.rsa.pub
+          echo "IMG_REF=cnpg-pg-$PG_MAJOR:validate" >> "$GITHUB_ENV"
+          echo "GRYPE_SRC=docker:cnpg-pg-$PG_MAJOR:validate" >> "$GITHUB_ENV"
+
+      - name: Smoke test image
+        run: |
+          [ "$PUBLISH" = true ] && docker pull --platform linux/amd64 "$IMG_REF"
+          IMAGE="$IMG_REF" PG_MAJOR="$PG_MAJOR" ./images/cloudnative-pg/test.sh
           # The whole point of the melange stage: the shipped binary must be
           # the PGDG minor the tags claim, not Wolfi's stale prebuild.
-          docker run --rm --entrypoint /usr/bin/postgres "$IMAGE:$PG_FULL" --version \
+          docker run --rm --entrypoint /usr/bin/postgres "$IMG_REF" --version \
             | grep -q "$PG_FULL" || { echo "image reports a version other than $PG_FULL"; exit 1; }
 
-      - name: Scan published image with grype
-        id: scan
+      - name: Scan image with grype
         run: |
           mkdir -p scans
           # registry: source pulls via the OCI API — no docker daemon needed;
-          # docker config is mounted for ghcr auth should the package be private.
+          # validate runs use the docker: source against the locally built
+          # image. || true: findings must not fail the job — the SIGNING gate
+          # below reads the JSON, and the job summary reports the counts.
           docker run --rm --user 0:0 \
             -v "$PWD/scans:/out" \
             -v "$HOME/.docker:/root/.docker:ro" \
-            ghcr.io/anchore/grype:latest "registry:$IMAGE:$PG_FULL" \
-              --output json --file "/out/cnpg-postgres-$PG_MAJOR.json"
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            ghcr.io/anchore/grype:latest "$GRYPE_SRC" \
+              --output json --file "/out/cnpg-postgres-$PG_MAJOR.json" || true
           # Signing gate: anything Low or above blocks. Negligible/Unknown are
           # excluded on purpose — Wolfi's secdb parks "no fix recorded" CVEs in
           # Unknown, which would veto signing forever.
@@ -242,7 +395,8 @@ jobs:
                      | IN("Low","Medium","High","Critical"))] | length' \
             "scans/cnpg-postgres-$PG_MAJOR.json")
           echo "lowplus=$LOWPLUS" >> "$GITHUB_OUTPUT"
-          echo "Low+ findings: $LOWPLUS" >> "$GITHUB_STEP_SUMMARY"
+          echo "postgresql-$PG_MAJOR Low+ findings: $LOWPLUS" >> "$GITHUB_STEP_SUMMARY"
+        id: scan
 
       # Keyless signing: no secret — the cert binds this workflow's identity
       # and lands in Rekor. Signs the manifest DIGEST (never a tag), so a
@@ -252,9 +406,9 @@ jobs:
       #     --certificate-identity-regexp '^https://github.com/tylerobara/containers/\.github/workflows/cloudnative-pg\.yml@refs/heads/main$' \
       #     ghcr.io/tylerobara/containers/cnpg-postgres:<tag>
       - name: Sign with cosign (only when scan has 0 Low+ findings)
-        if: steps.scan.outputs.lowplus == '0'
+        if: env.PUBLISH == 'true' && steps.scan.outputs.lowplus == '0'
         run: |
-          DIGEST=$(docker buildx imagetools inspect "$IMAGE:$PG_FULL" \
+          DIGEST=$(docker buildx imagetools inspect "$IMG_REF" \
             --format '{{json .Manifest}}' | jq -r .digest)
           # cosign's image runs as nonroot and can't read the mounted docker
           # config; numeric 0:0 + explicit DOCKER_CONFIG (same workaround as
@@ -264,14 +418,15 @@ jobs:
             -e DOCKER_CONFIG=/root/.docker \
             -e GITHUB_ACTIONS \
             -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-            ghcr.io/sigstore/cosign/cosign:latest sign --yes "$IMAGE@$DIGEST"
+            ghcr.io/sigstore/cosign/cosign:latest sign --yes "$IMG_REF@$DIGEST"
           echo "SIGNED=true" >> "$GITHUB_ENV"
         # else branch: publish stays green, unsigned — the summary line above
         # says why; nothing to do.
 
       - name: Build pages data
+        if: env.PUBLISH == 'true'
         run: |
-          DIGEST=$(docker buildx imagetools inspect "$IMAGE:$PG_FULL" \
+          DIGEST=$(docker buildx imagetools inspect "$IMG_REF" \
             --format '{{json .Manifest}}' | jq -r .digest)
           jq -n \
             --arg image "$IMAGE" --argjson major "$PG_MAJOR" --arg version "$PG_FULL" \
@@ -286,13 +441,14 @@ jobs:
           mv "scans/cnpg-postgres-$PG_MAJOR.json.tmp" "scans/cnpg-postgres-$PG_MAJOR.json"
 
       - uses: actions/upload-artifact@v7
+        if: env.PUBLISH == 'true'
         with:
           name: pages-data-pg-${{ matrix.major }}
           path: scans/cnpg-postgres-${{ matrix.major }}.json
 
   build-operator:
-    needs: [keygen, melange-operator]
-    if: ${{ !cancelled() && needs.keygen.result == 'success' }}
+    needs: [keygen, melange-operator, detect-changes]
+    if: ${{ !cancelled() && needs.keygen.result == 'success' && needs.detect-changes.outputs.has-op == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -301,8 +457,11 @@ jobs:
       id-token: write # only for cosign keyless below
     env:
       OP_IMAGE: ghcr.io/${{ github.repository }}/cloudnative-pg
+      PUBLISH: ${{ github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.validate_only != true) }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - uses: actions/download-artifact@v8
         with:
@@ -329,37 +488,63 @@ jobs:
             echo "apko resolved cloudnative-pg as '$RESOLVED', expected '${VER}-r${EPOCH}'"; exit 1
           fi
 
-      - uses: docker/login-action@v4
+      - name: Log in to ghcr
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Publish multi-arch operator image to ghcr
+        if: env.PUBLISH == 'true'
+        run: |
+          for i in 1 2 3; do
+            if docker run --rm --user root \
+              -v "$PWD:/work:ro" \
+              -v "$HOME/.docker:/root/.docker:ro" \
+              cgr.dev/chainguard/apko publish /work/images/cloudnative-pg-operator/apko/operator.yaml \
+                "$OP_IMAGE:$OP_VER" "$OP_IMAGE:$OP_MINOR" "$OP_IMAGE:latest" \
+                --arch x86_64,aarch64 \
+                --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
+                --lockfile /work/operator.lock.json; then
+              break
+            fi
+            [ "$i" = 3 ] && { echo "apko publish failed after 3 attempts"; exit 1; }
+            echo "publish attempt $i failed; retrying in 15s"; sleep 15
+          done
+          echo "OP_REF=$OP_IMAGE:$OP_VER" >> "$GITHUB_ENV"
+          echo "GRYPE_SRC=registry:$OP_IMAGE:$OP_VER" >> "$GITHUB_ENV"
+
+      - name: Build image locally (validate-only, no registry)
+        if: env.PUBLISH != 'true'
         run: |
           docker run --rm --user root \
-            -v "$PWD:/work:ro" \
-            -v "$HOME/.docker:/root/.docker:ro" \
+            -v "$PWD:/work" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
             cgr.dev/chainguard/apko publish /work/images/cloudnative-pg-operator/apko/operator.yaml \
-              "$OP_IMAGE:$OP_VER" "$OP_IMAGE:$OP_MINOR" "$OP_IMAGE:latest" \
-              --arch x86_64,aarch64 \
-              --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
-              --lockfile /work/operator.lock.json
+              "cnpg-operator:validate" \
+              --arch x86_64 \
+              --local \
+              --repository-append /work/packages --keyring-append /work/melange.rsa.pub
+          echo "OP_REF=cnpg-operator:validate" >> "$GITHUB_ENV"
+          echo "GRYPE_SRC=docker:cnpg-operator:validate" >> "$GITHUB_ENV"
 
-      - name: Smoke test published image
+      - name: Smoke test image
         run: |
-          docker pull --platform linux/amd64 "$OP_IMAGE:$OP_VER"
-          IMAGE="$OP_IMAGE:$OP_VER" VERSION="$OP_VER" ./images/cloudnative-pg-operator/test.sh
+          [ "$PUBLISH" = true ] && docker pull --platform linux/amd64 "$OP_REF"
+          IMAGE="$OP_REF" VERSION="$OP_VER" ./images/cloudnative-pg-operator/test.sh
 
-      - name: Scan published image with grype
+      - name: Scan image with grype
         id: scan
         run: |
           mkdir -p scans
           docker run --rm --user 0:0 \
             -v "$PWD/scans:/out" \
             -v "$HOME/.docker:/root/.docker:ro" \
-            ghcr.io/anchore/grype:latest "registry:$OP_IMAGE:$OP_VER" \
-              --output json --file /out/cloudnative-pg-operator.json
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            ghcr.io/anchore/grype:latest "$GRYPE_SRC" \
+              --output json --file /out/cloudnative-pg-operator.json || true
           # Same signing gate as the postgres images: any Low+ finding blocks.
           LOWPLUS=$(jq '[.matches[] | select(.vulnerability.severity
                      | IN("Low","Medium","High","Critical"))] | length' scans/cloudnative-pg-operator.json)
@@ -367,21 +552,22 @@ jobs:
           echo "operator Low+ findings: $LOWPLUS" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Sign with cosign (only when scan has 0 Low+ findings)
-        if: steps.scan.outputs.lowplus == '0'
+        if: env.PUBLISH == 'true' && steps.scan.outputs.lowplus == '0'
         run: |
-          DIGEST=$(docker buildx imagetools inspect "$OP_IMAGE:$OP_VER" \
+          DIGEST=$(docker buildx imagetools inspect "$OP_REF" \
             --format '{{json .Manifest}}' | jq -r .digest)
           docker run --rm --user 0:0 \
             -v "$HOME/.docker:/root/.docker:ro" \
             -e DOCKER_CONFIG=/root/.docker \
             -e GITHUB_ACTIONS \
             -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-            ghcr.io/sigstore/cosign/cosign:latest sign --yes "$OP_IMAGE@$DIGEST"
+            ghcr.io/sigstore/cosign/cosign:latest sign --yes "$OP_REF@$DIGEST"
           echo "SIGNED=true" >> "$GITHUB_ENV"
 
       - name: Build pages data
+        if: env.PUBLISH == 'true'
         run: |
-          DIGEST=$(docker buildx imagetools inspect "$OP_IMAGE:$OP_VER" \
+          DIGEST=$(docker buildx imagetools inspect "$OP_REF" \
             --format '{{json .Manifest}}' | jq -r .digest)
           jq -n \
             --arg image "$OP_IMAGE" --arg version "$OP_VER" \
@@ -395,21 +581,29 @@ jobs:
               scan: $scan[0]}' > scans/cloudnative-pg-operator.json.tmp
           mv scans/cloudnative-pg-operator.json.tmp scans/cloudnative-pg-operator.json
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
+        if: env.PUBLISH == 'true'
         with:
           name: pages-data-pg-operator
           path: scans/cloudnative-pg-operator.json
 
   pages:
-    if: ${{ !cancelled() }} # deploy whatever scans exist, even if some matrix legs failed
-    needs: [build, build-operator]
+    # Deploy when this run produced scans and at least one of its builders got
+    # far enough. Partial builds are fine: entries for images that did NOT
+    # rebuild are preserved from the live index.json (bump PRs land per image),
+    # keyed on image+major with fresh entries winning.
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.detect-changes.outputs.has-pages == 'true' || needs.detect-changes.outputs.has-pg == 'true' || needs.detect-changes.outputs.has-op == 'true') }}
+    needs: [detect-changes, build, build-operator]
     runs-on: ubuntu-latest
     permissions:
       contents: write # push the generated gh-pages branch
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - uses: actions/download-artifact@v8
+        if: needs.detect-changes.outputs.has-pg == 'true' || needs.detect-changes.outputs.has-op == 'true'
         with:
           pattern: pages-data-pg-*
           path: data
@@ -417,17 +611,25 @@ jobs:
 
       - name: Assemble index
         run: |
+          set -euo pipefail
           shopt -s nullglob
           files=(data/*.json)
-          if [ ${#files[@]} -gt 0 ]; then
-            jq -s 'sort_by(.major // 0) | reverse' "${files[@]}" > data/index.json
-            # CNPG ClusterImageCatalog, sha-pinned to each multi-arch manifest
-            # (same shape as cloudnative-pg's postgresql-minimal-trixie catalogs).
-            {
-              printf 'apiVersion: postgresql.cnpg.io/v1\nkind: ClusterImageCatalog\nmetadata:\n  name: cnpg-postgres-wolfi\n  labels:\n    images.cnpg.io/family: postgresql\n    images.cnpg.io/type: minimal\n    images.cnpg.io/os: wolfi\n    images.cnpg.io/date: "%s"\n    images.cnpg.io/publisher: tylerobara.github.io\nspec:\n  images:\n' "$(date -u +%Y%m%d)"
-              jq -r 'map(select(.major)) | sort_by(.major)[] | "  - major: \(.major)\n    image: \(.image):\(.version)@\(.digest)"' data/index.json
-            } > data/cluster-image-catalog.yaml
-          else echo '[]' > data/index.json; fi
+          if [ ${#files[@]} -gt 0 ]; then jq -s '.' "${files[@]}" > /tmp/new.json
+          else echo '[]' > /tmp/new.json; fi
+          # Previous deployment (first deploy: none yet; Pages can lag by a
+          # build or two — worst case a stale entry heals on the next build).
+          curl -fsSL --retry 3 "https://tylerobara.github.io/containers/data/index.json" -o /tmp/old.json 2>/dev/null || echo '[]' > /tmp/old.json
+          jq -e . /tmp/old.json >/dev/null 2>&1 || echo '[]' > /tmp/old.json
+          jq -s '(.[0] // []) as $old | .[1] as $new
+                 | reduce ($old + $new)[] as $e ({}; .[($e.image + "/" + ($e.major|tostring))] = $e)
+                 | [.[]] | sort_by(.major // 0) | reverse' \
+            /tmp/old.json /tmp/new.json > data/index.json
+          # CNPG ClusterImageCatalog, sha-pinned to each multi-arch manifest
+          # (same shape as cloudnative-pg's postgresql-minimal-trixie catalogs).
+          {
+            printf 'apiVersion: postgresql.cnpg.io/v1\nkind: ClusterImageCatalog\nmetadata:\n  name: cnpg-postgres-wolfi\n  labels:\n    images.cnpg.io/family: postgresql\n    images.cnpg.io/type: minimal\n    images.cnpg.io/os: wolfi\n    images.cnpg.io/date: "%s"\n    images.cnpg.io/publisher: tylerobara.github.io\nspec:\n  images:\n' "$(date -u +%Y%m%d)"
+            jq -r 'map(select(.major)) | sort_by(.major)[] | "  - major: \(.major)\n    image: \(.image):\(.version)@\(.digest)"' data/index.json
+          } > data/cluster-image-catalog.yaml
 
       - name: Deploy to gh-pages
         run: |
