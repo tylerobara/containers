@@ -33,6 +33,8 @@ reports 0 findings Low+; verify per the command on
 
 ## Updating
 
-`version` + `vars.sha256` in `melange/openbao.yaml`; the update-versions bot
-opens bump PRs against
+`version` + `vars.sha256` in `melange/openbao.yaml`; the melange build also
+stamps `internal/version.fullVersion` via ldflags (upstream's default tarball
+build would self-report `2.0.0-HEAD`), so `bao version` reports the real
+release. The update-versions bot opens bump PRs against
 [openbao/openbao releases](https://github.com/openbao/openbao/releases).
