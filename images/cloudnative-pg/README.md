@@ -35,12 +35,15 @@ Drop `--arch` to build both `x86_64` + `aarch64` from the config for a push.
 
 ## Publish
 
-`.github/workflows/cloudnative-pg.yml` publishes the multi-arch index
+Publishes the multi-arch index
 (`x86_64` + `aarch64`) to ghcr on pushes touching this directory (or manually):
 
 ```
-ghcr.io/<owner>/containers/cloudnativepg:18-minimal
+ghcr.io/tylerobara/containers:18-minimal
 ```
+
+One package per repo (`GITHUB_TOKEN` can only create the `owner/repository`
+package), so image variants are distinguished by their major-version tags.
 
 The workflow smoke-tests the published image with `test.sh` afterwards. If the
 repo is private, the package inherits private visibility — pull it from a

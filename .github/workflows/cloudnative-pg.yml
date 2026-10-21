@@ -17,7 +17,9 @@ concurrency:
 
 env:
   # Tag must start with the PG major (CNPG operator auto-detection).
-  IMAGE: ghcr.io/${{ github.repository_owner }}/containers/cloudnativepg
+  # GITHUB_TOKEN may only create a package named owner/repository (unlinked or
+  # nested names get DENIED), so variants live in tags, not sub-packages.
+  IMAGE: ghcr.io/${{ github.repository }}
   TAG: 18-minimal
 
 jobs:
