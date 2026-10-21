@@ -402,7 +402,7 @@ jobs:
 
   pages:
     if: ${{ !cancelled() }} # deploy whatever scans exist, even if some matrix legs failed
-    needs: build
+    needs: [build, build-operator]
     runs-on: ubuntu-latest
     permissions:
       contents: write # push the generated gh-pages branch
