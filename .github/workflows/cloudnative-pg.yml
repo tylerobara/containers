@@ -27,6 +27,7 @@ on:
     paths:
       - images/cloudnative-pg/**
       - images/cloudnative-pg-operator/**
+      - images/openbao/**
       - pages/**
       - .github/workflows/cloudnative-pg.yml
   pull_request:
