@@ -228,7 +228,14 @@ jobs:
         run: |
           shopt -s nullglob
           files=(data/*.json)
-          if [ ${#files[@]} -gt 0 ]; then jq -s 'sort_by(.major) | reverse' "${files[@]}" > data/index.json
+          if [ ${#files[@]} -gt 0 ]; then
+            jq -s 'sort_by(.major) | reverse' "${files[@]}" > data/index.json
+            # CNPG ClusterImageCatalog, sha-pinned to each multi-arch manifest
+            # (same shape as cloudnative-pg's postgresql-minimal-trixie catalogs).
+            {
+              printf 'apiVersion: postgresql.cnpg.io/v1\nkind: ClusterImageCatalog\nmetadata:\n  name: cnpg-postgres-wolfi\n  labels:\n    images.cnpg.io/family: postgresql\n    images.cnpg.io/type: minimal\n    images.cnpg.io/os: wolfi\n    images.cnpg.io/date: "%s"\n    images.cnpg.io/publisher: tylerobara.github.io\nspec:\n  images:\n' "$(date -u +%Y%m%d)"
+              jq -r 'sort_by(.major)[] | "  - major: \(.major)\n    image: \(.image):\(.version)@\(.digest)"' data/index.json
+            } > data/cluster-image-catalog.yaml
           else echo '[]' > data/index.json; fi
 
       - name: Deploy to gh-pages

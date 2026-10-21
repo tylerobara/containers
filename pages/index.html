@@ -32,6 +32,8 @@
     <a href="https://github.com/chainguard-dev/apko">apko</a> (no Dockerfile).
     Scanned with <a href="https://github.com/anchore/grype">grype</a> after publish.
     <span id="updated"></span></p>
+  <p class="dim">CNPG <a href="data/cluster-image-catalog.yaml">ClusterImageCatalog</a> (sha-pinned):
+    <span class="pull mono" id="catalog-cmd"></span></p>
   <div id="catalog">Loading…</div>
 </main>
 <script>
@@ -94,6 +96,8 @@ async function main() {
     </div>`;
   }).join('') || '<p class="dim">No builds yet.</p>';
 }
+document.getElementById('catalog-cmd').textContent =
+  'kubectl apply -f ' + new URL('data/cluster-image-catalog.yaml', location.href).href;
 main();
 </script>
 </body>
