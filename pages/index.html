@@ -89,7 +89,8 @@ async function main() {
       <div class="row"><h2><span class="mono">${esc(e.image)}</span> : ${esc(e.version)}</h2>
       <span class="dim">digest ${esc((e.digest ?? '').slice(0, 19))}… · built ${esc(e.built)}</span></div>
       <div class="tags">${(e.tags ?? []).map(t => `<span class="mono">${esc(t)}</span>`).join('')}</div>
-      <p>${sevBadges(c)} · ${e.scan?.descriptor?.version ? 'grype ' + esc(e.scan.descriptor.version) : ''}</p>
+      <p>${sevBadges(c)} · ${e.scan?.descriptor?.version ? 'grype ' + esc(e.scan.descriptor.version) : ''}
+      ${e.signed ? '· <span class="sev Negligible" title="cosign keyless signature on the manifest digest">cosign ✓</span>' : ''}</p>
       <p><span class="pull mono">docker pull ${esc(e.image)}:${esc(e.version)}</span></p>
       <details><summary>Vulnerability findings (${Object.values(c).reduce((a, b) => a + b, 0)})</summary>
       ${vulnTable(e.scan)}</details>

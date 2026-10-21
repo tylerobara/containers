@@ -106,6 +106,24 @@ Checks the CNPG tag convention, required binaries, initdb-against-empty-volume
 (needs `/bin/sh`), a real server boot + query, uid 26, and prod restraint
 (no bash, no apk-tools).
 
+## Signing (cosign, keyless)
+
+After each publish the image is scanned, and the manifest **digest** is signed
+with cosign keyless **only when grype reports zero findings of Low or above**
+(Negligible/Unknown don't block — Wolfi's secdb parks unfixed-recorded CVEs in
+Unknown forever). Unsigned builds stay published but carry no badge on the
+catalog page. Signatures land in Rekor; no signing secret exists.
+
+```sh
+cosign verify \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github.com/tylerobara/containers/\.github/workflows/cloudnative-pg\.yml@refs/heads/main$' \
+  ghcr.io/tylerobara/containers/cnpg-postgres:18.6
+```
+
+The identity regexp pins signatures to this repo's `main` workflow — anything
+signed elsewhere fails verification.
+
 ## Not included (add when needed)
 
 - `-dev` variant (bash, apk-tools, gosu, curl, socat, jq) — copy the pattern from

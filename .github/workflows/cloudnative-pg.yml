@@ -104,6 +104,10 @@ jobs:
       fail-fast: false
       matrix:
         major: [15, 16, 17, 18]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # only for cosign keyless below
     env:
       PG_MAJOR: ${{ matrix.major }}
     steps:
@@ -179,6 +183,7 @@ jobs:
             | grep -q "$PG_FULL" || { echo "image reports a version other than $PG_FULL"; exit 1; }
 
       - name: Scan published image with grype
+        id: scan
         run: |
           mkdir -p scans
           # registry: source pulls via the OCI API — no docker daemon needed;
@@ -188,6 +193,35 @@ jobs:
             -v "$HOME/.docker:/root/.docker:ro" \
             ghcr.io/anchore/grype:latest "registry:$IMAGE:$PG_FULL" \
               --output json --file "/out/cnpg-postgres-$PG_MAJOR.json"
+          # Signing gate: anything Low or above blocks. Negligible/Unknown are
+          # excluded on purpose — Wolfi's secdb parks "no fix recorded" CVEs in
+          # Unknown, which would veto signing forever.
+          LOWPLUS=$(jq '[.matches[] | select(.vulnerability.severity
+                     | IN("Low","Medium","High","Critical"))] | length' \
+            "scans/cnpg-postgres-$PG_MAJOR.json")
+          echo "lowplus=$LOWPLUS" >> "$GITHUB_OUTPUT"
+          echo "Low+ findings: $LOWPLUS" >> "$GITHUB_STEP_SUMMARY"
+
+      # Keyless signing: no secret — the cert binds this workflow's identity
+      # and lands in Rekor. Signs the manifest DIGEST (never a tag), so a
+      # signature can never be pointed at rotated content. Verify with:
+      #   cosign verify \
+      #     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      #     --certificate-identity-regexp '^https://github.com/tylerobara/containers/\.github/workflows/cloudnative-pg\.yml@refs/heads/main$' \
+      #     ghcr.io/tylerobara/containers/cnpg-postgres:<tag>
+      - name: Sign with cosign (only when scan has 0 Low+ findings)
+        if: steps.scan.outputs.lowplus == '0'
+        run: |
+          DIGEST=$(docker buildx imagetools inspect "$IMAGE:$PG_FULL" \
+            --format '{{json .Manifest}}' | jq -r .digest)
+          docker run --rm \
+            -v "$HOME/.docker:/root/.docker" \
+            -e GITHUB_ACTIONS \
+            -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+            ghcr.io/sigstore/cosign/cosign:latest sign --yes "$IMAGE@$DIGEST"
+          echo "SIGNED=true" >> "$GITHUB_ENV"
+        # else branch: publish stays green, unsigned — the summary line above
+        # says why; nothing to do.
 
       - name: Build pages data
         run: |
@@ -197,10 +231,11 @@ jobs:
             --arg image "$IMAGE" --argjson major "$PG_MAJOR" --arg version "$PG_FULL" \
             --arg digest "$DIGEST" --arg built "$(date -u +%FT%TZ)" \
             --arg tags "$PG_MAJOR $PG_FULL $PG_MAJOR-wolfi $PG_FULL-wolfi" \
-            --arg built_with melange \
+            --arg built_with melange --argjson signed "${SIGNED:-false}" \
             --slurpfile scan "scans/cnpg-postgres-$PG_MAJOR.json" \
             '{image: $image, major: $major, version: $version,
               tags: ($tags | split(" ")), digest: $digest, built: $built, built_with: $built_with,
+              signed: $signed,
               scan: $scan[0]}' > "scans/cnpg-postgres-$PG_MAJOR.json.tmp"
           mv "scans/cnpg-postgres-$PG_MAJOR.json.tmp" "scans/cnpg-postgres-$PG_MAJOR.json"
 
