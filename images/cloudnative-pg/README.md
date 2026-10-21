@@ -58,6 +58,14 @@ in that major's melange config and push — that is the whole update procedure.
   (`pages/index.html` + `data/*.json`) — enable it once under
   Settings → Pages → Source: **Deploy from a branch** → `gh-pages` / `(root)`.
   Catalog: https://tylerobara.github.io/containers/
+- **ClusterImageCatalog**: each Pages deploy also emits
+  `data/cluster-image-catalog.yaml` — one entry per major, each image pinned to
+  the multi-arch manifest digest published that run:
+
+  ```sh
+  kubectl apply -f https://tylerobara.github.io/containers/data/cluster-image-catalog.yaml
+  # then: spec.imageCatalogRef: { kind: ClusterImageCatalog, name: cnpg-postgres-wolfi }
+  ```
 - **ghcr auth**: nested package names (`owner/repo/image`) cannot be created by
   `GITHUB_TOKEN` — add a **`CR_PAT`** repo secret (fine-grained PAT, this repo,
   `packages: Write`; or classic with `write:packages`).
