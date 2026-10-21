@@ -2,7 +2,9 @@ name: cloudnative-pg
 
 # Publishes apko-assembled (Wolfi base, no Dockerfile) CloudNativePG PostgreSQL
 # images to ghcr for every PGDG-supported major, scanned with grype, cataloged
-# on GitHub Pages from the gh-pages branch.
+# on GitHub Pages from the gh-pages branch. The CloudNativePG operator image
+# (Go manager binary built from upstream source by melange) is in
+# images/cloudnative-pg-operator/.
 #
 # PostgreSQL itself is NOT the stale Wolfi prebuild (15.6/16.14/17.10) — it is
 # compiled from current PGDG source by melange (see images/cloudnative-pg/melange/),
@@ -14,6 +16,7 @@ on:
     branches: [main]
     paths:
       - images/cloudnative-pg/**
+      - images/cloudnative-pg-operator/**
       - pages/**
       - .github/workflows/cloudnative-pg.yml
   schedule:
@@ -89,6 +92,45 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: packages-pg-${{ matrix.major }}-${{ matrix.arch }}
+          path: |
+            packages/
+            melange.rsa.pub
+
+  melange-operator:
+    needs: keygen
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install melange
+        run: go install chainguard.dev/melange@${{ env.MELANGE_VERSION }}
+
+      - name: Restore signing key
+        run: |
+          echo '${{ needs.keygen.outputs.priv }}' | base64 -d > melange.rsa && chmod 600 melange.rsa
+          echo '${{ needs.keygen.outputs.pub }}' | base64 -d > melange.rsa.pub
+
+      - name: Build cloudnative-pg operator (${{ matrix.arch }})
+        run: |
+          ~/go/bin/melange build images/cloudnative-pg-operator/melange/cloudnative-pg.yaml \
+            --arch ${{ matrix.arch }} \
+            --signing-key melange.rsa \
+            --out-dir ./packages \
+            --runner docker
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-operator-${{ matrix.arch }}
           path: |
             packages/
             melange.rsa.pub
@@ -248,6 +290,112 @@ jobs:
           name: pages-data-pg-${{ matrix.major }}
           path: scans/cnpg-postgres-${{ matrix.major }}.json
 
+  build-operator:
+    needs: [keygen, melange-operator]
+    if: ${{ !cancelled() && needs.keygen.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OP_IMAGE: ghcr.io/${{ github.repository }}/cloudnative-pg
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: packages-operator-*
+          path: .
+          merge-multiple: true
+
+      - name: Resolve pinned version + version guard
+        run: |
+          VER=$(awk '/^  version:/{print $2; exit}' images/cloudnative-pg-operator/melange/cloudnative-pg.yaml)
+          EPOCH=$(awk '/^  epoch:/{print $2; exit}' images/cloudnative-pg-operator/melange/cloudnative-pg.yaml)
+          case "$VER" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "bad version '$VER'"; exit 1 ;; esac
+          echo "OP_VER=$VER" >> "$GITHUB_ENV"
+          echo "OP_MINOR=$(echo "$VER" | cut -d. -f1,2)" >> "$GITHUB_ENV"
+          docker run --rm --user root \
+            -v "$PWD:/work" \
+            cgr.dev/chainguard/apko lock /work/images/cloudnative-pg-operator/apko/operator.yaml \
+              --arch x86_64 --arch aarch64 \
+              --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
+              --output /work/operator.lock.json
+          RESOLVED=$(jq -r '.contents.packages[] | select(.name=="cloudnative-pg") | .version' operator.lock.json | head -1)
+          # exact pkgver match or the melange package lost resolution to Wolfi
+          if [ "$RESOLVED" != "${VER}-r${EPOCH}" ]; then
+            echo "apko resolved cloudnative-pg as '$RESOLVED', expected '${VER}-r${EPOCH}'"; exit 1
+          fi
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Publish multi-arch operator image to ghcr
+        run: |
+          docker run --rm --user root \
+            -v "$PWD:/work:ro" \
+            -v "$HOME/.docker:/root/.docker:ro" \
+            cgr.dev/chainguard/apko publish /work/images/cloudnative-pg-operator/apko/operator.yaml \
+              "$OP_IMAGE:$OP_VER" "$OP_IMAGE:$OP_MINOR" "$OP_IMAGE:latest" \
+              --arch x86_64,aarch64 \
+              --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
+              --lockfile /work/operator.lock.json
+
+      - name: Smoke test published image
+        run: |
+          docker pull --platform linux/amd64 "$OP_IMAGE:$OP_VER"
+          IMAGE="$OP_IMAGE:$OP_VER" VERSION="$OP_VER" ./images/cloudnative-pg-operator/test.sh
+
+      - name: Scan published image with grype
+        id: scan
+        run: |
+          mkdir -p scans
+          docker run --rm --user 0:0 \
+            -v "$PWD/scans:/out" \
+            -v "$HOME/.docker:/root/.docker:ro" \
+            ghcr.io/anchore/grype:latest "registry:$OP_IMAGE:$OP_VER" \
+              --output json --file /out/cloudnative-pg-operator.json
+          # Same signing gate as the postgres images: any Low+ finding blocks.
+          LOWPLUS=$(jq '[.matches[] | select(.vulnerability.severity
+                     | IN("Low","Medium","High","Critical"))] | length' scans/cloudnative-pg-operator.json)
+          echo "lowplus=$LOWPLUS" >> "$GITHUB_OUTPUT"
+          echo "operator Low+ findings: $LOWPLUS" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Sign with cosign (only when scan has 0 Low+ findings)
+        if: steps.scan.outputs.lowplus == '0'
+        run: |
+          DIGEST=$(docker buildx imagetools inspect "$OP_IMAGE:$OP_VER" \
+            --format '{{json .Manifest}}' | jq -r .digest)
+          docker run --rm --user 0:0 \
+            -v "$HOME/.docker:/root/.docker:ro" \
+            -e DOCKER_CONFIG=/root/.docker \
+            -e GITHUB_ACTIONS \
+            -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+            ghcr.io/sigstore/cosign/cosign:latest sign --yes "$OP_IMAGE@$DIGEST"
+          echo "SIGNED=true" >> "$GITHUB_ENV"
+
+      - name: Build pages data
+        run: |
+          DIGEST=$(docker buildx imagetools inspect "$OP_IMAGE:$OP_VER" \
+            --format '{{json .Manifest}}' | jq -r .digest)
+          jq -n \
+            --arg image "$OP_IMAGE" --arg version "$OP_VER" \
+            --arg digest "$DIGEST" --arg built "$(date -u +%FT%TZ)" \
+            --arg tags "$OP_VER $OP_MINOR latest" \
+            --arg built_with melange --argjson signed "${SIGNED:-false}" \
+            --slurpfile scan scans/cloudnative-pg-operator.json \
+            '{image: $image, major: null, version: $version,
+              tags: ($tags | split(" ")), digest: $digest, built: $built, built_with: $built_with,
+              signed: $signed,
+              scan: $scan[0]}' > scans/cloudnative-pg-operator.json.tmp
+          mv scans/cloudnative-pg-operator.json.tmp scans/cloudnative-pg-operator.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pages-data-pg-operator
+          path: scans/cloudnative-pg-operator.json
+
   pages:
     if: ${{ !cancelled() }} # deploy whatever scans exist, even if some matrix legs failed
     needs: build
@@ -268,12 +416,12 @@ jobs:
           shopt -s nullglob
           files=(data/*.json)
           if [ ${#files[@]} -gt 0 ]; then
-            jq -s 'sort_by(.major) | reverse' "${files[@]}" > data/index.json
+            jq -s 'sort_by(.major // 0) | reverse' "${files[@]}" > data/index.json
             # CNPG ClusterImageCatalog, sha-pinned to each multi-arch manifest
             # (same shape as cloudnative-pg's postgresql-minimal-trixie catalogs).
             {
               printf 'apiVersion: postgresql.cnpg.io/v1\nkind: ClusterImageCatalog\nmetadata:\n  name: cnpg-postgres-wolfi\n  labels:\n    images.cnpg.io/family: postgresql\n    images.cnpg.io/type: minimal\n    images.cnpg.io/os: wolfi\n    images.cnpg.io/date: "%s"\n    images.cnpg.io/publisher: tylerobara.github.io\nspec:\n  images:\n' "$(date -u +%Y%m%d)"
-              jq -r 'sort_by(.major)[] | "  - major: \(.major)\n    image: \(.image):\(.version)@\(.digest)"' data/index.json
+              jq -r 'map(select(.major)) | sort_by(.major)[] | "  - major: \(.major)\n    image: \(.image):\(.version)@\(.digest)"' data/index.json
             } > data/cluster-image-catalog.yaml
           else echo '[]' > data/index.json; fi
 

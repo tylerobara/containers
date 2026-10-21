@@ -1,0 +1,64 @@
+# Melange build for the CloudNativePG operator (github.com/cloudnative-pg/cloudnative-pg)
+# — the minimal repo's traefik pattern: build the Go binary from the release
+# tarball, CGO_ENABLED=0 for a fully static binary, package named exactly
+# `cloudnative-pg` so grype/CPE identify it, provider-priority so we always
+# win resolution. Bump `version` + `vars.sha256` on each operator release
+# (https://github.com/cloudnative-pg/cloudnative-pg/releases).
+
+package:
+  name: cloudnative-pg
+  version: 1.30.1
+  epoch: 100
+  description: "CloudNativePG operator built from upstream source"
+  copyright:
+    - license: Apache-2.0
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the GitHub release tarball
+  sha256: a7a814f2c5a67412de95061190772f6f297727c2a6178b0f54fbf766b8d56a59
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      # go.mod wants >=1.25 / toolchain 1.26.x; Wolfi's go-1.26 covers it.
+      - go-1.26
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/cloudnative-pg/cloudnative-pg/archive/refs/tags/v${{package.version}}.tar.gz" \
+        -o /home/build/cnpg.tar.gz
+      echo "${{vars.sha256}}  /home/build/cnpg.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf cnpg.tar.gz
+      rm cnpg.tar.gz
+
+  - working-directory: /home/build/cloudnative-pg-${{package.version}}
+    runs: |
+      # Mirrors `make build-manager` (plain `go build ./cmd/manager` + the
+      # pkg/versions ldflags). generate/fmt/vet skipped: the generated
+      # deepcopy files are committed in the release tarball.
+      export CGO_ENABLED=0 GOTOOLCHAIN=local
+      export PATH="$PATH:/usr/lib/go-1.26/bin"
+      go build -trimpath -buildvcs=false \
+        -ldflags "-s -w \
+          -X github.com/cloudnative-pg/cloudnative-pg/pkg/versions.buildVersion=${{package.version}} \
+          -X github.com/cloudnative-pg/cloudnative-pg/pkg/versions.buildCommit=unknown \
+          -X github.com/cloudnative-pg/cloudnative-pg/pkg/versions.buildDate=$(date -u +%FT%TZ)" \
+        -o manager ./cmd/manager
+      # Upstream ships the entrypoint binary at /manager.
+      install -Dm755 manager "${{targets.destdir}}/manager"
+
+  - runs: |
+      # Verify the build actually produced this version
+      "${{targets.destdir}}/manager" version | grep -q "${{package.version}}"

@@ -1,0 +1,39 @@
+# CloudNativePG operator image, assembled by apko (no Dockerfile).
+# The operator binary itself is built from upstream source by melange
+# (see ../melange/cloudnative-pg.yaml); everything else is Wolfi.
+#
+# Reference: the Distroless-based target of the operator Dockerfile
+# (github.com/cloudnative-pg/cloudnative-pg/blob/main/Dockerfile): static
+# /manager, nonroot 65532. We keep the same entrypoint and uid so manifests
+# are drop-in compatible, on a busybox+ca-certs Wolfi base instead.
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    # Debug shell only — the operator is a static Go binary and shells out
+    # to nothing. ca-certificates for the k8s API + webhooks + registry TLS.
+    - busybox
+    - ca-certificates
+    # Built by melange; supplied via --repository-append at build time.
+    - cloudnative-pg
+
+accounts:
+  groups:
+    - groupname: nonroot
+      gid: 65532
+  users:
+    - username: nonroot
+      uid: 65532
+      gid: 65532
+      shell: /bin/false
+  # Upstream runs as the distroless nonroot user.
+  run-as: 65532
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+
+entrypoint:
+  command: /manager
