@@ -1,0 +1,153 @@
+# CloudNativePG-compatible PostgreSQL image — built the same way as
+# rtvkiz/minimal images/postgres-slim: apko + Wolfi packages, no Dockerfile,
+# CVE patches within 24-48h via Wolfi.
+#
+# CNPG image contract (https://cloudnative-pg.github.io/docs/container_images/):
+#   - initdb, postgres, pg_ctl, pg_controldata, pg_basebackup on PATH
+#     (+ pg_rewind, pg_isready, psql used by the instance manager)
+#   - du for `kubectl cnpg status` (busybox applet)
+#   - uid/gid 26:26 (CNPG runs instances as the postgres account, 26)
+#   - sensible locale; no entrypoint/command needed (operator's instance
+#     manager always overrides them)
+#   - image tag must start with the PG major version (e.g. 18.6-minimal)
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    # Base filesystem
+    - wolfi-baselayout
+
+    # Shell — REQUIRED, not a convenience. initdb runs `"postgres" -V` through
+    # popen(), which execs /bin/sh. Without a shell initdb cannot initialise a
+    # fresh PGDATA — the normal first-run path for a CNPG cluster. busybox also
+    # provides du/coreutils applets the instance manager shells out to.
+    # busybox only — no bash, no apk-tools (those are the -dev variant).
+    - busybox
+
+    # PostgreSQL from Wolfi (CVE-patched). -base carries the libs/sharedir,
+    # -client carries psql/pg_basebackup/pg_isready, the server package
+    # postgres/initdb/pg_ctl/pg_controldata/pg_rewind.
+    - postgresql-18
+    - postgresql-18-base
+    - postgresql-18-client
+    - postgresql-18-client-base
+    - libpq-18
+
+    # Core libraries
+    - glibc
+    - glibc-locale-posix
+    - glibc-locale-en
+    - ld-linux
+    - libgcc
+    - libstdc++
+    - libcrypt1
+    - libxcrypt
+
+    # SSL/TLS libraries
+    - libssl3
+    - libcrypto3
+
+    # ICU (internationalization)
+    - libicu78
+    - icu78-data-full
+
+    # Authentication/security libraries — CNPG's Dockerfile installs
+    # libsasl2-modules + libldap-common for ldap auth; these are the equivalents.
+    - cyrus-sasl
+    - heimdal-libs
+    - krb5-libs
+    - krb5-conf
+    - keyutils-libs
+    - libldap-2.6
+    - libverto
+    - linux-pam
+    - libselinux
+    - libsepol
+
+    # XML/XSLT
+    - libxml2-16
+    - libxslt
+
+    # Compression (WAL compression, basebackup)
+    - liblz4-1
+    - libzstd1
+    - zlib
+
+    # Database/utility libraries
+    - libedit
+    - libffi
+    - libpcre2-8-0
+    - libuuid
+    - libcom_err
+    - sqlite-libs
+    - gdbm
+
+    # Terminal
+    - ncurses
+    - ncurses-terminfo-base
+    - readline
+
+    # Locale and timezone
+    - localedef
+    - tzdata
+
+    # Certificates
+    - ca-certificates-bundle
+
+accounts:
+  groups:
+    - groupname: postgres
+      gid: 26
+  users:
+    - username: postgres
+      uid: 26
+      gid: 26
+      shell: /bin/false
+  run-as: 26
+
+entrypoint:
+  # Only a standalone sanity default — the CNPG operator always overrides
+  # command/args with its injected instance manager (/controller/manager).
+  command: /usr/bin/postgres
+
+environment:
+  PGDATA: /var/lib/postgresql/data
+  LANG: en_US.UTF-8
+  PATH: /usr/bin:/bin
+
+paths:
+  - path: /var/lib/postgresql
+    type: directory
+    uid: 26
+    gid: 26
+    permissions: 0o700
+  - path: /var/lib/postgresql/data
+    type: directory
+    uid: 26
+    gid: 26
+    permissions: 0o700
+  - path: /var/run/postgresql
+    type: directory
+    uid: 26
+    gid: 26
+    permissions: 0o755
+  - path: /tmp
+    type: directory
+    uid: 26
+    gid: 26
+    permissions: 0o1777
+
+annotations:
+  org.opencontainers.image.title: "cloudnative-pg-postgres-minimal"
+  org.opencontainers.image.description: "CloudNativePG-compatible PostgreSQL 18 image built on Wolfi with daily CVE patches"
+  org.opencontainers.image.url: "https://github.com/tylerobara/containers"
+  org.opencontainers.image.source: "https://github.com/tylerobara/containers/tree/main/images/cloudnative-pg"
+  org.opencontainers.image.licenses: "Apache-2.0"
+  io.cloudnativepg.compat: "5"
+
+archs:
+  - x86_64
+  - aarch64
