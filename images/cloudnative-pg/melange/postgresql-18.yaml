@@ -1,0 +1,108 @@
+# Melange build for PostgreSQL 18 from PGDG source — the minimal repo's
+# traefik pattern: build from upstream source, name the package exactly what
+# Wolfi calls it (postgresql-18) so grype/secdb identify it, and win resolution
+# with provider-priority (apko picks the highest/highest-priority provider of a
+# top-level name across ALL repositories).
+#
+# PG18 dropped the autotools build system, so this major uses meson.
+# Bump `version` + `vars.sha256` on each PGDG minor release
+# (https://ftp.postgresql.org/pub/source/).
+
+package:
+  name: postgresql-18
+  version: 18.6
+  epoch: 0
+  description: "PostgreSQL 18 built from PGDG source for CloudNativePG images"
+  copyright:
+    - license: PostgreSQL
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the PGDG source tarball
+  sha256: 555610c24d53e4316da5b7d3fc25c279d96856d5e0e23ee308c328c5fa881d9f
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - build-base
+      - curl
+      - bison
+      - flex
+      - perl
+      - meson
+      - ninja-build
+      - pkgconf
+      # --with-* / -D feature flags need these dev packages:
+      - openssl-dev
+      - icu-dev
+      - libxml2-dev
+      - libxslt-dev
+      - zlib-dev
+      - lz4-dev
+      - zstd-dev
+      - krb5-dev
+      - openldap-2.6-dev
+      - readline-dev
+      - ncurses-dev
+      - util-linux-dev
+      - linux-pam-dev
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      # PGDG mirrors occasionally 403 bursts; retry like the minimal repo does.
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://ftp.postgresql.org/pub/source/v${{package.version}}/postgresql-${{package.version}}.tar.bz2" \
+        -o /home/build/postgresql.tar.gz
+      echo "${{vars.sha256}}  /home/build/postgresql.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf postgresql.tar.gz
+      rm postgresql.tar.gz
+
+  - working-directory: /home/build/postgresql-${{package.version}}
+    runs: |
+      meson setup build \
+        -Dprefix=/usr \
+        -Dsysconfdir=/etc \
+        -Dbindir=/usr/bin \
+        -Dlibdir=/usr/lib \
+        -Dicu=true \
+        -Dopenssl=true \
+        -Dxml=true \
+        -Dxslt=true \
+        -Dlz4=true \
+        -Dzstd=true \
+        -Dldap=true \
+        -Dkerberos=true \
+        -Dpam=true \
+        -Duuid=e2fs \
+        -Dreadline=true \
+        -Dsystem-tzdata=/usr/share/zoneinfo
+      meson compile -C build
+
+  - working-directory: /home/build/postgresql-${{package.version}}
+    runs: |
+      DESTDIR="${{targets.destdir}}" meson install -C build
+      # Drop pure-build artifacts: server-side PGXS (no extensions compiled
+      # against it in these images), static libs, headers, pkgconfig.
+      # lib/postgresql/*.so stay — those are loadable modules, not dev libs.
+      rm -rf "${{targets.destdir}}/usr/include" \
+             "${{targets.destdir}}/usr/lib/postgresql/pgxs" \
+             "${{targets.destdir}}/usr/lib/pkgconfig"
+      find "${{targets.destdir}}/usr/lib" -name '*.a' -delete
+      rm -f "${{targets.destdir}}/usr/lib/libpq.so"
+
+  - runs: |
+      # Verify the build actually produced this version
+      export LD_LIBRARY_PATH="${{targets.destdir}}/usr/lib"
+      "${{targets.destdir}}/usr/bin/postgres" --version | grep -q "${{package.version}}"
+      "${{targets.destdir}}/usr/bin/psql" --version | grep -q "${{package.version}}"
+      "${{targets.destdir}}/usr/bin/pg_basebackup" --version | grep -q "${{package.version}}"
+      "${{targets.destdir}}/usr/bin/pg_controldata" --version | grep -q "${{package.version}}"

@@ -31,14 +31,13 @@ contents:
     # busybox only — no bash, no apk-tools (those are the -dev variant).
     - busybox
 
-    # PostgreSQL from Wolfi (CVE-patched). -base carries the libs/sharedir,
-    # -client carries psql/pg_basebackup/pg_isready, the server package
-    # postgres/initdb/pg_ctl/pg_controldata/pg_rewind.
+    # PostgreSQL built from PGDG source by melange (see ../melange/). One fat
+    # package ships server + client + libpq so the images carry the current
+    # PGDG minor (15.19/16.15/17.11/18.6), not Wolfi's stale prebuilt
+    # (15.6/16.14/17.10). provider-priority: 100 in the melange config makes
+    # apko pick it over Wolfi's same-named package. Runtime .so deps are
+    # recorded by melange and resolve against Wolfi automatically.
     - postgresql-@@MAJOR@@
-    - postgresql-@@MAJOR@@-base
-    - postgresql-@@MAJOR@@-client
-    - postgresql-@@MAJOR@@-client-base
-    - libpq-@@MAJOR@@
 
     # Core libraries
     - glibc
@@ -50,9 +49,9 @@ contents:
     - libcrypt1
     - libxcrypt
 
-    # SSL/TLS libraries
-    - libssl3
-    - libcrypto3
+    # SSL/TLS runtime — NOT pinned here on purpose: the melange build links
+    # whichever OpenSSL is current in Wolfi (3 or 4) and records the exact
+    # so: dependency, which apko resolves to the right runtime package.
 
     # ICU (internationalization)
     - libicu78

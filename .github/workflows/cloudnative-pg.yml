@@ -1,8 +1,13 @@
 name: cloudnative-pg
 
-# Publishes apko-built (Wolfi, no Dockerfile) CloudNativePG PostgreSQL images
-# to ghcr for every PGDG-supported major, scans them with grype, and deploys
-# the catalog + scan report to GitHub Pages from the gh-pages branch.
+# Publishes apko-assembled (Wolfi base, no Dockerfile) CloudNativePG PostgreSQL
+# images to ghcr for every PGDG-supported major, scanned with grype, cataloged
+# on GitHub Pages from the gh-pages branch.
+#
+# PostgreSQL itself is NOT the stale Wolfi prebuild (15.6/16.14/17.10) — it is
+# compiled from current PGDG source by melange (see images/cloudnative-pg/melange/),
+# packaged as postgresql-<major> with provider-priority so apko picks it.
+# PGDG minor releases are picked up by bumping version+sha256 in those configs.
 
 on:
   push:
@@ -21,14 +26,76 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}/cnpg-postgres
+  MELANGE_VERSION: v0.63.0
 
 permissions:
   contents: read
   packages: write
 
 jobs:
-  build:
+  # One signing key for the whole run: apko verifies every arch's package
+  # index, so all melange jobs must sign with the same key. Ephemeral is fine —
+  # the key's only consumer is this run's apko step.
+  keygen:
     runs-on: ubuntu-latest
+    outputs:
+      pub: ${{ steps.k.outputs.pub }}
+      priv: ${{ steps.k.outputs.priv }}
+    steps:
+      - name: Install melange
+        run: go install chainguard.dev/melange@${{ env.MELANGE_VERSION }}
+
+      - name: Generate key
+        id: k
+        run: |
+          ~/go/bin/melange keygen
+          { echo "pub=$(base64 -w0 melange.rsa.pub)"; echo "priv=$(base64 -w0 melange.rsa)"; } >> "$GITHUB_OUTPUT"
+
+  melange:
+    needs: keygen
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        major: [15, 16, 17, 18]
+        arch: [x86_64, aarch64]
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install melange
+        run: go install chainguard.dev/melange@${{ env.MELANGE_VERSION }}
+
+      - name: Restore signing key
+        run: echo '${{ needs.keygen.outputs.priv }}' | base64 -d > melange.rsa && chmod 600 melange.rsa
+
+      - name: Build postgresql-${{ matrix.major }} (${{ matrix.arch }})
+        run: |
+          ~/go/bin/melange build images/cloudnative-pg/melange/postgresql-${{ matrix.major }}.yaml \
+            --arch ${{ matrix.arch }} \
+            --signing-key melange.rsa \
+            --out-dir ./packages \
+            --runner docker
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-pg-${{ matrix.major }}-${{ matrix.arch }}
+          path: |
+            packages/
+            melange.rsa.pub
+
+  build:
+    # Run even if one melange leg failed — its major fails alone at publish
+    # time instead of blocking the other three.
+    if: ${{ !cancelled() && needs.keygen.result == 'success' }}
+    needs: [keygen, melange]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -38,29 +105,44 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Render apko config for PG ${{ matrix.major }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: packages-pg-${{ matrix.major }}-*
+          path: .
+          merge-multiple: true
+
+      - name: Resolve pinned PGDG version + render apko config
         run: |
           mkdir -p build
-          sed "s/@@MAJOR@@/$PG_MAJOR/g" images/cloudnative-pg/apko/postgresql.yaml.tpl > "build/postgresql-$PG_MAJOR.yaml"
-
-      - name: Resolve package versions (apko lock)
-        run: |
-          docker run --rm --user root \
-            -v "$PWD/build:/build" \
-            cgr.dev/chainguard/apko lock "/build/postgresql-$PG_MAJOR.yaml" \
-              --arch x86_64 --arch aarch64 --output "/build/pg-$PG_MAJOR.lock.json"
-          # e.g. 18.6-r5 -> 18.6 ; the tags we publish must match reality.
-          PG_FULL=$(jq -r --arg p "postgresql-$PG_MAJOR" \
-            '.contents.packages[] | select(.name==$p) | .version' "build/pg-$PG_MAJOR.lock.json" \
-            | head -1 | sed -E 's/-r[0-9]+$//')
+          # The melange config is the source of truth for the PGDG minor.
+          PG_FULL=$(awk '/^  version:/{print $2; exit}' "images/cloudnative-pg/melange/postgresql-$PG_MAJOR.yaml")
           case "$PG_FULL" in
             "$PG_MAJOR".[0-9]*) echo "PG_FULL=$PG_FULL" >> "$GITHUB_ENV" ;;
-            *) echo "resolved unexpected version '$PG_FULL' for major $PG_MAJOR"; exit 1 ;;
+            *) echo "bad version '$PG_FULL' in melange config"; exit 1 ;;
           esac
+          sed "s/@@MAJOR@@/$PG_MAJOR/g" images/cloudnative-pg/apko/postgresql.yaml.tpl > "build/postgresql-$PG_MAJOR.yaml"
           echo "Publishing tags: $PG_MAJOR, $PG_FULL, $PG_MAJOR-wolfi, $PG_FULL-wolfi"
 
-      # Nested package names (owner/repo/image) cannot be created by GITHUB_TOKEN —
-      # set a CR_PAT secret (fine-grained: packages:write on this repo).
+      - name: Resolve package versions (apko lock, local repo wins)
+        run: |
+          docker run --rm --user root \
+            -v "$PWD:/work" \
+            cgr.dev/chainguard/apko lock "/work/build/postgresql-$PG_MAJOR.yaml" \
+              --arch x86_64 --arch aarch64 \
+              --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
+              --output "/work/build/pg-$PG_MAJOR.lock.json"
+          RESOLVED=$(jq -r --arg p "postgresql-$PG_MAJOR" \
+            '.contents.packages[] | select(.name==$p) | .version' "build/pg-$PG_MAJOR.lock.json" | head -1)
+          # provider-priority must beat Wolfi's stale same-named package —
+          # if this ever fires, the melange package lost resolution.
+          case "$RESOLVED" in
+            "$PG_FULL"-r*) ;;
+            *) echo "apko resolved postgresql-$PG_MAJOR as '$RESOLVED', expected '$PG_FULL-rN'"; exit 1 ;;
+          esac
+
+      # Nested package names (owner/repo/image) — works with GITHUB_TOKEN since
+      # the parent owner/repository package exists; CR_PAT (packages:write)
+      # overrides if ever needed.
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -71,16 +153,24 @@ jobs:
         run: |
           M=$PG_MAJOR V=$PG_FULL
           docker run --rm --user root \
-            -v "$PWD/build:/build:ro" \
+            -v "$PWD/build:/work/build:ro" \
+            -v "$PWD/packages:/work/packages:ro" \
+            -v "$PWD/melange.rsa.pub:/work/melange.rsa.pub:ro" \
             -v "$HOME/.docker:/root/.docker:ro" \
-            cgr.dev/chainguard/apko publish "/build/postgresql-$M.yaml" \
+            cgr.dev/chainguard/apko publish "/work/build/postgresql-$M.yaml" \
               "$IMAGE:$M" "$IMAGE:$V" "$IMAGE:$M-wolfi" "$IMAGE:$V-wolfi" \
-              --arch x86_64,aarch64 --lockfile "/build/pg-$M.lock.json"
+              --arch x86_64,aarch64 \
+              --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
+              --lockfile "/work/build/pg-$M.lock.json"
 
       - name: Smoke test published image
         run: |
           docker pull --platform linux/amd64 "$IMAGE:$PG_FULL"
           IMAGE="$IMAGE:$PG_FULL" PG_MAJOR="$PG_MAJOR" ./images/cloudnative-pg/test.sh
+          # The whole point of the melange stage: the shipped binary must be
+          # the PGDG minor the tags claim, not Wolfi's stale prebuild.
+          docker run --rm --entrypoint /usr/bin/postgres "$IMAGE:$PG_FULL" --version \
+            | grep -q "$PG_FULL" || { echo "image reports a version other than $PG_FULL"; exit 1; }
 
       - name: Scan published image with grype
         run: |
@@ -101,9 +191,10 @@ jobs:
             --arg image "$IMAGE" --argjson major "$PG_MAJOR" --arg version "$PG_FULL" \
             --arg digest "$DIGEST" --arg built "$(date -u +%FT%TZ)" \
             --arg tags "$PG_MAJOR $PG_FULL $PG_MAJOR-wolfi $PG_FULL-wolfi" \
+            --arg built_with melange \
             --slurpfile scan "scans/cnpg-postgres-$PG_MAJOR.json" \
             '{image: $image, major: $major, version: $version,
-              tags: ($tags | split(" ")), digest: $digest, built: $built,
+              tags: ($tags | split(" ")), digest: $digest, built: $built, built_with: $built_with,
               scan: $scan[0]}' > "scans/cnpg-postgres-$PG_MAJOR.json.tmp"
           mv "scans/cnpg-postgres-$PG_MAJOR.json.tmp" "scans/cnpg-postgres-$PG_MAJOR.json"
 

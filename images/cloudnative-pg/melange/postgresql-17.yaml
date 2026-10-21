@@ -1,0 +1,105 @@
+# Melange build for PostgreSQL 17 from PGDG source — the minimal repo's
+# traefik pattern: build from upstream source, name the package exactly what
+# Wolfi calls it (postgresql-17) so grype/secdb identify it, and win resolution
+# with provider-priority (apko picks the highest/highest-priority provider of a
+# top-level name across ALL repositories).
+#
+# Why: Wolfi's prebuilt postgresql-17 is stuck at 17.10 while PGDG ships 17.11.
+# Bump `version` + `vars.sha256` on each PGDG minor release
+# (https://ftp.postgresql.org/pub/source/).
+
+package:
+  name: postgresql-17
+  version: 17.11
+  epoch: 0
+  description: "PostgreSQL 17 built from PGDG source for CloudNativePG images"
+  copyright:
+    - license: PostgreSQL
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the PGDG source tarball
+  sha256: dd27f2b3c59e73ed14aa3324901242bf69a032a6347805f274e6260322d42979
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - build-base
+      - curl
+      - bison
+      - flex
+      - perl
+      # --with-* feature flags need these dev packages:
+      - openssl-dev
+      - icu-dev
+      - libxml2-dev
+      - libxslt-dev
+      - zlib-dev
+      - lz4-dev
+      - zstd-dev
+      - krb5-dev
+      - openldap-2.6-dev
+      - readline-dev
+      - ncurses-dev
+      - util-linux-dev
+      - linux-pam-dev
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      # PGDG mirrors occasionally 403 bursts; retry like the minimal repo does.
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://ftp.postgresql.org/pub/source/v${{package.version}}/postgresql-${{package.version}}.tar.bz2" \
+        -o /home/build/postgresql.tar.gz
+      echo "${{vars.sha256}}  /home/build/postgresql.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf postgresql.tar.gz
+      rm postgresql.tar.gz
+
+  - working-directory: /home/build/postgresql-${{package.version}}
+    runs: |
+      ./configure \
+        --prefix=/usr \
+        --sysconfdir=/etc \
+        --bindir=/usr/bin \
+        --libdir=/usr/lib \
+        --with-icu \
+        --with-openssl \
+        --with-libxml \
+        --with-libxslt \
+        --with-lz4 \
+        --with-zstd \
+        --with-ldap \
+        --with-gssapi \
+        --with-pam \
+        --with-uuid=e2fs \
+        --with-readline \
+        --with-system-tzdata=/usr/share/zoneinfo
+      make -j"$(nproc)"
+
+  - working-directory: /home/build/postgresql-${{package.version}}
+    runs: |
+      make install DESTDIR="${{targets.destdir}}"
+      # Drop pure-build artifacts: server-side PGXS (no extensions compiled
+      # against it in these images), static libs, headers, pkgconfig.
+      # lib/postgresql/*.so stay — those are loadable modules, not dev libs.
+      rm -rf "${{targets.destdir}}/usr/include" \
+             "${{targets.destdir}}/usr/lib/postgresql/pgxs" \
+             "${{targets.destdir}}/usr/lib/pkgconfig"
+      find "${{targets.destdir}}/usr/lib" -name '*.a' -delete
+      rm -f "${{targets.destdir}}/usr/lib/libpq.so"
+
+  - runs: |
+      # Verify the build actually produced this version
+      export LD_LIBRARY_PATH="${{targets.destdir}}/usr/lib"
+      "${{targets.destdir}}/usr/bin/postgres" --version | grep -q "${{package.version}}"
+      "${{targets.destdir}}/usr/bin/psql" --version | grep -q "${{package.version}}"
+      "${{targets.destdir}}/usr/bin/pg_basebackup" --version | grep -q "${{package.version}}"
+      "${{targets.destdir}}/usr/bin/pg_controldata" --version | grep -q "${{package.version}}"
