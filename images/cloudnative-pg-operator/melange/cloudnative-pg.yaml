@@ -48,16 +48,35 @@ pipeline:
       # Mirrors `make build-manager` (plain `go build ./cmd/manager` + the
       # pkg/versions ldflags). generate/fmt/vet skipped: the generated
       # deepcopy files are committed in the release tarball.
+      #
+      # Upstream's image layout is NOT just /manager: the operator globs
+      # CWD-relative "operator/manager_*" at startup (pkg/utils/discovery.go
+      # DetectAvailableArchitectures) and the cluster reconciler FAILS the
+      # whole status update if runtime.GOARCH is missing from that set
+      # ("cannot update the resource status: invalid architecture: arm64").
+      # So ship operator/manager_{amd64,arm64} like the upstream Dockerfile
+      # (which also cross-builds both into every arch's image — pure Go,
+      # CGO_ENABLED=0 makes the cross leg trivial), plus the /manager
+      # entrypoint symlink to the native one.
       export CGO_ENABLED=0 GOTOOLCHAIN=local
       export PATH="$PATH:/usr/lib/go-1.26/bin"
-      go build -trimpath -buildvcs=false \
-        -ldflags "-s -w \
-          -X github.com/cloudnative-pg/cloudnative-pg/pkg/versions.buildVersion=${{package.version}} \
-          -X github.com/cloudnative-pg/cloudnative-pg/pkg/versions.buildCommit=unknown \
-          -X github.com/cloudnative-pg/cloudnative-pg/pkg/versions.buildDate=$(date -u +%FT%TZ)" \
-        -o manager ./cmd/manager
-      # Upstream ships the entrypoint binary at /manager.
-      install -Dm755 manager "${{targets.destdir}}/manager"
+      for target in amd64 arm64; do
+        GOARCH=$target go build -trimpath -buildvcs=false \
+          -ldflags "-s -w \
+            -X github.com/cloudnative-pg/cloudnative-pg/pkg/versions.buildVersion=${{package.version}} \
+            -X github.com/cloudnative-pg/cloudnative-pg/pkg/versions.buildCommit=unknown \
+            -X github.com/cloudnative-pg/cloudnative-pg/pkg/versions.buildDate=$(date -u +%FT%TZ)" \
+          -o "operator/manager_$target" ./cmd/manager
+        # e_machine (little-endian, byte 18): 62 = x86_64, 183 = aarch64.
+        want=62; [ "$target" = arm64 ] && want=183
+        got=$(od -An -j 18 -N 1 -tu1 "operator/manager_$target" | tr -d ' ')
+        [ "$got" = "$want" ] || { echo "manager_$target has ELF e_machine $got, want $want"; exit 1; }
+      done
+      install -Dm755 operator/manager_amd64 "${{targets.destdir}}/operator/manager_amd64"
+      install -Dm755 operator/manager_arm64 "${{targets.destdir}}/operator/manager_arm64"
+      # Upstream: ln -sf operator/manager_${TARGETARCH} manager
+      native=$(go env GOARCH)
+      ln -sfn "operator/manager_$native" "${{targets.destdir}}/manager"
 
   - runs: |
       # Verify the build actually produced this version

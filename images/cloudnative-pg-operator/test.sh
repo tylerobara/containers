@@ -14,6 +14,19 @@ echo "Testing default entrypoint is /manager..."
 ep=$(docker inspect --format '{{.Config.Entrypoint}}' "$IMAGE")
 [ "$ep" = "[/manager]" ] || fail "entrypoint is '$ep', expected '[/manager]'"
 
+echo "Testing multi-arch manager binaries under /operator/ ..."
+# The reconciler refuses to write Cluster status unless operator/manager_<goarch>
+# exists ("cannot update the resource status: invalid architecture: arm64"), and
+# it cross-populates every arch it bundles. Each CI leg builds natively, so only
+# an in-image ELF-magic check catches a missing/cross-contaminated leg.
+# e_machine byte: 62 = x86_64, 183 = aarch64.
+docker run --rm --entrypoint /bin/sh "$IMAGE" -c '
+  [ -x /operator/manager_amd64 ] || exit 1
+  [ -x /operator/manager_arm64 ] || exit 1
+  [ "$(od -An -j 18 -N 1 -tu1 /operator/manager_amd64 | tr -d " ")" = 62 ] || exit 1
+  [ "$(od -An -j 18 -N 1 -tu1 /operator/manager_arm64 | tr -d " ")" = 183 ] || exit 1
+  exit 0' || fail "operator/manager_{amd64,arm64} missing or wrong ELF arch"
+
 echo "Testing nonroot uid 65532 (upstream parity)..."
 uid=$(docker inspect --format '{{.Config.User}}' "$IMAGE")
 [ "$uid" = "65532" ] || fail "run-as is '$uid', expected '65532'"
