@@ -1,3 +1,4 @@
+# test: PR pipeline validation (will be reverted)
 # CloudNativePG operator image, assembled by apko (no Dockerfile).
 # The operator binary itself is built from upstream source by melange
 # (see ../melange/cloudnative-pg.yaml); everything else is Wolfi.
