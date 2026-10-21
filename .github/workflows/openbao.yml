@@ -1,0 +1,306 @@
+name: openbao
+
+# Builds + publishes the OpenBao image (bao binary built from upstream source
+# by melange, assembled by apko on Wolfi, no Dockerfile). One workflow per
+# image family; routing is the native on.push.paths filter, so nothing here
+# ever builds postgres or the operator (their own workflows/schedules/groups).
+# cosign identity = THIS file:
+#   cosign verify \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#     --certificate-identity-regexp '^https://github.com/tylerobara/containers/\.github/workflows/openbao\.yml@refs/heads/main$' \
+#     ghcr.io/tylerobara/containers/openbao:<tag>
+# PRs run everything except publish/sign/pages; validate a bot bump PR via
+# workflow_dispatch (ref = bump branch, validate_only checked).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - images/openbao/**
+      - .github/workflows/openbao.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - images/openbao/**
+      - .github/workflows/openbao.yml
+  schedule:
+    - cron: '10 6 * * *' # daily, staggered off postgres + operator
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Ref to build (defaults to the branch dispatched from). Use a bump-PR branch to validate it."
+        required: false
+        default: ""
+      validate_only:
+        description: "Build + scan without publishing/signing/deploying pages"
+        type: boolean
+        default: false
+
+concurrency:
+  group: openbao-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+
+env:
+  MELANGE_VERSION: v0.63.0
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # No detect job: the on.push.paths trigger above IS the routing — if this
+  # workflow ran at all, openbao (or this file) changed.
+
+  keygen:
+    runs-on: ubuntu-latest
+    outputs:
+      pub: ${{ steps.k.outputs.pub }}
+      priv: ${{ steps.k.outputs.priv }}
+    steps:
+      - name: Install melange
+        run: go install chainguard.dev/melange@${{ env.MELANGE_VERSION }}
+
+      - name: Generate key
+        id: k
+        run: |
+          ~/go/bin/melange keygen
+          { echo "pub=$(base64 -w0 melange.rsa.pub)"; echo "priv=$(base64 -w0 melange.rsa)"; } >> "$GITHUB_OUTPUT"
+
+  melange:
+    needs: keygen
+    if: ${{ !cancelled() && needs.keygen.result == 'success' }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Install melange
+        run: go install chainguard.dev/melange@${{ env.MELANGE_VERSION }}
+
+      - name: Restore signing key
+        run: |
+          echo '${{ needs.keygen.outputs.priv }}' | base64 -d > melange.rsa && chmod 600 melange.rsa
+          echo '${{ needs.keygen.outputs.pub }}' | base64 -d > melange.rsa.pub
+
+      - name: Build openbao (${{ matrix.arch }})
+        run: |
+          ~/go/bin/melange build images/openbao/melange/openbao.yaml \
+            --arch ${{ matrix.arch }} \
+            --signing-key melange.rsa \
+            --out-dir ./packages \
+            --runner docker
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packages-openbao-${{ matrix.arch }}
+          path: |
+            packages/
+            melange.rsa.pub
+
+  build:
+    needs: [keygen, melange]
+    if: ${{ !cancelled() && needs.keygen.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # only for cosign keyless below
+    env:
+      BAO_IMAGE: ghcr.io/${{ github.repository }}/openbao
+      PUBLISH: ${{ github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.validate_only != true) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: packages-openbao-*
+          path: .
+          merge-multiple: true
+
+      - name: Resolve pinned version + version guard
+        run: |
+          VER=$(awk '/^  version:/{print $2; exit}' images/openbao/melange/openbao.yaml)
+          EPOCH=$(awk '/^  epoch:/{print $2; exit}' images/openbao/melange/openbao.yaml)
+          case "$VER" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "bad version '$VER'"; exit 1 ;; esac
+          echo "BAO_VER=$VER" >> "$GITHUB_ENV"
+          echo "BAO_MINOR=$(echo "$VER" | cut -d. -f1,2)" >> "$GITHUB_ENV"
+          docker run --rm --user root \
+            -v "$PWD:/work" \
+            cgr.dev/chainguard/apko lock /work/images/openbao/apko/openbao.yaml \
+              --arch x86_64 --arch aarch64 \
+              --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
+              --output /work/openbao.lock.json
+          RESOLVED=$(jq -r '.contents.packages[] | select(.name=="openbao") | .version' openbao.lock.json | head -1)
+          # exact pkgver match or the melange package lost resolution to Wolfi
+          if [ "$RESOLVED" != "${VER}-r${EPOCH}" ]; then
+            echo "apko resolved openbao as '$RESOLVED', expected '${VER}-r${EPOCH}'"; exit 1
+          fi
+
+      - name: Log in to ghcr
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Publish multi-arch openbao image to ghcr
+        if: env.PUBLISH == 'true'
+        run: |
+          for i in 1 2 3; do
+            if docker run --rm --user root \
+              -v "$PWD:/work:ro" \
+              -v "$HOME/.docker:/root/.docker:ro" \
+              cgr.dev/chainguard/apko publish /work/images/openbao/apko/openbao.yaml \
+                "$BAO_IMAGE:$BAO_VER" "$BAO_IMAGE:$BAO_MINOR" "$BAO_IMAGE:latest" \
+                --arch x86_64,aarch64 \
+                --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
+                --lockfile /work/openbao.lock.json; then
+              break
+            fi
+            [ "$i" = 3 ] && { echo "apko publish failed after 3 attempts"; exit 1; }
+            echo "publish attempt $i failed; retrying in 15s"; sleep 15
+          done
+          echo "BAO_REF=$BAO_IMAGE:$BAO_VER" >> "$GITHUB_ENV"
+          echo "GRYPE_SRC=registry:$BAO_IMAGE:$BAO_VER" >> "$GITHUB_ENV"
+
+      - name: Build image locally (validate-only, no registry)
+        if: env.PUBLISH != 'true'
+        run: |
+          docker run --rm --user root \
+            -v "$PWD:/work" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            cgr.dev/chainguard/apko publish /work/images/openbao/apko/openbao.yaml \
+              "openbao:validate" \
+              --arch x86_64 \
+              --local \
+              --repository-append /work/packages --keyring-append /work/melange.rsa.pub
+          echo "BAO_REF=openbao:validate" >> "$GITHUB_ENV"
+          echo "GRYPE_SRC=docker:openbao:validate" >> "$GITHUB_ENV"
+
+      - name: Smoke test image
+        run: |
+          [ "$PUBLISH" = true ] && docker pull --platform linux/amd64 "$BAO_REF"
+          IMAGE="$BAO_REF" VERSION="$BAO_VER" ./images/openbao/test.sh
+
+      - name: Scan image with grype
+        id: scan
+        run: |
+          mkdir -p scans
+          docker run --rm --user 0:0 \
+            -v "$PWD/scans:/out" \
+            -v "$HOME/.docker:/root/.docker:ro" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            ghcr.io/anchore/grype:latest "$GRYPE_SRC" \
+              --output json --file /out/openbao.json || true
+          # Same signing gate as every other image here: any Low+ finding blocks.
+          LOWPLUS=$(jq '[.matches[] | select(.vulnerability.severity
+                     | IN("Low","Medium","High","Critical"))] | length' scans/openbao.json)
+          echo "lowplus=$LOWPLUS" >> "$GITHUB_OUTPUT"
+          echo "openbao Low+ findings: $LOWPLUS" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Sign with cosign (only when scan has 0 Low+ findings)
+        if: env.PUBLISH == 'true' && steps.scan.outputs.lowplus == '0'
+        run: |
+          DIGEST=$(docker buildx imagetools inspect "$BAO_REF" \
+            --format '{{json .Manifest}}' | jq -r .digest)
+          docker run --rm --user 0:0 \
+            -v "$HOME/.docker:/root/.docker:ro" \
+            -e DOCKER_CONFIG=/root/.docker \
+            -e GITHUB_ACTIONS \
+            -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+            ghcr.io/sigstore/cosign/cosign:latest sign --yes "$BAO_REF@$DIGEST"
+          echo "SIGNED=true" >> "$GITHUB_ENV"
+
+      - name: Build pages data
+        if: env.PUBLISH == 'true'
+        run: |
+          DIGEST=$(docker buildx imagetools inspect "$BAO_REF" \
+            --format '{{json .Manifest}}' | jq -r .digest)
+          jq -n \
+            --arg image "$BAO_IMAGE" --arg version "$BAO_VER" \
+            --arg digest "$DIGEST" --arg built "$(date -u +%FT%TZ)" \
+            --arg tags "$BAO_VER $BAO_MINOR latest" \
+            --arg built_with melange --argjson signed "${SIGNED:-false}" \
+            --arg signed_by openbao.yml \
+            --slurpfile scan scans/openbao.json \
+            '{image: $image, major: null, version: $version,
+              tags: ($tags | split(" ")), digest: $digest, built: $built, built_with: $built_with,
+              signed: $signed, signed_by: $signed_by,
+              scan: $scan[0]}' > scans/openbao.json.tmp
+          mv scans/openbao.json.tmp scans/openbao.json
+
+      - uses: actions/upload-artifact@v7
+        if: env.PUBLISH == 'true'
+        with:
+          name: pages-data-openbao
+          path: scans/openbao.json
+
+  pages:
+    # Merge this image's fresh entry over the live index (postgres/operator
+    # entries are preserved from the live data/index.json, keyed on
+    # image+major with fresh entries winning), regenerate the catalog from the
+    # merged index, and deploy.
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the generated gh-pages branch
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: pages-data-openbao
+          path: data
+          merge-multiple: true
+
+      - name: Assemble index
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(data/*.json)
+          if [ ${#files[@]} -gt 0 ]; then jq -s '.' "${files[@]}" > /tmp/new.json
+          else echo '[]' > /tmp/new.json; fi
+          # Previous deployment (first deploy: none yet; Pages can lag by a
+          # build or two — worst case a stale entry heals on the next build).
+          curl -fsSL --retry 3 "https://tylerobara.github.io/containers/data/index.json" -o /tmp/old.json 2>/dev/null || echo '[]' > /tmp/old.json
+          jq -e . /tmp/old.json >/dev/null 2>&1 || echo '[]' > /tmp/old.json
+          jq -s '(.[0] // []) as $old | .[1] as $new
+                 | reduce ($old + $new)[] as $e ({}; .[($e.image + "/" + ($e.major|tostring))] = $e)
+                 | [.[]] | sort_by(.major // 0) | reverse' \
+            /tmp/old.json /tmp/new.json > data/index.json
+          # CNPG ClusterImageCatalog, sha-pinned to each multi-arch manifest
+          # (same shape as cloudnative-pg's postgresql-minimal-trixie catalogs).
+          {
+            printf 'apiVersion: postgresql.cnpg.io/v1\nkind: ClusterImageCatalog\nmetadata:\n  name: cnpg-postgres-wolfi\n  labels:\n    images.cnpg.io/family: postgresql\n    images.cnpg.io/type: minimal\n    images.cnpg.io/os: wolfi\n    images.cnpg.io/date: "%s"\n    images.cnpg.io/publisher: tylerobara.github.io\nspec:\n  images:\n' "$(date -u +%Y%m%d)"
+            jq -r 'map(select(.major)) | sort_by(.major)[] | "  - major: \(.major)\n    image: \(.image):\(.version)@\(.digest)"' data/index.json
+          } > data/cluster-image-catalog.yaml
+
+      - name: Deploy to gh-pages
+        run: |
+          dst=$(mktemp -d)
+          git -C "$dst" init -q
+          cp pages/index.html "$dst/index.html"
+          cp -r data "$dst/data"
+          git -C "$dst" add -A
+          git -C "$dst" -c user.name=github-actions[bot] \
+                           -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
+            commit -qm "Deploy $(date -u +%FT%TZ)"
+          git -C "$dst" push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/$GITHUB_REPOSITORY.git" HEAD:gh-pages

@@ -48,7 +48,11 @@
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const SEVS = ['Critical','High','Medium','Low','Negligible','Unknown'];
 const ISS = 'https://token.actions.githubusercontent.com';
-const IDREX = "'^https://github\\.com/tylerobara/containers/\\.github/workflows/cloudnative-pg\\.yml@refs/heads/main$'";
+// cosign identity = the workflow file that signed the image (entries carry
+// signed_by; per-image workflows since the split). Entries predating it were
+// all signed by the retired monolith.
+const idrex = e => "'^https://github\\.com/tylerobara/containers/\\.github/workflows/" +
+  String(e.signed_by || 'cloudnative-pg.yml').replace(/\./g, '\\.') + "@refs/heads/main$'";
 
 function sevCounts(scan) {
   const c = {};
@@ -92,7 +96,7 @@ function card(e) {
     ${e.signed ? '· <span class="sev Negligible" title="cosign keyless signature on the manifest digest">cosign ✓</span>' : ''}</p>
     <p><span class="pull mono">docker pull ${esc(e.image)}:${esc(e.version)}</span></p>
     <p><span class="pull mono">docker pull ${esc(e.image)}:${esc(e.version)}@${esc(e.digest)}</span></p>
-    ${e.signed ? `<p><span class="pull mono">cosign verify --certificate-oidc-issuer ${ISS} --certificate-identity-regexp ${IDREX} ${esc(e.image)}:${esc(e.version)}</span></p>` : ''}
+    ${e.signed ? `<p><span class="pull mono">cosign verify --certificate-oidc-issuer ${ISS} --certificate-identity-regexp ${idrex(e)} ${esc(e.image)}:${esc(e.version)}</span></p>` : ''}
     <details><summary>Vulnerability findings (${Object.values(c).reduce((a, b) => a + b, 0)})</summary>
     ${vulnTable(e.scan)}</details>
   </div>`;

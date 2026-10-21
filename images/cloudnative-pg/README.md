@@ -44,7 +44,7 @@ melange config's version, so tags can never drift from what was built.
 (SHA256 of `https://ftp.postgresql.org/pub/source/v<ver>/postgresql-<ver>.tar.bz2`)
 in that major's melange config and push — that is the whole update procedure.
 
-## CI/CD (`.github/workflows/cloudnative-pg.yml`)
+## CI/CD (`.github/workflows/postgres.yml`)
 
 - **Daily** (`cron 06:00 UTC`) + on pushes touching this directory + manual
   dispatch. Pipeline: `keygen` (ephemeral melange signing key, no repo secrets)
@@ -117,7 +117,7 @@ catalog page. Signatures land in Rekor; no signing secret exists.
 ```sh
 cosign verify \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github.com/tylerobara/containers/\.github/workflows/cloudnative-pg\.yml@refs/heads/main$' \
+  --certificate-identity-regexp '^https://github.com/tylerobara/containers/\.github/workflows/postgres\.yml@refs/heads/main$' \
   ghcr.io/tylerobara/containers/cnpg-postgres:18.6
 ```
 

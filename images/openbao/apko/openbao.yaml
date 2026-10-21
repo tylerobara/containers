@@ -41,7 +41,8 @@ environment:
 
 entrypoint:
   command: /usr/bin/bao
-  args: ["server"]
-
-ports:
-  - 8200
+# apko has no per-entrypoint args (and no ports/expose fields): the top-level
+# `cmd` string becomes the OCI Cmd, so `docker run <img>` runs `bao server`
+# while `docker run <img> version` still overrides it. Port 8200 is just the
+# usual server listen address; apko does not annotate EXPOSE.
+cmd: server

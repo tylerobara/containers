@@ -1,13 +1,14 @@
-name: cloudnative-pg
+name: postgres
 
-# Publishes apko-assembled (Wolfi base, no Dockerfile) CloudNativePG images to
-# ghcr, scanned with grype, cataloged on GitHub Pages from the gh-pages branch.
-# Structure follows the minimal repo (rtvkiz/minimal):
-#
-#   - detect-changes generates the build matrices from the repo contents + the
-#     event's diff, so a version-bump PR/push only rebuilds the image whose
-#     melange config moved, and adding a new PGDG major = just drop a new
-#     images/cloudnative-pg/melange/postgresql-<N>.yaml file.
+# Publishes the CNPG-compatible PostgreSQL images (PGDG source built by
+# melange, assembled by apko on Wolfi — no Dockerfile) to ghcr, scanned with
+# grype, cosign keyless signed when clean, cataloged on GitHub Pages.
+# One workflow per image family (postgres / cloudnative-pg-operator / openbao)
+# so a change to one image can never rebuild or cancel another: routing is
+# the native on.push.paths filter, each file carries its own schedule and
+# concurrency group, and the cert identity for cosign is THIS file's name —
+# verify postgres images with the identity below (the single shared
+# cloudnative-pg.yml this split out of is retired).
 #   - pull_request runs the whole pipeline WITHOUT publish/sign/pages (PRs have
 #     no trusted secrets and must never push tags): melange build, apko lock
 #     guard, local apko build, test.sh, grype — so bump PRs are proven green
@@ -16,22 +17,25 @@ name: cloudnative-pg
 #     bot-opened PR (GITHUB_TOKEN-authored PRs don't auto-run checks).
 #   - schedule/workflow_dispatch always full-rebuild; push/PR cancel stale runs.
 #
-# PostgreSQL is NOT the stale Wolfi prebuild (15.6/16.14/17.10) — it is compiled
-# from current PGDG source by melange, packaged as postgresql-<major> with
-# provider-priority + epoch 100 so apko can never pick Wolfi's over ours.
-# Upstream releases are turned into bump PRs by update-versions.yml.
+# PostgreSQL is NOT the stale Wolfi prebuild — it is compiled from current
+# PGDG source by melange, packaged as postgresql-<major> with provider-priority
+# + epoch 100 so apko can never pick Wolfi's over ours. Upstream releases are
+# turned into bump PRs by update-versions.yml.
 
 on:
   push:
     branches: [main]
     paths:
       - images/cloudnative-pg/**
-      - images/cloudnative-pg-operator/**
-      - images/openbao/**
+      - .github/workflows/postgres.yml
+      # pages/** is watched HERE ONLY: the Pages template is one file shared
+      # by all image workflows, so exactly one of them owns redeploying it.
       - pages/**
-      - .github/workflows/cloudnative-pg.yml
   pull_request:
     branches: [main]
+    paths:
+      - images/cloudnative-pg/**
+      - .github/workflows/postgres.yml
   schedule:
     - cron: '0 6 * * *' # daily — republishes tags so Wolfi CVE patches land within a day
   workflow_dispatch:
@@ -48,11 +52,10 @@ on:
 concurrency:
   # schedule/dispatch get unique groups (never cancelled mid-publish);
   # push/PR runs cancel their superseded predecessor on the same ref.
-  group: cloudnative-pg-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.run_id || github.ref }}
+  group: postgres-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.run_id || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
 
 env:
-  IMAGE: ghcr.io/${{ github.repository }}/cnpg-postgres
   MELANGE_VERSION: v0.63.0
 
 permissions:
@@ -62,9 +65,10 @@ permissions:
 jobs:
   # ----------------------------------------------------------------------------
   # DETECT WHAT CHANGED — full rebuild on cron/dispatch/workflow-edits, surgical
-  # per-image builds on push/PR (minimal's detect-changes pattern, with the
-  # matrix derived from the melange configs on disk instead of a hand-maintained
-  # list: PG19 support = add postgresql-19.yaml, no workflow edit).
+  # per-major builds on push/PR (matrix derived from the melange configs on
+  # disk instead of a hand-maintained list: PG19 support = add
+  # postgresql-19.yaml, no workflow edit). Cross-IMAGE routing is the trigger's
+  # on.push.paths filter; this job only picks the majors.
   # ----------------------------------------------------------------------------
   detect-changes:
     runs-on: ubuntu-latest
@@ -73,8 +77,6 @@ jobs:
       pg-matrix: ${{ steps.filter.outputs.pg-matrix }}
       build-pg-matrix: ${{ steps.filter.outputs.build-pg-matrix }}
       has-pg: ${{ steps.filter.outputs.has-pg }}
-      has-op: ${{ steps.filter.outputs.has-op }}
-      has-bao: ${{ steps.filter.outputs.has-bao }}
       has-pages: ${{ steps.filter.outputs.has-pages }}
     steps:
       - uses: actions/checkout@v7
@@ -86,11 +88,9 @@ jobs:
         run: |
           set -euo pipefail
           EVENT='${{ github.event_name }}'
-          OP_YAML=images/cloudnative-pg-operator/melange/cloudnative-pg.yaml
-          BAO_YAML=images/openbao/melange/openbao.yaml
           ALL_MAJORS=$(find images/cloudnative-pg/melange -name 'postgresql-*.yaml' 2>/dev/null \
             | sed -nE 's|.*/postgresql-([0-9]+)\.yaml$|\1|p' || true)
-          FULL=false; HAS_OP=false; HAS_BAO=false; HAS_PAGES=false; MAJORS=""
+          FULL=false; HAS_PAGES=false; MAJORS=""
 
           if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; then
             FULL=true
@@ -108,8 +108,6 @@ jobs:
               [ -z "${CHANGED:-}" ] && FULL=true
               # Any change to the pipeline itself → trust nothing, rebuild all.
               echo "${CHANGED:-}" | grep -qE '^\.github/' && FULL=true
-              echo "${CHANGED:-}" | grep -q '^images/cloudnative-pg-operator/' && HAS_OP=true
-              echo "${CHANGED:-}" | grep -q '^images/openbao/' && HAS_BAO=true
               echo "${CHANGED:-}" | grep -q '^pages/' && HAS_PAGES=true
               PG_CHANGED=$(echo "${CHANGED:-}" | grep '^images/cloudnative-pg/' || true)
               if [ -n "$PG_CHANGED" ]; then
@@ -123,12 +121,7 @@ jobs:
             fi
           fi
 
-          if [ "$FULL" = true ]; then
-            MAJORS="$ALL_MAJORS"; HAS_OP=true; HAS_BAO=true; HAS_PAGES=true
-          fi
-          # Only build images whose configs actually exist on the checked-out ref.
-          if [ "$HAS_OP" = true ] && [ ! -f "$OP_YAML" ]; then HAS_OP=false; fi
-          if [ "$HAS_BAO" = true ] && [ ! -f "$BAO_YAML" ]; then HAS_BAO=false; fi
+          if [ "$FULL" = true ]; then MAJORS="$ALL_MAJORS"; fi
           # comm wants sorted line streams; normalize either value (space- or
           # newline-separated) and drop anything that is not a plain number.
           numstream() { tr ' ' '\n' <<< "${1:-}" | grep -E '^[0-9]+$' | sort -u; }
@@ -152,16 +145,12 @@ jobs:
             echo "pg-matrix=$(tr -d '\n\r' <<<"$PG_MATRIX")"
             echo "build-pg-matrix=$(tr -d '\n\r' <<<"$BUILD_PG_MATRIX")"
             echo "has-pg=$(jq 'length > 0' <<<"$MAJ_JSON")"
-            echo "has-op=$HAS_OP"
-            echo "has-bao=$HAS_BAO"
             echo "has-pages=$HAS_PAGES"
           } >> "$GITHUB_OUTPUT"
 
           {
             echo "### Build plan"
             echo "- postgres majors: $(jq -c . <<<"$MAJ_JSON")"
-            echo "- operator: $HAS_OP"
-            echo "- openbao: $HAS_BAO"
             echo "- pages deploy: $HAS_PAGES"
             echo "- full rebuild: $FULL ($EVENT)"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -226,90 +215,6 @@ jobs:
             packages/
             melange.rsa.pub
 
-  melange-operator:
-    needs: [keygen, detect-changes]
-    if: ${{ !cancelled() && needs.keygen.result == 'success' && needs.detect-changes.outputs.has-op == 'true' }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x86_64, aarch64]
-        include:
-          - arch: x86_64
-            runner: ubuntu-latest
-          - arch: aarch64
-            runner: ubuntu-24.04-arm
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref || github.ref }}
-
-      - name: Install melange
-        run: go install chainguard.dev/melange@${{ env.MELANGE_VERSION }}
-
-      - name: Restore signing key
-        run: |
-          echo '${{ needs.keygen.outputs.priv }}' | base64 -d > melange.rsa && chmod 600 melange.rsa
-          echo '${{ needs.keygen.outputs.pub }}' | base64 -d > melange.rsa.pub
-
-      - name: Build cloudnative-pg operator (${{ matrix.arch }})
-        run: |
-          ~/go/bin/melange build images/cloudnative-pg-operator/melange/cloudnative-pg.yaml \
-            --arch ${{ matrix.arch }} \
-            --signing-key melange.rsa \
-            --out-dir ./packages \
-            --runner docker
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: packages-operator-${{ matrix.arch }}
-          path: |
-            packages/
-            melange.rsa.pub
-
-  melange-openbao:
-    needs: [keygen, detect-changes]
-    if: ${{ !cancelled() && needs.keygen.result == 'success' && needs.detect-changes.outputs.has-bao == 'true' }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x86_64, aarch64]
-        include:
-          - arch: x86_64
-            runner: ubuntu-latest
-          - arch: aarch64
-            runner: ubuntu-24.04-arm
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref || github.ref }}
-
-      - name: Install melange
-        run: go install chainguard.dev/melange@${{ env.MELANGE_VERSION }}
-
-      - name: Restore signing key
-        run: |
-          echo '${{ needs.keygen.outputs.priv }}' | base64 -d > melange.rsa && chmod 600 melange.rsa
-          echo '${{ needs.keygen.outputs.pub }}' | base64 -d > melange.rsa.pub
-
-      - name: Build openbao (${{ matrix.arch }})
-        run: |
-          ~/go/bin/melange build images/openbao/melange/openbao.yaml \
-            --arch ${{ matrix.arch }} \
-            --signing-key melange.rsa \
-            --out-dir ./packages \
-            --runner docker
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: packages-openbao-${{ matrix.arch }}
-          path: |
-            packages/
-            melange.rsa.pub
-
   build:
     # Run even if one melange leg failed — its major fails alone instead of
     # blocking the others.
@@ -325,6 +230,7 @@ jobs:
       packages: write
       id-token: write # only for cosign keyless below
     env:
+      IMAGE: ghcr.io/${{ github.repository }}/cnpg-postgres
       PG_MAJOR: ${{ matrix.major }}
       # Registry writes happen only from trusted main-lineage runs; PRs and
       # validate-only dispatches build locally instead (same lesson as minimal:
@@ -462,7 +368,7 @@ jobs:
       # signature can never be pointed at rotated content. Verify with:
       #   cosign verify \
       #     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-      #     --certificate-identity-regexp '^https://github.com/tylerobara/containers/\.github/workflows/cloudnative-pg\.yml@refs/heads/main$' \
+      #     --certificate-identity-regexp '^https://github.com/tylerobara/containers/\.github/workflows/postgres\.yml@refs/heads/main$' \
       #     ghcr.io/tylerobara/containers/cnpg-postgres:<tag>
       - name: Sign with cosign (only when scan has 0 Low+ findings)
         if: env.PUBLISH == 'true' && steps.scan.outputs.lowplus == '0'
@@ -492,10 +398,11 @@ jobs:
             --arg digest "$DIGEST" --arg built "$(date -u +%FT%TZ)" \
             --arg tags "$PG_MAJOR $PG_FULL $PG_MAJOR-wolfi $PG_FULL-wolfi" \
             --arg built_with melange --argjson signed "${SIGNED:-false}" \
+            --arg signed_by postgres.yml \
             --slurpfile scan "scans/cnpg-postgres-$PG_MAJOR.json" \
             '{image: $image, major: $major, version: $version,
               tags: ($tags | split(" ")), digest: $digest, built: $built, built_with: $built_with,
-              signed: $signed,
+              signed: $signed, signed_by: $signed_by,
               scan: $scan[0]}' > "scans/cnpg-postgres-$PG_MAJOR.json.tmp"
           mv "scans/cnpg-postgres-$PG_MAJOR.json.tmp" "scans/cnpg-postgres-$PG_MAJOR.json"
 
@@ -505,295 +412,14 @@ jobs:
           name: pages-data-pg-${{ matrix.major }}
           path: scans/cnpg-postgres-${{ matrix.major }}.json
 
-  build-operator:
-    needs: [keygen, melange-operator, detect-changes]
-    if: ${{ !cancelled() && needs.keygen.result == 'success' && needs.detect-changes.outputs.has-op == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      packages: write
-      id-token: write # only for cosign keyless below
-    env:
-      OP_IMAGE: ghcr.io/${{ github.repository }}/cloudnative-pg
-      PUBLISH: ${{ github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.validate_only != true) }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref || github.ref }}
-
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: packages-operator-*
-          path: .
-          merge-multiple: true
-
-      - name: Resolve pinned version + version guard
-        run: |
-          VER=$(awk '/^  version:/{print $2; exit}' images/cloudnative-pg-operator/melange/cloudnative-pg.yaml)
-          EPOCH=$(awk '/^  epoch:/{print $2; exit}' images/cloudnative-pg-operator/melange/cloudnative-pg.yaml)
-          case "$VER" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "bad version '$VER'"; exit 1 ;; esac
-          echo "OP_VER=$VER" >> "$GITHUB_ENV"
-          echo "OP_MINOR=$(echo "$VER" | cut -d. -f1,2)" >> "$GITHUB_ENV"
-          docker run --rm --user root \
-            -v "$PWD:/work" \
-            cgr.dev/chainguard/apko lock /work/images/cloudnative-pg-operator/apko/operator.yaml \
-              --arch x86_64 --arch aarch64 \
-              --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
-              --output /work/operator.lock.json
-          RESOLVED=$(jq -r '.contents.packages[] | select(.name=="cloudnative-pg") | .version' operator.lock.json | head -1)
-          # exact pkgver match or the melange package lost resolution to Wolfi
-          if [ "$RESOLVED" != "${VER}-r${EPOCH}" ]; then
-            echo "apko resolved cloudnative-pg as '$RESOLVED', expected '${VER}-r${EPOCH}'"; exit 1
-          fi
-
-      - name: Log in to ghcr
-        if: env.PUBLISH == 'true'
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
-
-      - name: Publish multi-arch operator image to ghcr
-        if: env.PUBLISH == 'true'
-        run: |
-          for i in 1 2 3; do
-            if docker run --rm --user root \
-              -v "$PWD:/work:ro" \
-              -v "$HOME/.docker:/root/.docker:ro" \
-              cgr.dev/chainguard/apko publish /work/images/cloudnative-pg-operator/apko/operator.yaml \
-                "$OP_IMAGE:$OP_VER" "$OP_IMAGE:$OP_MINOR" "$OP_IMAGE:latest" \
-                --arch x86_64,aarch64 \
-                --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
-                --lockfile /work/operator.lock.json; then
-              break
-            fi
-            [ "$i" = 3 ] && { echo "apko publish failed after 3 attempts"; exit 1; }
-            echo "publish attempt $i failed; retrying in 15s"; sleep 15
-          done
-          echo "OP_REF=$OP_IMAGE:$OP_VER" >> "$GITHUB_ENV"
-          echo "GRYPE_SRC=registry:$OP_IMAGE:$OP_VER" >> "$GITHUB_ENV"
-
-      - name: Build image locally (validate-only, no registry)
-        if: env.PUBLISH != 'true'
-        run: |
-          docker run --rm --user root \
-            -v "$PWD:/work" \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            cgr.dev/chainguard/apko publish /work/images/cloudnative-pg-operator/apko/operator.yaml \
-              "cnpg-operator:validate" \
-              --arch x86_64 \
-              --local \
-              --repository-append /work/packages --keyring-append /work/melange.rsa.pub
-          echo "OP_REF=cnpg-operator:validate" >> "$GITHUB_ENV"
-          echo "GRYPE_SRC=docker:cnpg-operator:validate" >> "$GITHUB_ENV"
-
-      - name: Smoke test image
-        run: |
-          [ "$PUBLISH" = true ] && docker pull --platform linux/amd64 "$OP_REF"
-          IMAGE="$OP_REF" VERSION="$OP_VER" ./images/cloudnative-pg-operator/test.sh
-
-      - name: Scan image with grype
-        id: scan
-        run: |
-          mkdir -p scans
-          docker run --rm --user 0:0 \
-            -v "$PWD/scans:/out" \
-            -v "$HOME/.docker:/root/.docker:ro" \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            ghcr.io/anchore/grype:latest "$GRYPE_SRC" \
-              --output json --file /out/cloudnative-pg-operator.json || true
-          # Same signing gate as the postgres images: any Low+ finding blocks.
-          LOWPLUS=$(jq '[.matches[] | select(.vulnerability.severity
-                     | IN("Low","Medium","High","Critical"))] | length' scans/cloudnative-pg-operator.json)
-          echo "lowplus=$LOWPLUS" >> "$GITHUB_OUTPUT"
-          echo "operator Low+ findings: $LOWPLUS" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Sign with cosign (only when scan has 0 Low+ findings)
-        if: env.PUBLISH == 'true' && steps.scan.outputs.lowplus == '0'
-        run: |
-          DIGEST=$(docker buildx imagetools inspect "$OP_REF" \
-            --format '{{json .Manifest}}' | jq -r .digest)
-          docker run --rm --user 0:0 \
-            -v "$HOME/.docker:/root/.docker:ro" \
-            -e DOCKER_CONFIG=/root/.docker \
-            -e GITHUB_ACTIONS \
-            -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-            ghcr.io/sigstore/cosign/cosign:latest sign --yes "$OP_REF@$DIGEST"
-          echo "SIGNED=true" >> "$GITHUB_ENV"
-
-      - name: Build pages data
-        if: env.PUBLISH == 'true'
-        run: |
-          DIGEST=$(docker buildx imagetools inspect "$OP_REF" \
-            --format '{{json .Manifest}}' | jq -r .digest)
-          jq -n \
-            --arg image "$OP_IMAGE" --arg version "$OP_VER" \
-            --arg digest "$DIGEST" --arg built "$(date -u +%FT%TZ)" \
-            --arg tags "$OP_VER $OP_MINOR latest" \
-            --arg built_with melange --argjson signed "${SIGNED:-false}" \
-            --slurpfile scan scans/cloudnative-pg-operator.json \
-            '{image: $image, major: null, version: $version,
-              tags: ($tags | split(" ")), digest: $digest, built: $built, built_with: $built_with,
-              signed: $signed,
-              scan: $scan[0]}' > scans/cloudnative-pg-operator.json.tmp
-          mv scans/cloudnative-pg-operator.json.tmp scans/cloudnative-pg-operator.json
-
-      - uses: actions/upload-artifact@v7
-        if: env.PUBLISH == 'true'
-        with:
-          name: pages-data-pg-operator
-          path: scans/cloudnative-pg-operator.json
-
-  build-openbao:
-    needs: [keygen, melange-openbao, detect-changes]
-    if: ${{ !cancelled() && needs.keygen.result == 'success' && needs.detect-changes.outputs.has-bao == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      packages: write
-      id-token: write # only for cosign keyless below
-    env:
-      BAO_IMAGE: ghcr.io/${{ github.repository }}/openbao
-      PUBLISH: ${{ github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.validate_only != true) }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref || github.ref }}
-
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: packages-openbao-*
-          path: .
-          merge-multiple: true
-
-      - name: Resolve pinned version + version guard
-        run: |
-          VER=$(awk '/^  version:/{print $2; exit}' images/openbao/melange/openbao.yaml)
-          EPOCH=$(awk '/^  epoch:/{print $2; exit}' images/openbao/melange/openbao.yaml)
-          case "$VER" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "bad version '$VER'"; exit 1 ;; esac
-          echo "BAO_VER=$VER" >> "$GITHUB_ENV"
-          echo "BAO_MINOR=$(echo "$VER" | cut -d. -f1,2)" >> "$GITHUB_ENV"
-          docker run --rm --user root \
-            -v "$PWD:/work" \
-            cgr.dev/chainguard/apko lock /work/images/openbao/apko/openbao.yaml \
-              --arch x86_64 --arch aarch64 \
-              --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
-              --output /work/openbao.lock.json
-          RESOLVED=$(jq -r '.contents.packages[] | select(.name=="openbao") | .version' openbao.lock.json | head -1)
-          # exact pkgver match or the melange package lost resolution to Wolfi
-          if [ "$RESOLVED" != "${VER}-r${EPOCH}" ]; then
-            echo "apko resolved openbao as '$RESOLVED', expected '${VER}-r${EPOCH}'"; exit 1
-          fi
-
-      - name: Log in to ghcr
-        if: env.PUBLISH == 'true'
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
-
-      - name: Publish multi-arch openbao image to ghcr
-        if: env.PUBLISH == 'true'
-        run: |
-          for i in 1 2 3; do
-            if docker run --rm --user root \
-              -v "$PWD:/work:ro" \
-              -v "$HOME/.docker:/root/.docker:ro" \
-              cgr.dev/chainguard/apko publish /work/images/openbao/apko/openbao.yaml \
-                "$BAO_IMAGE:$BAO_VER" "$BAO_IMAGE:$BAO_MINOR" "$BAO_IMAGE:latest" \
-                --arch x86_64,aarch64 \
-                --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
-                --lockfile /work/openbao.lock.json; then
-              break
-            fi
-            [ "$i" = 3 ] && { echo "apko publish failed after 3 attempts"; exit 1; }
-            echo "publish attempt $i failed; retrying in 15s"; sleep 15
-          done
-          echo "BAO_REF=$BAO_IMAGE:$BAO_VER" >> "$GITHUB_ENV"
-          echo "GRYPE_SRC=registry:$BAO_IMAGE:$BAO_VER" >> "$GITHUB_ENV"
-
-      - name: Build image locally (validate-only, no registry)
-        if: env.PUBLISH != 'true'
-        run: |
-          docker run --rm --user root \
-            -v "$PWD:/work" \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            cgr.dev/chainguard/apko publish /work/images/openbao/apko/openbao.yaml \
-              "openbao:validate" \
-              --arch x86_64 \
-              --local \
-              --repository-append /work/packages --keyring-append /work/melange.rsa.pub
-          echo "BAO_REF=openbao:validate" >> "$GITHUB_ENV"
-          echo "GRYPE_SRC=docker:openbao:validate" >> "$GITHUB_ENV"
-
-      - name: Smoke test image
-        run: |
-          [ "$PUBLISH" = true ] && docker pull --platform linux/amd64 "$BAO_REF"
-          IMAGE="$BAO_REF" VERSION="$BAO_VER" ./images/openbao/test.sh
-
-      - name: Scan image with grype
-        id: scan
-        run: |
-          mkdir -p scans
-          docker run --rm --user 0:0 \
-            -v "$PWD/scans:/out" \
-            -v "$HOME/.docker:/root/.docker:ro" \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            ghcr.io/anchore/grype:latest "$GRYPE_SRC" \
-              --output json --file /out/openbao.json || true
-          # Same signing gate as every other image here: any Low+ finding blocks.
-          LOWPLUS=$(jq '[.matches[] | select(.vulnerability.severity
-                     | IN("Low","Medium","High","Critical"))] | length' scans/openbao.json)
-          echo "lowplus=$LOWPLUS" >> "$GITHUB_OUTPUT"
-          echo "openbao Low+ findings: $LOWPLUS" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Sign with cosign (only when scan has 0 Low+ findings)
-        if: env.PUBLISH == 'true' && steps.scan.outputs.lowplus == '0'
-        run: |
-          DIGEST=$(docker buildx imagetools inspect "$BAO_REF" \
-            --format '{{json .Manifest}}' | jq -r .digest)
-          docker run --rm --user 0:0 \
-            -v "$HOME/.docker:/root/.docker:ro" \
-            -e DOCKER_CONFIG=/root/.docker \
-            -e GITHUB_ACTIONS \
-            -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-            ghcr.io/sigstore/cosign/cosign:latest sign --yes "$BAO_REF@$DIGEST"
-          echo "SIGNED=true" >> "$GITHUB_ENV"
-
-      - name: Build pages data
-        if: env.PUBLISH == 'true'
-        run: |
-          DIGEST=$(docker buildx imagetools inspect "$BAO_REF" \
-            --format '{{json .Manifest}}' | jq -r .digest)
-          jq -n \
-            --arg image "$BAO_IMAGE" --arg version "$BAO_VER" \
-            --arg digest "$DIGEST" --arg built "$(date -u +%FT%TZ)" \
-            --arg tags "$BAO_VER $BAO_MINOR latest" \
-            --arg built_with melange --argjson signed "${SIGNED:-false}" \
-            --slurpfile scan scans/openbao.json \
-            '{image: $image, major: null, version: $version,
-              tags: ($tags | split(" ")), digest: $digest, built: $built, built_with: $built_with,
-              signed: $signed,
-              scan: $scan[0]}' > scans/openbao.json.tmp
-          mv scans/openbao.json.tmp scans/openbao.json
-
-      - uses: actions/upload-artifact@v7
-        if: env.PUBLISH == 'true'
-        with:
-          name: pages-data-openbao
-          path: scans/openbao.json
-
   pages:
     # Deploy when this run produced scans and at least one of its builders got
     # far enough. Partial builds are fine: entries for images that did NOT
-    # rebuild are preserved from the live index.json (bump PRs land per image),
-    # keyed on image+major with fresh entries winning.
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.detect-changes.outputs.has-pages == 'true' || needs.detect-changes.outputs.has-pg == 'true' || needs.detect-changes.outputs.has-op == 'true' || needs.detect-changes.outputs.has-bao == 'true') }}
-    needs: [detect-changes, build, build-operator, build-openbao]
+    # rebuild are preserved from the live index.json (each image family has
+    # its own workflow now; bump PRs land per image), keyed on image+major
+    # with fresh entries winning.
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.detect-changes.outputs.has-pages == 'true' || needs.detect-changes.outputs.has-pg == 'true') }}
+    needs: [detect-changes, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write # push the generated gh-pages branch
@@ -803,9 +429,9 @@ jobs:
           ref: ${{ inputs.ref || github.ref }}
 
       - uses: actions/download-artifact@v8
-        if: needs.detect-changes.outputs.has-pg == 'true' || needs.detect-changes.outputs.has-op == 'true' || needs.detect-changes.outputs.has-bao == 'true'
+        if: needs.detect-changes.outputs.has-pg == 'true'
         with:
-          pattern: pages-data-*
+          pattern: pages-data-pg-*
           path: data
           merge-multiple: true
 

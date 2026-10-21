@@ -4,8 +4,9 @@ name: update-versions
 # this repo's image families. Checks upstream (PGDG ftp for each tracked
 # postgresql-<major>.yaml, GitHub releases for the operator and openbao) and
 # opens a PR bumping `version` + `vars.sha256` in the melange config. Nothing
-# is merged or published here: review the PR, validate it with
-# cloudnative-pg.yml workflow_dispatch (ref = PR branch, validate_only = true),
+# is merged or published here: review the PR, validate it with that image's
+# own workflow (postgres / cloudnative-pg-operator / openbao) via
+# workflow_dispatch (ref = PR branch, validate_only = true),
 # then merge — the merge push rebuilds and publishes just that image.
 #
 # GITHUB_TOKEN-authored PRs don't auto-run checks (GitHub's anti-recursion
@@ -46,8 +47,8 @@ jobs:
             echo ",${ONLY// /}," | grep -qi ",$1,"
           }
 
-          bump_row() { # bump_row <name> <yaml-path> <latest> <tarball-url>
-            local name=$1 yaml=$2 latest=$3 url=$4
+          bump_row() { # bump_row <name> <yaml-path> <latest> <tarball-url> <validating-workflow>
+            local name=$1 yaml=$2 latest=$3 url=$4 wf=$5
             local cur branch sha
             cur=$(awk '/^  version:/{print $2; exit}' "$yaml")
             # only ever move forward (guards against ftp page noise)
@@ -90,7 +91,7 @@ jobs:
           - upstream tarball hashed into the config: <$url>
           - \`sha256\`: \`$sha\`
 
-          Bot PRs don't get automatic CI checks. To validate before merging, run **cloudnative-pg.yml → Run workflow** with \`ref=$branch\` and **validate_only** checked: it builds, assembles and grype-scans this branch without publishing or signing anything. The merge push to main then publishes only this image."
+          Bot PRs don't get automatic CI checks. To validate before merging, run **$wf.yml → Run workflow** with \`ref=$branch\` and **validate_only** checked: it builds, assembles and grype-scans this branch without publishing or signing anything. The merge push to main then publishes only this image."
             fi
             echo "$name: opened/updated bump PR $cur -> $latest" >> "$GITHUB_STEP_SUMMARY"
             # back to the pristine baseline for the next row
@@ -109,7 +110,8 @@ jobs:
               continue
             fi
             bump_row "postgresql-$major" "$yaml" "$latest" \
-              "https://ftp.postgresql.org/pub/source/v${latest}/postgresql-${latest}.tar.bz2"
+              "https://ftp.postgresql.org/pub/source/v${latest}/postgresql-${latest}.tar.bz2" \
+              postgres
           done
 
           # --- operator: latest GitHub release ---
@@ -121,7 +123,8 @@ jobs:
               FAILED=1
             fi
             bump_row operator "$yaml" "$latest" \
-              "https://github.com/cloudnative-pg/cloudnative-pg/archive/refs/tags/v${latest}.tar.gz"
+              "https://github.com/cloudnative-pg/cloudnative-pg/archive/refs/tags/v${latest}.tar.gz" \
+              cloudnative-pg-operator
           fi
 
           # --- openbao: latest GitHub release ---
@@ -133,7 +136,8 @@ jobs:
               FAILED=1
             fi
             bump_row openbao "$yaml" "$latest" \
-              "https://github.com/openbao/openbao/archive/refs/tags/v${latest}.tar.gz"
+              "https://github.com/openbao/openbao/archive/refs/tags/v${latest}.tar.gz" \
+              openbao
           fi
 
           exit $FAILED
