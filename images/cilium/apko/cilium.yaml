@@ -1,0 +1,68 @@
+# Cilium agent image, assembled by apko (no Dockerfile). The agent tree is
+# built from upstream source by melange (../melange/cilium.yaml), cilium-envoy
+# is the upstream-published static binary (../melange/cilium-envoy.yaml);
+# everything else is Wolfi packages.
+#
+# Reference: images/{cilium,runtime}/Dockerfile at cilium v1.20.3 — an
+# ubuntu 26.04 rootfs with jq + install-runtime-deps.sh (bash-completion,
+# iproute2, iptables, ipset, kmod, ca-certificates, libatomic1), their own
+# iptables 1.8.8 debs + the kubernetes-sigs iptables-wrapper, clang/llc from
+# the cilium-llvm image, bpftool from cilium-bpftool, gops, and the CNI +
+# agent binaries. Differences here, on purpose:
+#   - Wolfi busybox+glibc base instead of ubuntu: same tools from Wolfi
+#     (iproute2, iptables/ipset/nftables, kmod, jq, clang, bpftool,
+#     gops at upstream's 0.3.29), none of ubuntu's apt machinery
+#   - no iptables-wrapper: Wolfi iptables is nft-only, so the wrapper's
+#     legacy/nft autodetect has nothing to choose between
+#   - no bash-completion / LICENSE.all debug niceties
+#   - the agent embeds cilium-envoy like upstream does (proxies per-node
+#     L7 policy); the standalone envoy image is a separate apko config
+# Runs root + privileged like upstream (CNI agent: host namespaces, BPF).
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    # Runtime dependencies mirroring images/runtime/install-runtime-deps.sh.
+    # bash: the chart's init/poststart hooks exec /bin/bash scripts; busybox
+    # covers the sh applets (mount, sleep, ...) the agent shells out to.
+    - busybox
+    - bash
+    - iproute2
+    - iptables
+    - ipset
+    - kmod
+    - jq
+    - util-linux
+    - ca-certificates
+    # the bundled cilium-envoy is linked against glibc (libc/libm;
+    # libatomic ships inside the cilium-envoy package)
+    - glibc
+    # Runtime BPF compilation (socket-LB, etc.): clang + bpftool. Upstream
+    # ships llc too but nothing in cilium 1.20.3 execs it (clang -target
+    # bpf covers everything). clang-23 hard-depends on llvm-23 + gcc +
+    # glibc-dev, which dominates image size (~3.3GB uncompressed vs
+    # upstream's 986MB); trimming that chain needs a slim clang package
+    # upstream Wolfi does not have.
+    - clang
+    - bpftool
+    # Debug REPL for the agent/operator (same 0.3.29 as build-gops.sh).
+    - gops
+    # Built by melange; supplied via --repository-append at build time.
+    - cilium
+    - cilium-envoy
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+  # Upstream image ENVs (hubble CLI default socket; INITSYSTEM is inert here
+  # but chart logic and docs grep for it).
+  HUBBLE_SERVER: unix:///var/run/cilium/hubble.sock
+  INITSYSTEM: SYSTEMD
+
+entrypoint:
+  command: /usr/bin/cilium-dbg
+# Upstream CMD is cilium-dbg too; the helm daemonset overrides command with
+# `cilium-agent --config-dir=/tmp/cilium/config-map`, so this only shapes
+# bare `docker run` behavior.

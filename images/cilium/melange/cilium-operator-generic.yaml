@@ -1,0 +1,75 @@
+# Melange build for the cilium operator image (github.com/cilium/cilium),
+# same source build as the agent config but the generic-IPAM operator
+# variant, exactly as images/operator/Dockerfile builds it:
+#   make GOARCH=<arch> DESTDIR=<dir> NOSTRIP=1 \
+#     build-container-operator-generic install-container-binary-operator-generic
+# Upstream puts it on a scratch base with ca-certs + gops; here that is the
+# apko config (busybox + ca-certificates + Wolfi's gops, same 0.3.29 as
+# upstream's build-gops.sh). The /home/gops scratch dir upstream chmods to
+# 777 in the image ships with the package (melange cannot chown dirs).
+#
+# Bump `version` + `vars.sha256` on each release (in lockstep with
+# cilium.yaml) — the update-versions bot covers this row.
+
+package:
+  name: cilium-operator-generic
+  version: 1.20.3
+  epoch: 100
+  description: "Cilium operator (generic IPAM variant), built from upstream source"
+  copyright:
+    - license: Apache-2.0
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the GitHub release tarball (same tarball as cilium.yaml)
+  sha256: 5ebbd251ed8890d809aee3a6dcaec4cb15cc00bd8e9e8c0be379d220e44aa743
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      - make
+      # The top-level Makefile needs bash (Makefile.quiet recipe) and GNU
+      # coreutils, same as the agent build.
+      - coreutils
+      - bash
+      # go.mod wants go 1.26.0; Wolfi go-1.26 is 1.26.10.
+      - go-1.26
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/cilium/cilium/archive/refs/tags/v${{package.version}}.tar.gz" \
+        -o /home/build/cilium.tar.gz
+      echo "${{vars.sha256}}  /home/build/cilium.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf cilium.tar.gz && rm cilium.tar.gz
+
+  - working-directory: /home/build/cilium-${{package.version}}
+    runs: |
+      export GOTOOLCHAIN=local
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      case "$(uname -m)" in
+        x86_64)  GOARCH=amd64 ;;
+        aarch64) GOARCH=arm64 ;;
+        *) echo "unsupported arch $(uname -m)"; exit 1 ;;
+      esac
+      make GOARCH="$GOARCH" DESTDIR="${{targets.destdir}}" PKG_BUILD=1 NOSTRIP=1 \
+        build-container-operator-generic install-container-binary-operator-generic
+
+      # Upstream's image does `COPY --chmod=777 / /home/gops` for gops'
+      # config drop-ins under the chart's GOPS_CONFIG_DIR=/home/gops.
+      mkdir -p "${{targets.destdir}}/home/gops"
+      chmod 777 "${{targets.destdir}}/home/gops"
+
+  - runs: |
+      "${{targets.destdir}}/usr/bin/cilium-operator-generic" \
+        --version | grep -q "${{package.version}}"

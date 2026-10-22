@@ -1,0 +1,32 @@
+# Cilium operator image (generic IPAM variant), assembled by apko (no
+# Dockerfile). The binary is built from upstream source by melange
+# (../melange/cilium-operator-generic.yaml); everything else is Wolfi.
+#
+# Reference: images/operator/Dockerfile at cilium v1.20.3 — FROM scratch +
+# ca-certificates + gops + a 777-mode /home/gops under GOPS_CONFIG_DIR.
+# Ours is busybox-on-Wolfi instead of true scratch (repo convention: one
+# debug shell in every prod image); /home/gops ships with the melange
+# package. No run-as: like upstream the operator runs as root, and the helm
+# deployment sets its own securityContext anyway.
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    - busybox
+    - ca-certificates
+    - gops
+    # Built by melange; supplied via --repository-append at build time.
+    - cilium-operator-generic
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+  GOPS_CONFIG_DIR: /home/gops
+
+entrypoint:
+  command: /usr/bin/cilium-operator-generic
+# Upstream has no CMD (scratch image); the helm deployment always passes
+# `cilium-operator-generic --config-dir=...`, so this just makes bare
+# `docker run` print usage/version instead of an exec error.

@@ -3,7 +3,8 @@ name: update-versions
 # Version bump bot — the minimal repo's update-versions.yml pattern scaled to
 # this repo's image families. Checks upstream (PGDG ftp for each tracked
 # postgresql-<major>.yaml, GitHub releases for the operator, openbao,
-# dokuwiki and grafana-image-renderer) and
+# dokuwiki, grafana-image-renderer and cilium; cilium-envoy follows cilium's
+# own images/cilium/Dockerfile pin and gets its payload shas re-extracted) and
 # opens a PR bumping `version` + `vars.sha256` in the melange config. Nothing
 # is merged or published here: review the PR, validate it with that image's
 # own workflow (postgres / cloudnative-pg-operator / openbao / dokuwiki /
@@ -21,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       only:
-        description: "Comma-separated rows to check, e.g. postgresql-16,operator,openbao,dokuwiki (blank = all)"
+        description: "Comma-separated rows to check, e.g. postgresql-16,operator,openbao,cilium,cilium-envoy (blank = all)"
         required: false
         default: ""
 
@@ -168,6 +169,122 @@ jobs:
             bump_row grafana-image-renderer "$yaml" "$latest" \
               "https://github.com/grafana/grafana-image-renderer/archive/refs/tags/v${latest}.tar.gz" \
               grafana-image-renderer
+          fi
+
+          # --- cilium: latest GitHub release (agent + operator share one tarball) ---
+          if want cilium; then
+            latest=$(gh api repos/cilium/cilium/releases/latest --jq '.tag_name | ltrimstr("v")')
+            if [ -z "$latest" ]; then
+              echo "::error::cilium: no release found upstream"
+              FAILED=1
+            else
+              url="https://github.com/cilium/cilium/archive/refs/tags/v${latest}.tar.gz"
+              bump_row cilium images/cilium/melange/cilium.yaml "$latest" "$url" cilium
+              bump_row cilium-operator-generic images/cilium/melange/cilium-operator-generic.yaml "$latest" "$url" cilium
+            fi
+          fi
+
+          # --- cilium-envoy: follows the ARG CILIUM_ENVOY_IMAGE= pin inside
+          # cilium's own images/cilium/Dockerfile at the latest release tag
+          # (no GitHub releases on cilium/proxy). The pin is digest-pinned, so
+          # the bot re-extracts the per-arch payload shas the same way the
+          # melange build does — quay registry API + tar, no docker needed. ---
+          if want cilium-envoy; then
+            yaml=images/cilium/melange/cilium-envoy.yaml
+            ct=$(gh api repos/cilium/cilium/releases/latest --jq '.tag_name')
+            line=$(gh api "repos/cilium/cilium/contents/images/cilium/Dockerfile?ref=${ct}" --jq .content \
+              | base64 -d | grep -m1 '^ARG CILIUM_ENVOY_IMAGE=')
+            ref=${line#*=}
+            etag=${ref#*:}; etag=${etag%@*}            # v<maj>.<min>.<pat>-<ts>-<proxy sha>
+            edigest=${ref##*@sha256:}
+            ever=${etag#v}; ever=${ever%%-*}
+            cur=$(awk '/^  version:/{print $2; exit}' "$yaml")
+            curd=$(awk '/^  digest: /{print $2; exit}' "$yaml")
+            if { [ "$cur" = "$ever" ] && [ "$curd" = "$edigest" ]; } \
+               || { [ "$cur" != "$ever" ] && [ "$(printf '%s\n%s\n' "$cur" "$ever" | sort -V | tail -1)" != "$ever" ]; }; then
+              echo "cilium-envoy: already at or ahead of $ever, skip"
+            else
+              idx=$(mktemp -d)
+              tok=$(curl -fsSL "https://quay.io/v2/auth?service=quay.io&scope=repository:cilium/cilium-envoy:pull" | jq -r .token)
+              ok=1
+              curl -fsSL -H "Authorization: Bearer $tok" \
+                -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+                -o "$idx/index.json" "https://quay.io/v2/cilium/cilium-envoy/manifests/sha256:${edigest}" || ok=0
+              echo "${edigest}  $idx/index.json" | sha256sum -c - >/dev/null || ok=0
+              if [ "$ok" = 0 ]; then
+                echo "::error::cilium-envoy: pinned digest does not resolve"
+                FAILED=1
+              fi
+              if [ "$ok" = 1 ]; then
+              for a in amd64 arm64; do
+                case $a in amd64) ma=x86_64-linux-gnu ;; arm64) ma=aarch64-linux-gnu ;; esac
+                md=$(jq -r --arg a "$a" '.manifests[] | select(.platform.architecture==$a) | .digest' "$idx/index.json")
+                curl -fsSL -H "Authorization: Bearer $tok" \
+                  -H 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+                  -o "$idx/$a.json" "https://quay.io/v2/cilium/cilium-envoy/manifests/$md"
+                mkdir -p "$idx/$a"
+                for d in $(jq -r '.layers[].digest' "$idx/$a.json"); do
+                  curl -fsSL -H "Authorization: Bearer $tok" -o "$idx/l.tar" "https://quay.io/v2/cilium/cilium-envoy/blobs/$d"
+                  tar xf "$idx/l.tar" -C "$idx/$a" \
+                    usr/bin/cilium-envoy usr/bin/cilium-envoy-starter "usr/lib/$ma/libatomic.so.1.2.0" 2>/dev/null || true
+                done
+                for f in usr/bin/cilium-envoy usr/bin/cilium-envoy-starter "usr/lib/$ma/libatomic.so.1.2.0"; do
+                  [ -f "$idx/$a/$f" ] || { echo "::error::cilium-envoy $a: upstream image lacks $f"; FAILED=1; }
+                done
+                e=$(sha256sum "$idx/$a/usr/bin/cilium-envoy" | awk '{print $1}')
+                s=$(sha256sum "$idx/$a/usr/bin/cilium-envoy-starter" | awk '{print $1}')
+                l=$(sha256sum "$idx/$a/usr/lib/$ma/libatomic.so.1.2.0" | awk '{print $1}')
+                case $a in
+                  amd64) SE_A=$e SS_A=$s SL_A=$l ;;
+                  arm64) SE_B=$e SS_B=$s SL_B=$l ;;
+                esac
+              done
+              fi
+              rm -rf "$idx"
+              if [ "$FAILED" = 1 ]; then
+                echo "::error::cilium-envoy: extraction failed, no PR opened"
+              else
+                sed -i "0,/^  version: /s/^  version: .*/  version: $ever/" "$yaml"
+                sed -i "s/^  upstream_tag: .*/  upstream_tag: $etag/" "$yaml"
+                sed -i "s/^  digest: .*/  digest: $edigest/" "$yaml"
+                sed -i "s/^  sha256_amd64: .*/  sha256_amd64: $SE_A/" "$yaml"
+                sed -i "s/^  sha256_starter_amd64: .*/  sha256_starter_amd64: $SS_A/" "$yaml"
+                sed -i "s/^  sha256_libatomic_amd64: .*/  sha256_libatomic_amd64: $SL_A/" "$yaml"
+                sed -i "s/^  sha256_arm64: .*/  sha256_arm64: $SE_B/" "$yaml"
+                sed -i "s/^  sha256_starter_arm64: .*/  sha256_starter_arm64: $SS_B/" "$yaml"
+                sed -i "s/^  sha256_libatomic_arm64: .*/  sha256_libatomic_arm64: $SL_B/" "$yaml"
+                # round-trip guard: every edit must land exactly
+                ok=1
+                chk() { [ "$(awk -v k="$1" '$1==k{print $2; exit}' "$yaml")" = "$2" ] || ok=0; }
+                chk "version:" "$ever"; chk "upstream_tag:" "$etag"; chk "digest:" "$edigest"
+                chk "sha256_amd64:" "$SE_A"; chk "sha256_starter_amd64:" "$SS_A"; chk "sha256_libatomic_amd64:" "$SL_A"
+                chk "sha256_arm64:" "$SE_B"; chk "sha256_starter_arm64:" "$SS_B"; chk "sha256_libatomic_arm64:" "$SL_B"
+                if [ "$ok" != 1 ]; then
+                  echo "::error::cilium-envoy: yaml edit did not land as expected"
+                  FAILED=1; git checkout -- "$yaml"
+                else
+                  branch="bump/cilium-envoy-$ever"
+                  git switch -c "$branch"
+                  git add "$yaml"
+                  git commit -m "chore(cilium-envoy): bump $cur -> $ever (pin ${etag})"
+                  git push -f origin "$branch"
+                  if [ -n "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+                    echo "cilium-envoy: pushed update to existing PR for $branch"
+                  else
+                    gh pr create --head "$branch" --base main \
+                      --title "chore(cilium-envoy): bump $cur -> $ever (pin ${etag})" \
+                      --body "**cilium-envoy** \`$cur\` -> \`$ever\` per cilium ${ct}'s ARG CILIUM_ENVOY_IMAGE= pin (detected by the update-versions bot).
+
+          - melange config: \`$yaml\` (\`version\`, \`vars.upstream_tag\`, \`vars.digest\` + all six per-arch \`vars.sha256_*\` re-extracted from the digest-pinned image; \`epoch: 100\` untouched)
+          - upstream reference: \`quay.io/cilium/cilium-envoy:${etag}@sha256:${edigest}\`
+
+          Bot PRs don't get automatic CI checks. To validate before merging, run **cilium.yml → Run workflow** with \`ref=$branch\` and **validate_only** checked. The merge push to main then publishes just the cilium-envoy image."
+                  fi
+                  echo "cilium-envoy: opened/updated bump PR $cur -> $ever" >> "$GITHUB_STEP_SUMMARY"
+                  git switch -C scratch-"$branch" origin/main >/dev/null 2>&1
+                fi
+              fi
+            fi
           fi
 
           exit $FAILED

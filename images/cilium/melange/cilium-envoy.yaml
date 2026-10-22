@@ -1,0 +1,122 @@
+# Melange build for the cilium-envoy image (the Envoy proxy Cilium builds
+# at github.com/cilium/proxy). Building Envoy means a multi-hour bazel+clang
+# superbuild, so this package extracts the two static binaries from the
+# upstream published image instead — the same tier as the cloudnative-pg
+# operator reusing upstream release binaries. Trust comes from the digest
+# pin below (immutable content addressing), which is exactly the reference
+# cilium v1.20.3 pins in images/cilium/Dockerfile, plus per-arch sha256 of
+# the extracted binaries, and a --version smoke check.
+#
+# The update-versions bot reads the new ARG CILIUM_ENVOY_IMAGE= line from
+# cilium's images/cilium/Dockerfile at the latest release and bumps version,
+# upstream_tag and digest here; regenerate the sha256_* values when bumping
+# (docker pull + docker cp + sha256sum of /usr/bin/cilium-envoy{,-starter}).
+#
+# Upstream tag format: <envoy version>-<build unix ts>-<proxy git sha>.
+
+package:
+  name: cilium-envoy
+  version: 1.38.6
+  epoch: 100
+  description: "Cilium Envoy proxy (extracted from the upstream published image)"
+  copyright:
+    - license: Apache-2.0
+  dependencies:
+    provider-priority: 100
+    runtime:
+      - glibc   # envoy is linked against glibc (libc/libm/ld-linux)
+
+vars:
+  upstream_tag: v1.38.6-1791537840-00e749f11f69334c625e53fc1ce2fc6c7f34a51f
+  # Multi-arch index digest of the quay.io/cilium/cilium-envoy image above.
+  digest: d6c8c0c91954d1885026d82a31b341f37dcd34a4b127fdaf1587e43ddd224cef
+  # sha256 of the extracted /usr/bin/cilium-envoy, -starter, and the gcc
+  # libatomic the binary links against (no Wolfi package ships it; upstream
+  #'s ubuntu base carries it — libatomic1 in install-runtime-deps.sh) per arch.
+  sha256_amd64: 55a280cbf648d065fd88800d8e3bf06b00a8e9cd1b7939f582f9d78304bc16fc
+  sha256_starter_amd64: ebf97e60a561d2355c2b6c60e58711d9d879941ad934bdcd11c3a1a59c1f2244
+  sha256_libatomic_amd64: 9d8a34468e614a71a6427dbabb0ac24eb8cb1e324dc6aa3bf95eb6f59201f000
+  sha256_arm64: 19b188ecb3ab649324fd6d4c93035b3a5efabbb84caa73ad48a78830b9b6d59b
+  sha256_starter_arm64: 1e0baa446c1cdfba5e2c69fdd7e2efad67bb6b8258509f16c76045efc22ea3c6
+  sha256_libatomic_arm64: 2896f2608b49113496e6872c77cb591f51f4e646fec01e59f517a971199979fe
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      - jq
+      # envoy is glibc-dynamic (libc/libm/ld-linux + the extracted libatomic
+      # below); this provides the loader for the --version smoke check.
+      - glibc
+
+pipeline:
+  - runs: |
+      # Pull the digest-pinned image straight from quay's registry API
+      # (anonymous pull token -> index -> per-arch manifest -> gzip layers)
+      # and extract only /usr/bin/cilium-envoy{,-starter} from the layers.
+      set -e
+      case "$(uname -m)" in
+        x86_64)  ARCH=amd64; MULTIARCH=x86_64-linux-gnu ;;
+        aarch64) ARCH=arm64; MULTIARCH=aarch64-linux-gnu ;;
+        *) echo "unsupported arch $(uname -m)"; exit 1 ;;
+      esac
+      cd /home/build
+      TOK=$(curl -sf --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://quay.io/v2/auth?service=quay.io&scope=repository:cilium/cilium-envoy:pull" \
+        | jq -r .token)
+      curl -sf --retry 8 --retry-delay 15 --retry-all-errors -H "Authorization: Bearer $TOK" \
+        -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json" \
+        -o index.json "https://quay.io/v2/cilium/cilium-envoy/manifests/sha256:${{vars.digest}}"
+      # registry must return exactly the bytes this digest names
+      echo "${{vars.digest}}  index.json" | sha256sum -c -
+      MD=$(jq -r --arg a "$ARCH" \
+        '.manifests[] | select(.platform.architecture==$a) | .digest' index.json)
+      case "$MD" in sha256:*) ;; *) echo "no $ARCH manifest in the pinned index"; exit 1 ;; esac
+      curl -sf --retry 8 --retry-delay 15 --retry-all-errors -H "Authorization: Bearer $TOK" \
+        -H "Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
+        -o manifest.json "https://quay.io/v2/cilium/cilium-envoy/manifests/$MD"
+      for d in $(jq -r '.layers[].digest' manifest.json); do
+        curl -sfL --retry 8 --retry-delay 15 --retry-all-errors \
+          -H "Authorization: Bearer $TOK" \
+          -o layer.tar "https://quay.io/v2/cilium/cilium-envoy/blobs/$d"
+        # content-addressed: every layer blob must hash to its name
+        echo "${d#sha256:}  layer.tar" | sha256sum -c -
+        tar xf layer.tar \
+          usr/bin/cilium-envoy usr/bin/cilium-envoy-starter \
+          "usr/lib/$MULTIARCH/libatomic.so.1.2.0" 2>/dev/null || true
+        rm layer.tar
+      done
+      # Extracted payloads must be exactly what was reviewed for this pin.
+      case "$ARCH" in
+        amd64) SHA_E=${{vars.sha256_amd64}}; SHA_S=${{vars.sha256_starter_amd64}}; SHA_L=${{vars.sha256_libatomic_amd64}} ;;
+        arm64) SHA_E=${{vars.sha256_arm64}}; SHA_S=${{vars.sha256_starter_arm64}}; SHA_L=${{vars.sha256_libatomic_arm64}} ;;
+      esac
+      echo "$SHA_E  usr/bin/cilium-envoy" | sha256sum -c -
+      echo "$SHA_S  usr/bin/cilium-envoy-starter" | sha256sum -c -
+      echo "$SHA_L  usr/lib/$MULTIARCH/libatomic.so.1.2.0" | sha256sum -c -
+      install -Dm755 usr/bin/cilium-envoy "${{targets.destdir}}/usr/bin/cilium-envoy"
+      install -Dm755 usr/bin/cilium-envoy-starter "${{targets.destdir}}/usr/bin/cilium-envoy-starter"
+      # Ship the linked libatomic at the standard apk libdir (the deb's
+      # multiarch path is not on the default loader search path) + the
+      # SONAME symlink the binary's DT_NEEDED names.
+      install -Dm755 "usr/lib/$MULTIARCH/libatomic.so.1.2.0" \
+        "${{targets.destdir}}/usr/lib/libatomic.so.1.2.0"
+      ln -sf libatomic.so.1.2.0 "${{targets.destdir}}/usr/lib/libatomic.so.1"
+
+  - runs: |
+      # --version prints <proxy git sha>/<envoy version>/Distribution/RELEASE/
+      # BoringSSL — both stamps must match the upstream_tag pin. The binary
+      # is glibc-dynamic (libc/libm + our shipped libatomic), so the check
+      # runs with the package libdir on the loader path (apko pulls Wolfi's
+      # glibc into the images for the real thing).
+      UT='${{vars.upstream_tag}}'
+      SHA="${UT##*-}"                      # trailing proxy git sha
+      VER="${UT#v}"; VER="${VER%%-*}"      # leading envoy version
+      LD_LIBRARY_PATH="${{targets.destdir}}/usr/lib" \
+        "${{targets.destdir}}/usr/bin/cilium-envoy" --version | grep -q "$SHA/$VER/"

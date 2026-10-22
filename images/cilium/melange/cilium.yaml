@@ -1,0 +1,131 @@
+# Melange build for the cilium agent image (github.com/cilium/cilium).
+# Builds the cilium-agent container payload from the release tarball with
+# upstream's own contract, exactly as images/cilium/Dockerfile does inside
+# the cilium-builder image:
+#   make GOARCH=<arch> DESTDIR=<dir> PKG_BUILD=1 NOSTRIP=1 \
+#     build-container install-container-binary
+# That installs the daemon + CLIs (cilium-agent, cilium-dbg/cilium,
+# cilium-health, bugtool, hubble, cilium-mount, cilium-sysctlfix,
+# cilium-envoy-bootstrap-locality), the CNI plugin (/opt/cni/bin/cilium-cni)
+# and the BPF datapath tree (/var/lib/cilium/bpf) — pure Go (CGO_ENABLED=0
+# default), vendor/ in the tarball, VERSION file (no git needed).
+#
+# The runtime pieces upstream copies from its ubuntu rootfs (clang, llc,
+# bpftool, iptables, iproute2, ipset, kmod, jq, bash) are Wolfi packages in
+# the apko config instead of copies from distro images. The /cni/loopback
+# plugin and the three install scripts mirror images/runtime/build-cni.sh
+# and images/cilium/Dockerfile. gops comes from Wolfi (same 0.3.29 upstream
+# vendors). cilium-envoy ships as its own package (see cilium-envoy.yaml).
+#
+# Bump `version` + `vars.sha256` (+ `vars.cni_sha256` when the pinned CNI
+# release changes) on each release — the update-versions bot covers this row.
+
+package:
+  name: cilium
+  version: 1.20.3
+  epoch: 100
+  description: "Cilium CNI (cilium-agent + tooling), built from upstream source"
+  copyright:
+    - license: Apache-2.0
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the GitHub release tarball
+  sha256: 5ebbd251ed8890d809aee3a6dcaec4cb15cc00bd8e9e8c0be379d220e44aa743
+  # images/runtime/build-cni.sh pins containernetworking/plugins v1.9.1
+  cni_version: "1.9.1"
+  cni_sha256: 34bd82d47e981940751619c9cc44c095bb90bfcaf8d71865cbb822c37690a764
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      - make
+      # cilium-dbg/Makefile's install uses `ln -frs` (relative symlink),
+      # which busybox ln lacks; GNU coreutils ln under /usr/bin wins PATH.
+      - coreutils
+      - bash
+      # go.mod wants go 1.26.0; Wolfi go-1.26 is 1.26.10.
+      - go-1.26
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/cilium/cilium/archive/refs/tags/v${{package.version}}.tar.gz" \
+        -o /home/build/cilium.tar.gz
+      echo "${{vars.sha256}}  /home/build/cilium.tar.gz" | sha256sum -c -
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/containernetworking/plugins/archive/refs/tags/v${{vars.cni_version}}.tar.gz" \
+        -o /home/build/cni.tar.gz
+      echo "${{vars.cni_sha256}}  /home/build/cni.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf cilium.tar.gz && rm cilium.tar.gz
+      tar xf cni.tar.gz && rm cni.tar.gz
+
+  - working-directory: /home/build/cilium-${{package.version}}
+    runs: |
+      export GOTOOLCHAIN=local
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      # melange builds one arch per runner, so GOARCH is the native arch
+      # (upstream passes TARGETARCH from BuildKit).
+      case "$(uname -m)" in
+        x86_64)  GOARCH=amd64 ;;
+        aarch64) GOARCH=arm64 ;;
+        *) echo "unsupported arch $(uname -m)"; exit 1 ;;
+      esac
+      make GOARCH="$GOARCH" DESTDIR="${{targets.destdir}}" PKG_BUILD=1 NOSTRIP=1 \
+        build-container install-container-binary
+
+  - working-directory: /home/build/plugins-${{vars.cni_version}}
+    runs: |
+      # Same command as images/runtime/build-cni.sh (the loopback CNI plugin
+      # the agent's install-plugin.sh copies to the host); no vendor/ here,
+      # so modules resolve from the network.
+      export CGO_ENABLED=0 GOTOOLCHAIN=local
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      case "$(uname -m)" in
+        x86_64)  GOARCH=amd64 ;;
+        aarch64) GOARCH=arm64 ;;
+      esac
+      go build -buildvcs=false \
+        -ldflags "-s -w -X github.com/containernetworking/plugins/pkg/utils/buildversion.BuildVersion=v${{vars.cni_version}}" \
+        -o "${{targets.destdir}}/cni/loopback" ./plugins/main/loopback
+      go version -m "${{targets.destdir}}/cni/loopback" | grep -q "GOARCH=$GOARCH"
+
+  - runs: |
+      # The three scripts the helm chart's init containers exec by absolute
+      # path, at the same locations upstream's images/cilium/Dockerfile puts
+      # them (filesystem root).
+      s=/home/build/cilium-${{package.version}}
+      D="${{targets.destdir}}"
+      install -m755 "$s/images/cilium/init-container.sh" "$D/init-container.sh"
+      install -m755 "$s/plugins/cilium-cni/install-plugin.sh" "$D/install-plugin.sh"
+      install -m755 "$s/plugins/cilium-cni/cni-uninstall.sh" "$D/cni-uninstall.sh"
+
+  - runs: |
+      # Verify the build actually produced this version + the full install
+      # tree the helm chart's daemonset expects.
+      D="${{targets.destdir}}"
+      "$D/usr/bin/cilium-agent" --version | grep -q "${{package.version}}"
+      # cilium-cni prints its banner on stderr
+      "$D/opt/cni/bin/cilium-cni" --version 2>&1 | grep -q "${{package.version}}"
+      for b in cilium-dbg cilium cilium-bugtool cilium-agent cilium-health \
+               cilium-health-responder cilium-mount cilium-sysctlfix \
+               cilium-envoy-bootstrap-locality hubble; do
+        test -x "$D/usr/bin/$b" || { echo "missing /usr/bin/$b"; exit 1; }
+      done
+      test -x "$D/opt/cni/bin/cilium-cni"
+      test -x "$D/cni/loopback"
+      test -f "$D/var/lib/cilium/bpf/bpf_lxc.c"
+      for s in init-container.sh install-plugin.sh cni-uninstall.sh; do
+        test -f "$D/$s" || { echo "missing /$s"; exit 1; }
+        sh -n "$D/$s"
+      done
