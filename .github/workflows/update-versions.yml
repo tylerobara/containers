@@ -2,10 +2,11 @@ name: update-versions
 
 # Version bump bot — the minimal repo's update-versions.yml pattern scaled to
 # this repo's image families. Checks upstream (PGDG ftp for each tracked
-# postgresql-<major>.yaml, GitHub releases for the operator and openbao) and
+# postgresql-<major>.yaml, GitHub releases for the operator, openbao and
+# dokuwiki) and
 # opens a PR bumping `version` + `vars.sha256` in the melange config. Nothing
 # is merged or published here: review the PR, validate it with that image's
-# own workflow (postgres / cloudnative-pg-operator / openbao) via
+# own workflow (postgres / cloudnative-pg-operator / openbao / dokuwiki) via
 # workflow_dispatch (ref = PR branch, validate_only = true),
 # then merge — the merge push rebuilds and publishes just that image.
 #
@@ -19,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       only:
-        description: "Comma-separated rows to check, e.g. postgresql-16,operator,openbao (blank = all)"
+        description: "Comma-separated rows to check, e.g. postgresql-16,operator,openbao,dokuwiki (blank = all)"
         required: false
         default: ""
 
@@ -138,6 +139,21 @@ jobs:
             bump_row openbao "$yaml" "$latest" \
               "https://github.com/openbao/openbao/archive/refs/tags/v${latest}.tar.gz" \
               openbao
+          fi
+
+          # --- dokuwiki: latest GitHub release (release-2026-07-14c -> 2026.07.14c) ---
+          if want dokuwiki; then
+            yaml=images/dokuwiki/melange/dokuwiki.yaml
+            latest=$(gh api repos/dokuwiki/dokuwiki/releases/latest --jq '.tag_name' \
+              | sed 's/^release-//' | tr '-' '.')
+            if [ -z "$latest" ]; then
+              echo "::error::dokuwiki: no release found upstream"
+              FAILED=1
+            fi
+            # download server filenames keep the dashed release form
+            bump_row dokuwiki "$yaml" "$latest" \
+              "https://download.dokuwiki.org/src/dokuwiki/dokuwiki-$(printf '%s' "$latest" | tr '.' '-').tgz" \
+              dokuwiki
           fi
 
           exit $FAILED

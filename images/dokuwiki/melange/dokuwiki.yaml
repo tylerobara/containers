@@ -1,0 +1,357 @@
+# Melange build for DokuWiki (github.com/dokuwiki/dokuwiki) — assembles the
+# app tree + container wiring from the pinned official release tarball. The
+# overlay files mirror the upstream image (github.com/dokuwiki/docker) at tag
+# release-2026-07-14c; the apache/entrypoint pieces are ours because Wolfi's
+# apache2 is a vanilla build (no Debian a2enmod/a2enconf helpers) driven by a
+# single self-contained config. No Wolfi dokuwiki package exists today, so
+# provider-priority/epoch are belt-and-suspenders (openbao convention).
+#
+# Version is the release date in apk-safe form (2026-07-14c -> 2026.07.14c);
+# the tarball URL below is re-dashed from it. Bump `version` + `vars.sha256`
+# on each release — the update-versions bot covers this row.
+
+package:
+  name: dokuwiki
+  version: 2026.07.14c
+  epoch: 100
+  description: "DokuWiki — standards compliant, simple and fast Wiki"
+  copyright:
+    - license: GPL-2.0-only
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of https://download.dokuwiki.org/src/dokuwiki/dokuwiki-2026-07-14c.tgz
+  sha256: 7e9b4dcb5ecb91a57f71b9b77dcec7bcf929959881464796611349ed1d183176
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+
+pipeline:
+  - runs: |
+      # Dashed release name is the download server's filename form.
+      DOKUVER=$(printf '%s' '${{package.version}}' | tr '.' '-')
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://download.dokuwiki.org/src/dokuwiki/dokuwiki-${DOKUVER}.tgz" \
+        -o /home/build/dokuwiki.tgz
+      echo "${{vars.sha256}}  /home/build/dokuwiki.tgz" | sha256sum -c -
+      mkdir /home/build/src
+      tar xf dokuwiki.tgz -C /home/build/src --strip-components 1
+      rm dokuwiki.tgz
+
+  - working-directory: /home/build
+    runs: |
+      D="${{targets.destdir}}"
+      install -d -m755 "$D/var/www/html" "$D/etc/apache2/dokuwiki" "$D/etc/php/conf.d"
+      cp -a /home/build/src/. "$D/var/www/html/"
+
+      # ---- upstream dokuwiki/docker config overlay (root/ tree) ----
+      cat > "$D/var/www/html/conf/docker.php" <<'DWEOF'
+      <?php
+      /**
+       * additional defaults for the docker environment
+       *
+       * We can set these defaults because we control the environment
+       */
+      $conf['userewrite'] = 1;
+      DWEOF
+      # upstream's im_convert (imagemagick) and xsendfile (mod_xsendfile) lines
+      # are dropped: this image ships neither, GD covers image manipulation and
+      # fetch.php serves media without the sendfile optimization.
+      cat > "$D/var/www/html/conf/docker.protected.php" <<'DWEOF'
+      <?php
+      /**
+       * settings that should not be overwritten in the docker environment
+       */
+      $conf['savedir'] = '/storage/data';
+      DWEOF
+      cat > "$D/var/www/html/conf/plugins.docker.php" <<'DWEOF'
+      <?php
+
+      // always disable the upgrade plugin in docker
+      $plugins['upgrade'] = 0;
+      DWEOF
+      cat > "$D/var/www/html/health.php" <<'DWEOF'
+      <?php
+
+      if (!defined('STDERR')) define('STDERR', fopen('php://stderr', 'w')); // see dokuwiki/docker#15
+      define('DOKU_UNITTEST', 1);
+      if (!defined('DOKU_INC')) define('DOKU_INC', __DIR__ . '/');
+
+      header('Content-Type: text/plain; charset=utf-8');
+      try {
+          ob_start();
+          require DOKU_INC . 'inc/init.php';
+          ob_end_clean();
+          # if init didn't fail, DokuWiki should be generally okay
+          echo 'ok';
+      } catch (\Exception $e) {
+          ob_end_clean();
+          header($_SERVER['SERVER_PROTOCOL'] . ' 500 Internal Server Error', true, 500);
+
+          // ensure we have a good status message on failure
+          $msg = $e->getMessage();
+          $msg = strip_tags($msg);
+          $msg = preg_replace('/^nice_die:/', '', $msg);
+          $msg = preg_replace('/\s+/', ' ', $msg);
+          $msg = trim($msg);
+          echo $msg;
+      }
+      DWEOF
+      cat > "$D/var/www/html/.autoprepend.php" <<'DWEOF'
+      <?php
+      /**
+       * This file is automatically loaded by PHP before any other code. This ensures that DOKU_INC is
+       * is always pointing to the correct location within the container, even when the entry point is
+       * a plugin.
+       */
+      if (!defined('DOKU_INC')) define('DOKU_INC', __DIR__ . '/');
+      DWEOF
+      cat > "$D/var/www/html/inc/preload.php" <<'DWEOF'
+      <?php
+
+      // initialize the farm if the farmer plugin is available
+      if (file_exists(__DIR__ . '/../lib/plugins/farmer/DokuWikiFarmCore.php')) {
+          $_ENV['DOKU_FARMDIR'] = '/storage/farm/';
+          include(__DIR__ . '/../lib/plugins/farmer/DokuWikiFarmCore.php');
+      }
+
+      // load the standard cascade if the farmer hasn't already loaded it
+      if (!defined('DOKU_CONF')) {
+          define('DOKU_CONF', __DIR__ . '/../conf/');
+      }
+      if (!isset($config_cascade) || $config_cascade === []) {
+          include __DIR__ . '/config_cascade.php';
+      }
+
+      // adjust the previously set config_cascade
+      array_unshift($config_cascade['main']['default'], '/var/www/html/conf.core/dokuwiki.php');
+      array_push($config_cascade['main']['default'], '/var/www/html/conf.core/docker.php');
+      array_unshift($config_cascade['main']['protected'], '/var/www/html/conf.core/docker.protected.php');
+      array_unshift($config_cascade['acronyms']['default'], '/var/www/html/conf.core/acronyms.conf');
+      array_unshift($config_cascade['entities']['default'], '/var/www/html/conf.core/entities.conf');
+      array_unshift($config_cascade['interwiki']['default'], '/var/www/html/conf.core/interwiki.conf');
+      array_unshift($config_cascade['license']['default'], '/var/www/html/conf.core/license.php');
+      array_unshift($config_cascade['manifest']['default'], '/var/www/html/conf.core/manifest.json');
+      array_unshift($config_cascade['mediameta']['default'], '/var/www/html/conf.core/mediameta.php');
+      array_unshift($config_cascade['mime']['default'], '/var/www/html/conf.core/mime.conf');
+      array_unshift($config_cascade['scheme']['default'], '/var/www/html/conf.core/scheme.conf');
+      array_unshift($config_cascade['smileys']['default'], '/var/www/html/conf.core/smileys.conf');
+      array_unshift($config_cascade['wordblock']['default'], '/var/www/html/conf.core/wordblock.conf');
+      array_unshift($config_cascade['plugins']['default'], '/var/www/html/conf.core/plugins.php');
+      array_unshift(
+          $config_cascade['plugins']['protected'],
+          '/var/www/html/conf.core/plugins.required.php',
+          '/var/www/html/conf.core/plugins.docker.php'
+      );
+      DWEOF
+      # env-var tunables; PHP expands ${VAR} from the environment at parse time
+      # (defaults come from the apko environment block).
+      cat > "$D/etc/php/conf.d/dokuwiki.ini" <<'DWEOF'
+      max_input_vars = 10000
+      post_max_size = ${PHP_UPLOADLIMIT}
+      upload_max_filesize = ${PHP_UPLOADLIMIT}
+      memory_limit = ${PHP_MEMORYLIMIT}
+      date.timezone = ${PHP_TIMEZONE}
+      auto_prepend_file = /var/www/html/.autoprepend.php
+      DWEOF
+      # upstream's php.ini override hook: dangling until a user drops a
+      # /storage/php.ini in, and PHP's conf.d scan silently skips it.
+      ln -sf /storage/php.ini "$D/etc/php/conf.d/custom.ini"
+
+      # ---- upstream storage split: read-only core + /storage symlinks ----
+      cd "$D/var/www/html"
+      mv conf conf.core
+      mv data data.core
+      mv lib/plugins lib/plugins.core
+      mv lib/tpl lib/tpl.core
+      ln -s /storage/conf conf
+      ln -s /storage/data data
+      ln -s /storage/lib/plugins lib/plugins
+      ln -s /storage/lib/tpl lib/tpl
+      ln -s /storage/.htaccess .htaccess
+
+      # ---- self-contained apache config (see notes in the file) ----
+      cat > "$D/etc/apache2/dokuwiki/httpd.conf" <<'AEOF'
+      # Minimal self-contained Apache config for DokuWiki (mod_php, prefork).
+      # Vanilla apache2 on Wolfi ships no conf.d include mechanism, so this file is
+      # the whole server config, launched via: httpd -d / -f thisfile -DNO_DETACH
+      ServerRoot "/"
+      PidFile /tmp/httpd.pid
+      Listen 8080
+      ServerName localhost
+
+      LoadModule mpm_prefork_module usr/lib/apache2/modules/mod_mpm_prefork.so
+      LoadModule unixd_module usr/lib/apache2/modules/mod_unixd.so
+      LoadModule authn_core_module usr/lib/apache2/modules/mod_authn_core.so
+      LoadModule authz_core_module usr/lib/apache2/modules/mod_authz_core.so
+      LoadModule authz_host_module usr/lib/apache2/modules/mod_authz_host.so
+      LoadModule dir_module usr/lib/apache2/modules/mod_dir.so
+      LoadModule mime_module usr/lib/apache2/modules/mod_mime.so
+      LoadModule log_config_module usr/lib/apache2/modules/mod_log_config.so
+      LoadModule env_module usr/lib/apache2/modules/mod_env.so
+      LoadModule setenvif_module usr/lib/apache2/modules/mod_setenvif.so
+      LoadModule filter_module usr/lib/apache2/modules/mod_filter.so
+      LoadModule alias_module usr/lib/apache2/modules/mod_alias.so
+      LoadModule rewrite_module usr/lib/apache2/modules/mod_rewrite.so
+      LoadModule php_module usr/lib/apache2/modules/libphp.so
+
+      TypesConfig etc/apache2/mime.types
+      ErrorLog /var/log/apache2/error.log
+      CustomLog /var/log/apache2/access.log vhost_combined
+
+      TraceEnable Off
+      ServerSignature Off
+      ServerTokens Prod
+      RedirectMatch 404 /\.git
+
+      User www-data
+      Group www-data
+
+      <Directory />
+          Require all denied
+      </Directory>
+
+      DocumentRoot /var/www/html
+      Include etc/apache2/extra/php_module.conf
+
+      <Directory /var/www/html/>
+          Options -Indexes -MultiViews +FollowSymLinks
+          AllowOverride All
+
+          Require all granted
+
+          # The rewrites live here instead of in a .htaccess file, so a custom .htaccess
+          # can be mounted without having to repeat them. InheritDown passes them on to
+          # such a mounted file, where they are applied after its own rules.
+          RewriteEngine on
+          RewriteOptions InheritDown
+
+          # Support the ! syntax for farm animals
+          RewriteRule ^!([^/]+)/(.*)  $2?animal=$1 [QSA,DPI]
+          RewriteRule ^!([^/]+)$      ?animal=$1 [QSA,DPI]
+
+          # pretty urls
+          RewriteRule ^_media/(.*)              lib/exe/fetch.php?media=$1  [QSA,L,B]
+          RewriteRule ^_detail/(.*)             lib/exe/detail.php?media=$1 [QSA,L,B]
+          RewriteRule ^_export/([^/]+)/(.*)     doku.php?do=export_$1&id=$2 [QSA,L,B]
+          RewriteRule ^$                        doku.php  [L]
+          RewriteCond %{REQUEST_FILENAME}       !-f
+          RewriteCond %{REQUEST_FILENAME}       !-d
+          RewriteRule (.*)                      doku.php?id=$1  [QSA,L,B]
+          RewriteRule ^index.php$               doku.php
+      </Directory>
+
+      <Files ~ "^([\._]ht|README$|VERSION$|COPYING$)">
+          Require all denied
+      </Files>
+
+      # Log the forwarded client instead of the reverse proxy, falling back to the peer
+      # address when no proxy is involved (upstream dokuwiki/docker contract).
+      SetEnvIf Remote_Addr "(.*)" logip=$1
+      SetEnvIf X-Forwarded-For "^([^,\s]+)" logip=$1
+      LogFormat "%v:%p %{logip}e %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\"" vhost_combined
+      AEOF
+
+      # ---- entrypoint: dumb-init shebang (openbao precedent) ----
+      cat > "$D/entrypoint.sh" <<'EEOF'
+      #!/usr/bin/dumb-init /bin/sh
+      # PID 1: dumb-init reaps orphans and forwards signals to the httpd master.
+      set -e
+
+      setup() {
+        # Seed the /storage volume from the read-only core trees (upstream storagesetup).
+        mkdir -p /storage/data /storage/conf /storage/lib/plugins /storage/lib/tpl
+        # cp -R (not -a): seeding runs as uid 33, where preserving the root
+        # ownership of the packaged files is impossible and only warns.
+        cp -R /var/www/html/data.core/. /storage/data/
+
+        # installer does not use config_cascade, so symlink the license file
+        rm -f /storage/conf/license.php
+        ln -s /var/www/html/conf.core/license.php /storage/conf/license.php
+
+        # core extensions are symlinked into the volume
+        for ext in plugins tpl; do
+          for dir in /var/www/html/lib/"$ext".core/*; do
+            base=$(basename "$dir")
+            rm -rf "/storage/lib/$ext/$base"
+            ln -s "$dir" "/storage/lib/$ext/$base"
+          done
+        done
+      }
+
+      HTTPD_CMD="httpd -d / -f /etc/apache2/dokuwiki/httpd.conf -DNO_DETACH"
+
+      # Apache's file logs are forwarded to the container log stream. Piped logs
+      # and by-name /dev/std* directives are broken in this apache build; tail -F
+      # follows reopens (graceful restarts, rotation) and opens the runtime log
+      # pipes fine as any uid. They orphan onto the httpd master, which is fine:
+      # the container exits with it.
+      mkdir -p /var/log/apache2
+      touch /var/log/apache2/access.log /var/log/apache2/error.log 2>/dev/null || true
+      tail -F /var/log/apache2/access.log >/proc/1/fd/1 2>/dev/null &
+      tail -F /var/log/apache2/error.log >/proc/1/fd/2 2>/dev/null &
+
+      # Root mode (docker default / k8s runAsUser:0), mirroring upstream: fix
+      # volume ownership, run setup as www-data, then keep the httpd master as
+      # root so it can open the runtime-owned log files; User/Group in the config
+      # drops the request-handling children to www-data. mod_php needs prefork.
+      if [ "$(id -u)" = 0 ]; then
+        echo "Running as root, running storage setup as 33:33"
+        chown -R 33:33 /storage
+        su-exec 33:33 "$0" --setup
+        exec /usr/sbin/$HTTPD_CMD
+      fi
+
+      # Called back from root mode: setup only, then exit.
+      if [ "$1" = "--setup" ]; then
+        setup
+        exit 0
+      fi
+
+      # Nonroot mode (image default): /storage must already be writable by uid 33
+      # (created by the image, or via k8s fsGroup: 33 on a mounted volume).
+      setup
+      exec /usr/sbin/$HTTPD_CMD
+      EEOF
+      chmod 755 "$D/entrypoint.sh"
+
+  - runs: |
+      D="${{targets.destdir}}"
+      # app tree integrity
+      test -f "$D/var/www/html/doku.php"
+      test -f "$D/var/www/html/install.php"
+      test -f "$D/var/www/html/conf.core/dokuwiki.php"
+      test -f "$D/var/www/html/conf.core/docker.php"
+      test -f "$D/var/www/html/conf.core/docker.protected.php"
+      test -f "$D/var/www/html/conf.core/plugins.docker.php"
+      test -f "$D/var/www/html/data.core/deleted.files"
+      test -d "$D/var/www/html/data.core/pages"
+      test -d "$D/var/www/html/lib/plugins.core/acl"
+      test -d "$D/var/www/html/lib/tpl.core/dokuwiki"
+      test -f "$D/var/www/html/health.php"
+      test -f "$D/var/www/html/inc/preload.php"
+      test -f "$D/var/www/html/.autoprepend.php"
+      # storage split: docroot entries must be symlinks, not dirs
+      for l in conf data lib/plugins lib/tpl .htaccess; do
+        test -L "$D/var/www/html/$l" || { echo "$l is not a symlink"; exit 1; }
+      done
+      # docker.php must NOT resurrect the features this image does not ship
+      grep -q "userewrite" "$D/var/www/html/conf.core/docker.php"
+      ! grep -qE "xsendfile|im_convert" "$D/var/www/html/conf.core/docker.php"
+      # config + entrypoint sanity (melange#1395 lesson: assert shipped bits)
+      test -L "$D/etc/php/conf.d/custom.ini"
+      grep -q "PHP_TIMEZONE" "$D/etc/php/conf.d/dokuwiki.ini"
+      grep -q "vhost_combined" "$D/etc/apache2/dokuwiki/httpd.conf"
+      test -x "$D/entrypoint.sh"
+      sh -n "$D/entrypoint.sh"
+      grep -q "^exec /usr/sbin/\$HTTPD_CMD" "$D/entrypoint.sh"

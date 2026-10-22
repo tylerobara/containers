@@ -1,0 +1,127 @@
+# DokuWiki image, assembled by apko (no Dockerfile). The app tree + apache
+# config + entrypoint are built by melange (see ../melange/dokuwiki.yaml);
+# apache and PHP come from Wolfi.
+#
+# Reference: github.com/dokuwiki/docker (php:8.4-apache). Same contract on
+# purpose — /var/www/html docroot with read-only *.core trees, /storage volume
+# for conf/data/lib state, port 8080, /health.php, PHP_UPLOADLIMIT /
+# PHP_MEMORYLIMIT / PHP_TIMEZONE envs. Differences from upstream, on purpose:
+#   - Wolfi vanilla apache2 + php-8.4-apache (mod_php, prefork) instead of
+#     Debian's php image + a2enmod scaffolding; single self-contained config
+#   - default user is nonroot www-data 33:33 (upstream defaults to root and
+#     drops via apache's User/Group; both modes work here — see README.md)
+#   - no mod_xsendfile / imagemagick (not packaged by Wolfi; GD covers media
+#     manipulation, fetch.php serves media without sendfile offload)
+#   - dumb-init shebang on the entrypoint + su-exec for the root drop path
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    - busybox
+    # /etc/os-release + the world-writable base dirs (/tmp 1777 for PHP
+    # sessions + the httpd pidfile)
+    - wolfi-baselayout
+    - ca-certificates
+    # PID 1 reaping (entrypoint shebang) + root->33 drop helper
+    - dumb-init
+    - su-exec
+    # web tier: vanilla apache2 + mod_php SAPI, mirroring upstream's extension
+    # list (gd bz2 opcache pdo_sqlite intl ldap); Wolfi ships each ext's
+    # activation ini in a companion -config package, and pdo_sqlite needs the
+    # core pdo module or it dies on an undefined symbol.
+    - apache2
+    - php-8.4
+    - php-8.4-apache
+    - php-8.4-pdo
+    - php-8.4-pdo-config
+    - php-8.4-gd
+    - php-8.4-gd-config
+    - php-8.4-bz2
+    - php-8.4-bz2-config
+    - php-8.4-opcache
+    - php-8.4-opcache-config
+    - php-8.4-pdo_sqlite
+    - php-8.4-pdo_sqlite-config
+    - php-8.4-intl
+    - php-8.4-intl-config
+    - php-8.4-ldap
+    - php-8.4-ldap-config
+    # Built by melange; supplied via --repository-append at build time.
+    - dokuwiki
+
+accounts:
+  groups:
+    - groupname: www-data
+      gid: 33
+  users:
+    - username: www-data
+      uid: 33
+      gid: 33
+      shell: /sbin/nologin
+  run-as: 33
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+  # dokuwiki.ini expands these at PHP startup; defaults mirror upstream's
+  # Dockerfile ENV lines.
+  PHP_UPLOADLIMIT: 128M
+  PHP_MEMORYLIMIT: 256M
+  PHP_TIMEZONE: UTC
+
+# apko has no ports/expose fields; the wiki listens on 8080 (unprivileged,
+# matching upstream). The entrypoint execs httpd in the foreground itself.
+entrypoint:
+  command: /entrypoint.sh
+
+# Writable state for the nonroot default + the log dir httpd writes into
+# (forwarded to the container log stream by the entrypoint). melange cannot
+# ship owned nonroot dirs (melange#1395), so apko paths: owns this instead —
+# same lesson as openbao. PathMutation's mode field is `permissions` (omitting
+# it creates the dir at mode 0!). A mounted /storage volume must be chowned to
+# 33 (k8s fsGroup: 33, or start the container as root once to auto-chown).
+paths:
+  - path: /storage
+    type: directory
+    uid: 33
+    gid: 33
+    permissions: 0o755
+    recursive: true
+  - path: /storage/conf
+    type: directory
+    uid: 33
+    gid: 33
+    permissions: 0o755
+    recursive: true
+  - path: /storage/data
+    type: directory
+    uid: 33
+    gid: 33
+    permissions: 0o755
+    recursive: true
+  - path: /storage/lib
+    type: directory
+    uid: 33
+    gid: 33
+    permissions: 0o755
+    recursive: true
+  - path: /storage/lib/plugins
+    type: directory
+    uid: 33
+    gid: 33
+    permissions: 0o755
+    recursive: true
+  - path: /storage/lib/tpl
+    type: directory
+    uid: 33
+    gid: 33
+    permissions: 0o755
+    recursive: true
+  - path: /var/log/apache2
+    type: directory
+    uid: 33
+    gid: 33
+    permissions: 0o755
+    recursive: true

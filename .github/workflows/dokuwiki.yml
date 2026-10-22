@@ -1,0 +1,309 @@
+name: dokuwiki
+
+# Builds + publishes the DokuWiki image (app tree assembled from the pinned
+# official release tarball by melange, apache2 + php-8.4-apache mod_php stack
+# from Wolfi, no Dockerfile). One workflow per image family; routing is the
+# native on.push.paths filter. cosign identity = THIS file:
+#   cosign verify \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#     --certificate-identity-regexp '^https://github.com/tylerobara/containers/\.github/workflows/dokuwiki\.yml@refs/heads/main$' \
+#     ghcr.io/tylerobara/containers/dokuwiki:<tag>
+# PRs run everything except publish/sign/pages; validate a bot bump PR via
+# workflow_dispatch (ref = bump branch, validate_only checked).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - images/dokuwiki/**
+      - .github/workflows/dokuwiki.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - images/dokuwiki/**
+      - .github/workflows/dokuwiki.yml
+  schedule:
+    - cron: '20 6 * * *' # daily, staggered off postgres/operator/openbao/os-shell
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Ref to build (defaults to the branch dispatched from). Use a bump-PR branch to validate it."
+        required: false
+        default: ""
+      validate_only:
+        description: "Build + scan without publishing/signing/deploying pages"
+        type: boolean
+        default: false
+
+concurrency:
+  group: dokuwiki-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+
+env:
+  MELANGE_VERSION: v0.63.0
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # No detect job: the on.push.paths trigger above IS the routing — if this
+  # workflow ran at all, dokuwiki (or this file) changed.
+
+  keygen:
+    runs-on: ubuntu-latest
+    outputs:
+      pub: ${{ steps.k.outputs.pub }}
+      priv: ${{ steps.k.outputs.priv }}
+    steps:
+      - name: Install melange
+        run: go install chainguard.dev/melange@${{ env.MELANGE_VERSION }}
+
+      - name: Generate key
+        id: k
+        run: |
+          ~/go/bin/melange keygen
+          { echo "pub=$(base64 -w0 melange.rsa.pub)"; echo "priv=$(base64 -w0 melange.rsa)"; } >> "$GITHUB_OUTPUT"
+
+  melange:
+    needs: keygen
+    if: ${{ !cancelled() && needs.keygen.result == 'success' }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Install melange
+        run: go install chainguard.dev/melange@${{ env.MELANGE_VERSION }}
+
+      - name: Restore signing key
+        run: |
+          echo '${{ needs.keygen.outputs.priv }}' | base64 -d > melange.rsa && chmod 600 melange.rsa
+          echo '${{ needs.keygen.outputs.pub }}' | base64 -d > melange.rsa.pub
+
+      - name: Build dokuwiki (${{ matrix.arch }})
+        run: |
+          ~/go/bin/melange build images/dokuwiki/melange/dokuwiki.yaml \
+            --arch ${{ matrix.arch }} \
+            --signing-key melange.rsa \
+            --out-dir ./packages \
+            --runner docker
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packages-dokuwiki-${{ matrix.arch }}
+          path: |
+            packages/
+            melange.rsa.pub
+
+  build:
+    needs: [keygen, melange]
+    if: ${{ !cancelled() && needs.keygen.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # only for cosign keyless below
+    env:
+      DW_IMAGE: ghcr.io/${{ github.repository }}/dokuwiki
+      PUBLISH: ${{ github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.validate_only != true) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: packages-dokuwiki-*
+          path: .
+          merge-multiple: true
+
+      - name: Resolve pinned version + version guard
+        run: |
+          VER=$(awk '/^  version:/{print $2; exit}' images/dokuwiki/melange/dokuwiki.yaml)
+          EPOCH=$(awk '/^  epoch:/{print $2; exit}' images/dokuwiki/melange/dokuwiki.yaml)
+          case "$VER" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "bad version '$VER'"; exit 1 ;; esac
+          echo "DW_VER=$VER" >> "$GITHUB_ENV"
+          echo "DW_MINOR=$(echo "$VER" | cut -d. -f1,2)" >> "$GITHUB_ENV"
+          docker run --rm --user root \
+            -v "$PWD:/work" \
+            cgr.dev/chainguard/apko lock /work/images/dokuwiki/apko/dokuwiki.yaml \
+              --arch x86_64 --arch aarch64 \
+              --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
+              --output /work/dokuwiki.lock.json
+          RESOLVED=$(jq -r '.contents.packages[] | select(.name=="dokuwiki") | .version' dokuwiki.lock.json | head -1)
+          # exact pkgver match or the melange package lost resolution to Wolfi
+          if [ "$RESOLVED" != "${VER}-r${EPOCH}" ]; then
+            echo "apko resolved dokuwiki as '$RESOLVED', expected '${VER}-r${EPOCH}'"; exit 1
+          fi
+
+      - name: Log in to ghcr
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Publish multi-arch dokuwiki image to ghcr
+        if: env.PUBLISH == 'true'
+        run: |
+          for i in 1 2 3; do
+            if docker run --rm --user root \
+              -v "$PWD:/work:ro" \
+              -v "$HOME/.docker:/root/.docker:ro" \
+              cgr.dev/chainguard/apko publish /work/images/dokuwiki/apko/dokuwiki.yaml \
+                "$DW_IMAGE:$DW_VER" "$DW_IMAGE:$DW_MINOR" "$DW_IMAGE:latest" \
+                --arch x86_64,aarch64 \
+                --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
+                --lockfile /work/dokuwiki.lock.json; then
+              break
+            fi
+            [ "$i" = 3 ] && { echo "apko publish failed after 3 attempts"; exit 1; }
+            echo "publish attempt $i failed; retrying in 15s"; sleep 15
+          done
+          echo "DW_REF=$DW_IMAGE:$DW_VER" >> "$GITHUB_ENV"
+          echo "GRYPE_SRC=registry:$DW_IMAGE:$DW_VER" >> "$GITHUB_ENV"
+
+      - name: Build image locally (validate-only, no registry)
+        if: env.PUBLISH != 'true'
+        run: |
+          docker run --rm --user root \
+            -v "$PWD:/work" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            cgr.dev/chainguard/apko publish /work/images/dokuwiki/apko/dokuwiki.yaml \
+              "dokuwiki:validate" \
+              --arch x86_64 \
+              --local \
+              --repository-append /work/packages --keyring-append /work/melange.rsa.pub
+          echo "DW_REF=dokuwiki:validate" >> "$GITHUB_ENV"
+          echo "GRYPE_SRC=docker:dokuwiki:validate" >> "$GITHUB_ENV"
+
+      - name: Smoke test image
+        run: |
+          [ "$PUBLISH" = true ] && docker pull --platform linux/amd64 "$DW_REF"
+          IMAGE="$DW_REF" VERSION="$DW_VER" ./images/dokuwiki/test.sh
+
+      - name: Scan image with grype
+        id: scan
+        run: |
+          mkdir -p scans
+          docker run --rm --user 0:0 \
+            -v "$PWD/scans:/out" \
+            -v "$HOME/.docker:/root/.docker:ro" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            ghcr.io/anchore/grype:latest "$GRYPE_SRC" \
+              --output json --file /out/dokuwiki.json || true
+          # Same signing gate as every other image here: any Low+ finding blocks.
+          LOWPLUS=$(jq '[.matches[] | select(.vulnerability.severity
+                     | IN("Low","Medium","High","Critical"))] | length' scans/dokuwiki.json)
+          echo "lowplus=$LOWPLUS" >> "$GITHUB_OUTPUT"
+          echo "dokuwiki Low+ findings: $LOWPLUS" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Sign with cosign (only when scan has 0 Low+ findings)
+        if: env.PUBLISH == 'true' && steps.scan.outputs.lowplus == '0'
+        run: |
+          DIGEST=$(docker buildx imagetools inspect "$DW_REF" \
+            --format '{{json .Manifest}}' | jq -r .digest)
+          docker run --rm --user 0:0 \
+            -v "$HOME/.docker:/root/.docker:ro" \
+            -e DOCKER_CONFIG=/root/.docker \
+            -e GITHUB_ACTIONS \
+            -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+            ghcr.io/sigstore/cosign/cosign:latest sign --yes "$DW_REF@$DIGEST"
+          echo "SIGNED=true" >> "$GITHUB_ENV"
+
+      - name: Build pages data
+        if: env.PUBLISH == 'true'
+        run: |
+          DIGEST=$(docker buildx imagetools inspect "$DW_REF" \
+            --format '{{json .Manifest}}' | jq -r .digest)
+          jq -n \
+            --arg image "$DW_IMAGE" --arg version "$DW_VER" \
+            --arg digest "$DIGEST" --arg built "$(date -u +%FT%TZ)" \
+            --arg tags "$DW_VER $DW_MINOR latest" \
+            --arg built_with melange --argjson signed "${SIGNED:-false}" \
+            --arg signed_by dokuwiki.yml \
+            --slurpfile scan scans/dokuwiki.json \
+            '{image: $image, major: null, version: $version,
+              tags: ($tags | split(" ")), digest: $digest, built: $built, built_with: $built_with,
+              signed: $signed, signed_by: $signed_by,
+              scan: $scan[0]}' > scans/dokuwiki.json.tmp
+          mv scans/dokuwiki.json.tmp scans/dokuwiki.json
+
+      - uses: actions/upload-artifact@v7
+        if: env.PUBLISH == 'true'
+        with:
+          name: pages-data-dokuwiki
+          path: scans/dokuwiki.json
+
+  pages:
+    # Merge this image's fresh entry over the live index (sibling entries are
+    # preserved from the live gh-pages data/index.json, keyed on image+major
+    # with fresh entries winning), regenerate the catalog, and deploy.
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the generated gh-pages branch
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: pages-data-dokuwiki
+          path: data
+          merge-multiple: true
+
+      - name: Assemble index
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(data/*.json)
+          if [ ${#files[@]} -gt 0 ]; then jq -s '.' "${files[@]}" > /tmp/new.json
+          else echo '[]' > /tmp/new.json; fi
+          # Previous deployment. Read the gh-pages BRANCH (ground truth the
+          # moment any sibling workflow pushes it), not the Pages URL — that
+          # cache can lag ~10 min, and sibling workflows deploying minutes
+          # apart would otherwise resurrect each other's stale entries.
+          git fetch -q --depth 1 origin gh-pages 2>/dev/null || true
+          { git show FETCH_HEAD:data/index.json 2>/dev/null \
+            || curl -fsSL --retry 3 "https://tylerobara.github.io/containers/data/index.json" 2>/dev/null \
+            || echo '[]'; } > /tmp/old.json
+          jq -e . /tmp/old.json >/dev/null 2>&1 || echo '[]' > /tmp/old.json
+          jq -s '(.[0] // []) as $old | .[1] as $new
+                 | reduce ($old + $new)[] as $e ({}; .[($e.image + "/" + ($e.major|tostring))] = $e)
+                 | [.[]] | sort_by(.major // 0) | reverse' \
+            /tmp/old.json /tmp/new.json > data/index.json
+          # CNPG ClusterImageCatalog, sha-pinned to each multi-arch manifest
+          # (same shape as cloudnative-pg's postgresql-minimal-trixie catalogs).
+          {
+            printf 'apiVersion: postgresql.cnpg.io/v1\nkind: ClusterImageCatalog\nmetadata:\n  name: cnpg-postgres-wolfi\n  labels:\n    images.cnpg.io/family: postgresql\n    images.cnpg.io/type: minimal\n    images.cnpg.io/os: wolfi\n    images.cnpg.io/date: "%s"\n    images.cnpg.io/publisher: tylerobara.github.io\nspec:\n  images:\n' "$(date -u +%Y%m%d)"
+            jq -r 'map(select(.major)) | sort_by(.major)[] | "  - major: \(.major)\n    image: \(.image):\(.version)@\(.digest)"' data/index.json
+          } > data/cluster-image-catalog.yaml
+
+      - name: Deploy to gh-pages
+        run: |
+          dst=$(mktemp -d)
+          git -C "$dst" init -q
+          cp pages/index.html "$dst/index.html"
+          cp -r data "$dst/data"
+          git -C "$dst" add -A
+          git -C "$dst" -c user.name=github-actions[bot] \
+                           -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
+            commit -qm "Deploy $(date -u +%FT%TZ)"
+          git -C "$dst" push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/$GITHUB_REPOSITORY.git" HEAD:gh-pages
