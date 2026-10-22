@@ -3,12 +3,13 @@ name: update-versions
 # Version bump bot — the minimal repo's update-versions.yml pattern scaled to
 # this repo's image families. Checks upstream (PGDG ftp for each tracked
 # postgresql-<major>.yaml, GitHub releases for the operator, openbao,
-# dokuwiki, grafana-image-renderer and cilium; cilium-envoy follows cilium's
+# dokuwiki, grafana-image-renderer, cilium and cert-manager; cilium-envoy
+# follows cilium's
 # own images/cilium/Dockerfile pin and gets its payload shas re-extracted) and
 # opens a PR bumping `version` + `vars.sha256` in the melange config. Nothing
 # is merged or published here: review the PR, validate it with that image's
 # own workflow (postgres / cloudnative-pg-operator / openbao / dokuwiki /
-# grafana-image-renderer) via
+# grafana-image-renderer / cert-manager) via
 # workflow_dispatch (ref = PR branch, validate_only = true),
 # then merge — the merge push rebuilds and publishes just that image.
 #
@@ -281,6 +282,69 @@ jobs:
           Bot PRs don't get automatic CI checks. To validate before merging, run **cilium.yml → Run workflow** with \`ref=$branch\` and **validate_only** checked. The merge push to main then publishes just the cilium-envoy image."
                   fi
                   echo "cilium-envoy: opened/updated bump PR $cur -> $ever" >> "$GITHUB_STEP_SUMMARY"
+                  git switch -C scratch-"$branch" origin/main >/dev/null 2>&1
+                fi
+              fi
+            fi
+          fi
+
+          # --- cert-manager: latest GitHub release; the three configs share
+          # one tarball, so all three are bumped in a single PR ---
+          if want cert-manager; then
+            cm_yamls="images/cert-manager/melange/cert-manager-controller.yaml
+              images/cert-manager/melange/cert-manager-cainjector.yaml
+              images/cert-manager/melange/cert-manager-webhook.yaml"
+            cur=$(awk '/^  version:/{print $2; exit}' images/cert-manager/melange/cert-manager-controller.yaml)
+            latest=$(gh api repos/cert-manager/cert-manager/releases/latest --jq '.tag_name | ltrimstr("v")')
+            if [ -z "$latest" ]; then
+              echo "::error::cert-manager: no release found upstream"
+              FAILED=1
+            fi
+            if [ "$(printf '%s\n%s\n' "$cur" "$latest" | sort -V | tail -1)" != "$latest" ] || [ "$cur" = "$latest" ]; then
+              echo "cert-manager: already at or ahead of $latest, skip"
+            else
+              url="https://github.com/cert-manager/cert-manager/archive/refs/tags/v${latest}.tar.gz"
+              if ! cm_sha=$(curl -fsSL --retry 3 "$url" | sha256sum | awk '{print $1}'); then
+                echo "::error::cert-manager: could not download $url"
+                FAILED=1
+              else
+                cm_commit=$(gh api repos/cert-manager/cert-manager/git/ref/tags/"v$latest" --jq '.object.sha')
+                for yaml in $cm_yamls; do
+                  sed -i "0,/^  version: /s/^  version: .*/  version: $latest/" "$yaml"
+                  sed -i "0,/^  sha256: /s/^  sha256: .*/  sha256: $cm_sha/" "$yaml"
+                  sed -i "0,/^  git_commit: /s/^  git_commit: .*/  git_commit: $cm_commit/" "$yaml"
+                done
+                ok=1
+                for yaml in $cm_yamls; do
+                  [ "$(awk '/^  version:/{print $2; exit}' "$yaml")" = "$latest" ] || ok=0
+                  [ "$(awk '/^  sha256:/{print $2; exit}' "$yaml")" = "$cm_sha" ] || ok=0
+                  [ "$(awk '/^  git_commit:/{print $2; exit}' "$yaml")" = "$cm_commit" ] || ok=0
+                done
+                if [ "$ok" != 1 ]; then
+                  echo "::error::cert-manager: yaml edit did not land as expected"
+                  FAILED=1
+                  for yaml in $cm_yamls; do git checkout -- "$yaml"; done
+                else
+                  branch="bump/cert-manager-$latest"
+                  git switch -c "$branch"
+                  for yaml in $cm_yamls; do git add "$yaml"; done
+                  git commit -m "chore(cert-manager): bump $cur -> $latest"
+                  git push -f origin "$branch"
+                  if [ -n "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+                    echo "cert-manager: pushed update to existing PR for $branch"
+                  else
+                    gh pr create --head "$branch" --base main \
+                      --title "chore(cert-manager): bump $cur -> $latest" \
+                      --body "**cert-manager** \`$cur\` -> \`$latest\` (detected by the update-versions bot).
+
+          - melange configs: controller + cainjector + webhook (\`version\`, \`vars.sha256\`, \`vars.git_commit\` bumped together — one shared tarball; \`epoch: 100\` untouched)
+          - upstream tarball hashed into the configs: <$url>
+          - \`sha256\`: \`$cm_sha\`
+          - \`git_commit\`: \`$cm_commit\` (tag ref, so the startup banner matches upstream)
+
+          Bot PRs don't get automatic CI checks. To validate before merging, run **cert-manager.yml → Run workflow** with \`ref=$branch\` and **validate_only** checked: it builds, assembles and grype-scans all three without publishing or signing anything. The merge push to main then publishes the family."
+                  fi
+                  echo "cert-manager: opened/updated bump PR $cur -> $latest" >> "$GITHUB_STEP_SUMMARY"
                   git switch -C scratch-"$branch" origin/main >/dev/null 2>&1
                 fi
               fi

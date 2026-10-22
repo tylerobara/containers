@@ -1,0 +1,77 @@
+# Melange build for the cert-manager webhook image
+# (github.com/cert-manager/cert-manager), from the release tarball with
+# upstream's exact build contract (make/00_mod.mk): CGO_ENABLED=0,
+# GOFLAGS=-trimpath, ldflags "-w -s -X pkg/util.AppVersion=$(VERSION)
+# -X pkg/util.AppGitCommit=$(GITCOMMIT)". Upstream COPYs the static binary
+# onto distroless/static (hack/containers/Containerfile.*); here that base
+# is the apko config (busybox + ca-certificates on Wolfi).
+#
+# The three configs (controller/cainjector/webhook) share one tarball and
+# move in lockstep — the update-versions bot bumps all three in a single PR.
+# Bump `version` + `vars.sha256` + `vars.git_commit` only via that bot.
+
+package:
+  name: cert-manager-webhook
+  version: 1.21.2
+  epoch: 100
+  description: "cert-manager webhook built from upstream source"
+  copyright:
+    - license: Apache-2.0
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the GitHub release tarball (shared by all three configs)
+  sha256: 7654466dc0859d72e5bf0f5f88e9ba7bd41bd328e092ad953781bca4b1a5079b
+  # Commit behind the upstream tag; injected exactly like upstream's release
+  # build so the startup banner (version/git_commit) matches it.
+  git_commit: 922a06aa49ee4bb802db268ef72a174af70edd32
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      # go.mod wants go 1.26.0; Wolfi go-1.26 is 1.26.10.
+      - go-1.26
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/cert-manager/cert-manager/archive/refs/tags/v${{package.version}}.tar.gz" \
+        -o /home/build/cm.tar.gz
+      echo "${{vars.sha256}}  /home/build/cm.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf cm.tar.gz && rm cm.tar.gz
+
+  - working-directory: /home/build/cert-manager-${{package.version}}/cmd/webhook
+    runs: |
+      # Each cmd/<binary> is its own Go module (`replace
+      # github.com/cert-manager/cert-manager => ../../`), so the build runs
+      # from inside it, as upstream's go-workspace-based build resolves it.
+      # No vendor/ in the tarball, so modules resolve from the network
+      # (same as the cilium loopback build).
+      export CGO_ENABLED=0 GOTOOLCHAIN=local GOFLAGS=-trimpath
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      go build -buildvcs=false \
+        -ldflags "-w -s \
+          -X github.com/cert-manager/cert-manager/pkg/util.AppVersion=v${{package.version}} \
+          -X github.com/cert-manager/cert-manager/pkg/util.AppGitCommit=${{vars.git_commit}}" \
+        -o cert-manager-webhook .
+      install -D -m 0755 cert-manager-webhook \
+        "${{targets.destdir}}/usr/bin/cert-manager-webhook"
+
+  - runs: |
+      # No --version flag upstream; the startup banner carries the ldflag
+      # stamps before the binary dies on missing in-cluster config.
+      out=$(timeout 60 "${{targets.destdir}}/usr/bin/cert-manager-webhook" 2>&1 || true)
+      echo "$out"
+      echo "$out" | grep -q "starting cert-manager webhook"
+      echo "$out" | grep -q "version=\"v${{package.version}}\""
+      echo "$out" | grep -q "git_commit=\"${{vars.git_commit}}\""

@@ -1,0 +1,31 @@
+# cert-manager cainjector image, assembled by apko (no Dockerfile). The binary is
+# built from the upstream release tarball by melange (see
+# ../melange/cert-manager-cainjector.yaml); everything else is Wolfi. Mirrors
+# upstream's distroless/static + single-binary image (hack/containers/
+# Containerfile.cainjector), with the repo-wide busybox debug shell instead of a
+# bare scratch base.
+#
+# The helm chart's pod securityContext (runAsNonRoot + runAsUser 1001)
+# overrides run-as at deploy time; 65532 only governs bare docker runs.
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    # Debug shell only — the binary is static Go. ca-certificates for the
+    # ACME/Issuers' outbound TLS and webhook CA pinning.
+    - busybox
+    - ca-certificates
+    # Built by melange; supplied via --repository-append at build time.
+    - cert-manager-cainjector
+
+accounts:
+  run-as: 65532
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+
+entrypoint:
+  command: /usr/bin/cert-manager-cainjector
