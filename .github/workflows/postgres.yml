@@ -313,16 +313,18 @@ jobs:
         run: |
           # Native arch is enough to prove the assembly + smoke test on PRs;
           # the multi-arch lock guard above already proved both resolve.
+          # The local tag must still start with the PG major: test.sh enforces
+          # CNPG's tag convention, and a bare ':validate' fails it.
           docker run --rm --user root \
             -v "$PWD:/work" \
             -v /var/run/docker.sock:/var/run/docker.sock \
             cgr.dev/chainguard/apko publish "/work/build/postgresql-$PG_MAJOR.yaml" \
-              "cnpg-pg-$PG_MAJOR:validate" \
+              "cnpg-pg-$PG_MAJOR:$PG_FULL-validate" \
               --arch x86_64 \
               --local \
               --repository-append /work/packages --keyring-append /work/melange.rsa.pub
-          echo "IMG_REF=cnpg-pg-$PG_MAJOR:validate" >> "$GITHUB_ENV"
-          echo "GRYPE_SRC=docker:cnpg-pg-$PG_MAJOR:validate" >> "$GITHUB_ENV"
+          echo "IMG_REF=cnpg-pg-$PG_MAJOR:$PG_FULL-validate" >> "$GITHUB_ENV"
+          echo "GRYPE_SRC=docker:cnpg-pg-$PG_MAJOR:$PG_FULL-validate" >> "$GITHUB_ENV"
 
       - name: Smoke test image
         run: |
