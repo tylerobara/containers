@@ -83,6 +83,10 @@ pipeline:
       esac
       make GOARCH="$GOARCH" DESTDIR="${{targets.destdir}}" PKG_BUILD=1 NOSTRIP=1 \
         build-container install-container-binary
+      # install-bpf creates /var/lib/cilium via `install -m 0750 -d`; a
+      # root-owned 0750 dir breaks melange's host-side workspace xattr pass
+      # on non-root runners. Runtime-irrelevant (the agent runs as root).
+      chmod 0755 "${{targets.destdir}}/var/lib/cilium"
 
   - working-directory: /home/build/plugins-${{vars.cni_version}}
     runs: |
