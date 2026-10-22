@@ -11,7 +11,7 @@
 package:
   name: openbao
   version: 2.7.1
-  epoch: 101
+  epoch: 102
   description: "OpenBao secrets management built from upstream source"
   copyright:
     - license: MPL-2.0
@@ -70,23 +70,34 @@ pipeline:
       # Upstream ships a vault compat symlink.
       ln -sfn bao "${{targets.destdir}}/usr/bin/vault"
       # The official openbao Helm chart hardcodes this path in its server
-      # command — ship upstream's exact release entrypoint from the tarball
-      # (its shebang runs dumb-init; apko adds dumb-init + su-exec).
-      install -Dm755 .release/docker/docker-entrypoint.sh \
-        "${{targets.destdir}}/usr/local/bin/docker-entrypoint.sh"
-      # Upstream's data dirs (audit logs, file backend, config drop-ins),
-      # owned like upstream's image does: the entrypoint script chowns them
-      # when owner != openbao and only /openbao/config tolerates chown
-      # failure — root-owned dirs here would abort our nonroot default user
-      # under set -e on any bare (non-chart) `docker run`.
+      # command. Ship upstream's exact release entrypoint from the tarball
+      # (its shebang runs dumb-init; apko adds dumb-init + su-exec), but
+      # pre-patch its two unguarded chowns: /openbao/{logs,file} lack the
+      # `|| echo` that upstream's config chown has, and melange cannot ship
+      # nonroot-owned dirs (pipeline chown is normalized away, melange#1395)
+      # — under our nonroot default user they would abort the script pre-exec.
+      # The verify step below fails the build if the patch stops applying.
+      install -d -m755 "${{targets.destdir}}/usr/local/bin"
+      sed -e 's%chown -R openbao:openbao /openbao/logs%& || echo "Could not chown /openbao/logs (nonroot?)"%' \
+          -e 's%chown -R openbao:openbao /openbao/file%& || echo "Could not chown /openbao/file (nonroot?)"%' \
+          .release/docker/docker-entrypoint.sh \
+        > "${{targets.destdir}}/usr/local/bin/docker-entrypoint.sh"
+      chmod 755 "${{targets.destdir}}/usr/local/bin/docker-entrypoint.sh"
+      # Upstream's data dirs (audit logs, file backend, config drop-ins);
+      # root-owned is unavoidable (see above) and safe: the chart skips the
+      # script's chowns via SKIP_CHOWN=true, and the patched lines merely
+      # echo on nonroot failure. Mount volumes as needed and chown them.
       mkdir -p "${{targets.destdir}}/openbao/config" \
         "${{targets.destdir}}/openbao/logs" "${{targets.destdir}}/openbao/file" \
         "${{targets.destdir}}/openbao/data"
-      chown -R 65532:65532 "${{targets.destdir}}/openbao"
 
   - runs: |
       # Verify the build actually produced this version
       "${{targets.destdir}}/usr/bin/bao" version | grep -q "${{package.version}}"
-      # The chart hardcodes this path; ship-no-verify ships-no-image.
+      # The chart hardcodes this path; prove it's present, parseable, and
+      # carries the chown-tolerance patch: 2 sed-applied lines + upstream's
+      # own config line = exactly 3 `|| echo` chown guards.
       test -x "${{targets.destdir}}/usr/local/bin/docker-entrypoint.sh"
       sh -n "${{targets.destdir}}/usr/local/bin/docker-entrypoint.sh"
+      [ "$(grep -c '|| echo' "${{targets.destdir}}/usr/local/bin/docker-entrypoint.sh")" = 3 ] \
+        || { echo "entrypoint chown patch did not apply as expected"; exit 1; }
