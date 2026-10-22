@@ -1,0 +1,71 @@
+# grafana-image-renderer image, assembled by apko (no Dockerfile). The Go
+# binary + entrypoint are built by melange (see ../melange/*.yaml); chromium,
+# fonts and init come from Wolfi.
+#
+# Reference: github.com/grafana/grafana-image-renderer/blob/main/Dockerfile
+# (debian:trixie + pinned chromium + a huge multilingual font set + tini,
+# nonroot 65532, port 8081). Differences from upstream, on purpose:
+#   - Wolfi chromium instead of Debian's apt-pinned 155.x: Wolfi's repo lags
+#     a few releases behind (currently 149.x); same binary path /usr/bin/
+#     chromium, and Wolfi ships the security patches on its own cadence
+#   - a small font set (dejavu + opensans + noto core/CJK) instead of
+#     upstream's ~20-package freefont/unifont/roboto/inter/every-script pile;
+#     add font-noto-* packages if a dashboard needs another script
+#   - no chromium-driver/chromium-shell (Selenium-only, unused here), no
+#     locales/bash/util-linux (upstream ships them for its debug tooling)
+#   - sandbox stays OFF (browser.sandbox defaults false upstream too); run
+#     with gVisor/Kata or set --browser.sandbox only if the platform supports
+#     it — see README.md
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    - busybox
+    # /etc/os-release + world-writable /tmp 1777 (chromium profile dirs are
+    # made with os.MkdirTemp under TMPDIR=/tmp)
+    - wolfi-baselayout
+    - ca-certificates
+    # PID 1 for the entrypoint wrapper (zombie reaping for chromium children)
+    - tini
+    # the renderer's browser; pulls its own gtk/nss/mesa/pulse deps
+    - chromium
+    # font stack: sans/serif baseline + Open Sans (Grafana's UI font) + Noto
+    # core and CJK so non-Latin dashboards don't render tofu
+    - fontconfig
+    - ttf-dejavu
+    - font-opensans
+    - font-noto
+    - font-noto-cjk
+    # LANG=en_US.UTF-8 (upstream runs locale-gen for this)
+    - glibc-locale-en
+    # Built by melange; supplied via --repository-append at build time.
+    - grafana-image-renderer
+
+accounts:
+  groups:
+    - groupname: nonroot
+      gid: 65532
+  users:
+    - username: nonroot
+      uid: 65532
+      gid: 65532
+      shell: /bin/false
+  run-as: 65532
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+  LANG: en_US.UTF-8
+  # chromium writes cache/profile scratch under $HOME; '/' is not writable
+  # as nonroot, so point it at the world-writable /tmp
+  HOME: /tmp
+
+# apko has no ports/expose fields; the server listens on :8081 (unprivileged,
+# matching upstream's SERVER_ADDR default). The wrapper execs
+# `tini -- grafana-image-renderer "$@"`, so `docker run <img>` runs `server`
+# and `docker run <img> healthcheck` still overrides the Cmd.
+entrypoint:
+  command: /usr/local/bin/docker-entrypoint.sh
+cmd: server

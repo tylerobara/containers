@@ -1,0 +1,101 @@
+# Melange build for grafana-image-renderer
+# (github.com/grafana/grafana-image-renderer) — same static-Go-binary pattern
+# as openbao. v5.x is a plain Go server (the old Node.js/phantomjs stack is
+# gone); Wolfi has no grafana-image-renderer package today, so
+# provider-priority/epoch are belt-and-suspenders in case one ever appears
+# with the same name.
+#
+# Bump `version` + `vars.sha256` on each release
+# (https://github.com/grafana/grafana-image-renderer/releases) — the
+# update-versions bot covers this row.
+
+package:
+  name: grafana-image-renderer
+  version: 5.12.8
+  epoch: 100
+  description: "Grafana image rendering service backed by headless Chromium"
+  copyright:
+    - license: Apache-2.0
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the GitHub release tarball
+  sha256: c78b804a59be5e8bb80bf1b05dd2e71ff95edfa872e802cac2d23e29b0a01f2f
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      # go.mod wants go 1.26.10; Wolfi go-1.26 is 1.26.10.
+      - go-1.26
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/grafana/grafana-image-renderer/archive/refs/tags/v${{package.version}}.tar.gz" \
+        -o /home/build/grafana-image-renderer.tar.gz
+      echo "${{vars.sha256}}  /home/build/grafana-image-renderer.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf grafana-image-renderer.tar.gz
+      rm grafana-image-renderer.tar.gz
+
+  - working-directory: /home/build/grafana-image-renderer-${{package.version}}
+    runs: |
+      # v5 has no ldflags-injectable version: GetPrettyVersion() reads the
+      # -buildvcs git stamp, which a tarball build cannot produce (it would
+      # self-report "<no vcs info in build>+dirty", what upstream's own
+      # Makefile build says too). Stamp the release version the openbao way —
+      # patch the defaults in pkg/service/version.go; the verify step below
+      # fails the build if the patch stops applying.
+      # Mirrors the rest of the Makefile's build target exactly:
+      #   CGO_ENABLED=0 go build -buildvcs -ldflags '-s -w -extldflags "-static"' .
+      # (buildvcs=false because we patched the stamp source instead; modules
+      # resolve from the network, there is no vendor/ dir in the tarball).
+      sed -i \
+        -e 's%revision = "<no vcs info in build>"%revision = "${{package.version}}"%' \
+        -e 's%modified = true%modified = false%' \
+        pkg/service/version.go
+      [ "$(grep -c "revision = \"${{package.version}}\"" pkg/service/version.go)" = 1 ] \
+        && [ "$(grep -c "modified = false" pkg/service/version.go)" = 1 ] \
+        || { echo "version stamp patch did not apply as expected"; exit 1; }
+      export CGO_ENABLED=0 GOTOOLCHAIN=local
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      go build -buildvcs=false \
+        -ldflags "-s -w -extldflags '-static'" \
+        -o grafana-image-renderer .
+      D="${{targets.destdir}}"
+      install -d -m755 "$D/usr/bin" "$D/var/lib/db/sbom"
+      # melange writes the SBOM from the host side; 0777 so the runner uid
+      # can drop it in even though the pipeline created it (dokuwiki lesson).
+      chmod 0777 "$D/var/lib/db/sbom"
+      install -m755 grafana-image-renderer "$D/usr/bin/grafana-image-renderer"
+      # Upstream's contract is ENTRYPOINT ["tini","--"] CMD
+      # ["grafana-image-renderer","server"]; apko entrypoints are a single
+      # command, so this tiny wrapper carries tini (which we do want as the
+      # real PID 1: the server spawns chromium children to reap).
+      install -d -m755 "$D/usr/local/bin"
+      cat > "$D/usr/local/bin/docker-entrypoint.sh" <<'EOF'
+      #!/bin/sh
+      exec /usr/bin/tini -- /usr/bin/grafana-image-renderer "$@"
+      EOF
+      chmod 755 "$D/usr/local/bin/docker-entrypoint.sh"
+      cd "$D" && find . -type f | sed 's/^\.\///' > ../../grafana-image-renderer.bill-of-materials
+
+  - runs: |
+      # Verify the build actually produced this version (--version prints one
+      # "grafana-image-renderer version <stamp> (goX.Y.Z)" line; the stamp is
+      # our patched package.version).
+      "${{targets.destdir}}/usr/bin/grafana-image-renderer" --version \
+        | grep -q "version ${{package.version}} "
+      # healthcheck subcommand exists (upstream's Dockerfile HEALTHCHECK uses it)
+      "${{targets.destdir}}/usr/bin/grafana-image-renderer" healthcheck --help >/dev/null
+      test -x "${{targets.destdir}}/usr/local/bin/docker-entrypoint.sh"
+      sh -n "${{targets.destdir}}/usr/local/bin/docker-entrypoint.sh"

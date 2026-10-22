@@ -2,11 +2,12 @@ name: update-versions
 
 # Version bump bot — the minimal repo's update-versions.yml pattern scaled to
 # this repo's image families. Checks upstream (PGDG ftp for each tracked
-# postgresql-<major>.yaml, GitHub releases for the operator, openbao and
-# dokuwiki) and
+# postgresql-<major>.yaml, GitHub releases for the operator, openbao,
+# dokuwiki and grafana-image-renderer) and
 # opens a PR bumping `version` + `vars.sha256` in the melange config. Nothing
 # is merged or published here: review the PR, validate it with that image's
-# own workflow (postgres / cloudnative-pg-operator / openbao / dokuwiki) via
+# own workflow (postgres / cloudnative-pg-operator / openbao / dokuwiki /
+# grafana-image-renderer) via
 # workflow_dispatch (ref = PR branch, validate_only = true),
 # then merge — the merge push rebuilds and publishes just that image.
 #
@@ -154,6 +155,19 @@ jobs:
             bump_row dokuwiki "$yaml" "$latest" \
               "https://download.dokuwiki.org/src/dokuwiki/dokuwiki-$(printf '%s' "$latest" | tr '.' '-').tgz" \
               dokuwiki
+          fi
+
+          # --- grafana-image-renderer: latest GitHub release ---
+          if want grafana-image-renderer; then
+            yaml=images/grafana-image-renderer/melange/grafana-image-renderer.yaml
+            latest=$(gh api repos/grafana/grafana-image-renderer/releases/latest --jq '.tag_name | ltrimstr("v")')
+            if [ -z "$latest" ]; then
+              echo "::error::grafana-image-renderer: no release found upstream"
+              FAILED=1
+            fi
+            bump_row grafana-image-renderer "$yaml" "$latest" \
+              "https://github.com/grafana/grafana-image-renderer/archive/refs/tags/v${latest}.tar.gz" \
+              grafana-image-renderer
           fi
 
           exit $FAILED
