@@ -108,6 +108,42 @@
       "description": "The cert-manager admission webhook that validates and mutates cert-manager resources, built from upstream source by melange and assembled by apko on Wolfi."
     },
     {
+      "name": "metallb-controller",
+      "display_name": "MetalLB controller",
+      "dir": "metallb",
+      "apko": "metallb-controller.yaml",
+      "workflow": "metallb.yml",
+      "category": "Kubernetes & Networking",
+      "primary_package": "metallb-controller",
+      "upstream_url": "https://metallb.universe.tf",
+      "summary": "MetalLB controller, built from upstream source.",
+      "description": "The MetalLB controller that assigns and reconciles LoadBalancer IP pools in Kubernetes, built from upstream source by melange and assembled by apko on Wolfi."
+    },
+    {
+      "name": "metallb-speaker",
+      "display_name": "MetalLB speaker",
+      "dir": "metallb",
+      "apko": "metallb-speaker.yaml",
+      "workflow": "metallb.yml",
+      "category": "Kubernetes & Networking",
+      "primary_package": "metallb-speaker",
+      "upstream_url": "https://metallb.universe.tf",
+      "summary": "MetalLB speaker, built from upstream source.",
+      "description": "The MetalLB speaker that announces LoadBalancer IPs on the local network via Layer 2 or BGP, built from upstream source by melange and assembled by apko on Wolfi."
+    },
+    {
+      "name": "metallb-frr-k8s",
+      "display_name": "MetalLB frr-k8s",
+      "dir": "metallb",
+      "apko": "metallb-frr-k8s.yaml",
+      "workflow": "metallb.yml",
+      "category": "Kubernetes & Networking",
+      "primary_package": "metallb-frr-k8s",
+      "upstream_url": "https://github.com/metallb/frr-k8s",
+      "summary": "frr-k8s, MetalLB's FRR integration, built from upstream source.",
+      "description": "frr-k8s, the FRR routing integration MetalLB's BGP backend runs on, built from upstream source by melange and assembled by apko on Wolfi."
+    },
+    {
       "name": "openbao",
       "display_name": "OpenBao",
       "dir": "openbao",
