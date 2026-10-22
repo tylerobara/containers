@@ -1,0 +1,21 @@
+---
+import type { ImageRecord } from '../lib/catalog';
+import { imageHref } from '../lib/catalog';
+import SeverityBar from './SeverityBar.astro';
+export interface Props { image: ImageRecord; }
+const { image } = Astro.props;
+const search = [image.name, image.slug, image.displayName, image.summary, image.category, image.version, ...image.tags]
+  .filter(Boolean).join(' ').toLowerCase();
+---
+<article class="card" data-name={image.slug} data-category={image.category} data-search={search}>
+  <span class="cat">{image.category}</span>
+  <a class="card-title" href={imageHref(image.slug)}>{image.displayName}</a>
+  <p class="desc">{image.summary}</p>
+  <div class="meta-row">
+    <SeverityBar image={image} />
+    {image.version && <span class="kv-mono">{image.version}</span>}
+    {image.size?.human && <span>{image.size.human}</span>}
+    {image.signed && <span title="cosign keyless signature on the manifest digest">· signed</span>}
+    {image.updatedAgo && <span>· {image.updatedAgo}</span>}
+  </div>
+</article>

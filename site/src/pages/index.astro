@@ -1,0 +1,163 @@
+---
+import Layout from '../components/Layout.astro';
+import ImageCard from '../components/ImageCard.astro';
+import CopyButton from '../components/CopyButton.astro';
+import { images, siteStats, dataset, href, cosignVerify, GITHUB_URL } from '../lib/catalog';
+
+const stats = siteStats();
+// Newest postgres major first, then one of each family.
+const featuredSlugs = [
+  images.find((i) => i.name === 'cnpg-postgres')?.slug,
+  'cloudnative-pg', 'openbao', 'cilium', 'cert-manager-controller', 'dokuwiki',
+];
+const featured = featuredSlugs
+  .map((s) => images.find((i) => i.slug === s))
+  .filter((i): i is NonNullable<typeof i> => Boolean(i));
+
+const example = images.find((i) => i.signed && i.name === 'openbao') ?? images.find((i) => i.signed);
+const verifyCmd = example ? `# Pull — public package on GHCR
+docker pull ${example.repo}:${example.version ?? 'latest'}
+
+# Verify the keyless cosign signature (identity = the workflow that built it)
+${cosignVerify(example)}` : '';
+
+const catalogUrl = new URL(href('/data/cluster-image-catalog.yaml'), Astro.site).href;
+
+const faqs = [
+  {
+    q: 'Why is there no Dockerfile?',
+    a: 'Every binary is compiled from the upstream release tarball by melange into a signed APK, and the image is assembled declaratively by apko from that APK plus Wolfi packages. There is no `RUN` step, so the image contents are exactly the package list — reproducible, and every file is attributable to a package grype can scan.',
+  },
+  {
+    q: 'Why are some images not signed?',
+    a: 'Signing is gated on the scan: an image is cosign-signed only when grype reports zero findings at Low severity or above. An unsigned image is published and usable, but its latest build carried at least one Low+ finding — the Advisories tab on its page shows which.',
+  },
+  {
+    q: 'How often are the images rebuilt?',
+    a: 'Daily. Each image family has its own workflow and schedule, so a rebuild picks up fresh Wolfi CVE patches within 24 hours. Upstream version bumps arrive as pull requests from the update-versions workflow and rebuild only the image whose directory changed.',
+  },
+  {
+    q: 'How do I use the PostgreSQL images with CloudNativePG?',
+    a: `Apply the sha-pinned ClusterImageCatalog — \`kubectl apply -f ${catalogUrl}\` — and reference it from your Cluster with \`imageCatalogRef\`. Each major is pinned to its multi-arch manifest digest, refreshed on every rebuild.`,
+  },
+  {
+    q: 'What does "scanned" mean here?',
+    a: 'Every published build is scanned with grype after publish, and the full JSON report is published with this site. The counts on each page are raw grype findings for that exact digest — no VEX suppression is applied.',
+  },
+];
+
+const schema = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'WebSite',
+    name: 'containers',
+    url: new URL(href('/'), Astro.site).href,
+  },
+  {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: faqs.map((f) => ({
+      '@type': 'Question',
+      name: f.q,
+      acceptedAnswer: { '@type': 'Answer', text: f.a },
+    })),
+  },
+];
+---
+<Layout schema={schema}>
+  <section class="hero">
+    <div class="container">
+      <span class="eyebrow">melange · apko · Wolfi · no Dockerfiles</span>
+      <h1>Container images built from source</h1>
+      <p class="lead">
+        Binaries compiled from upstream source by melange, images assembled by apko on a
+        Wolfi base, scanned with grype on every build and cosign-signed when the scan is clean.
+      </p>
+      <div class="cta">
+        <a class="btn btn-primary" href={href('/images/')}>Browse {stats.images} images →</a>
+        <a class="btn btn-ghost" href={href('/about/')}>How to verify</a>
+      </div>
+      <div class="stats" style="margin-top:36px">
+        <div class="stat"><div class="num">{stats.images}</div><div class="lbl">Images</div></div>
+        <div class="stat"><div class="num">{stats.signed}/{stats.images}</div><div class="lbl">Signed &amp; clean</div></div>
+        <div class="stat"><div class="num">24h</div><div class="lbl">Rebuild cadence</div></div>
+        <div class="stat"><div class="num">0</div><div class="lbl">Dockerfiles</div></div>
+      </div>
+    </div>
+  </section>
+
+  {verifyCmd && (
+    <section>
+      <div class="container">
+        <h2 class="section-title">Pull and verify in 30 seconds</h2>
+        <p class="section-sub">You don't have to trust the page — check the signature yourself.</p>
+        <div class="container-narrow" style="padding:0">
+          <CopyButton code={verifyCmd} />
+        </div>
+      </div>
+    </section>
+  )}
+
+  <section>
+    <div class="container">
+      <h2 class="section-title">What every image ships with</h2>
+      <p class="section-sub">The same pipeline for every image family — one workflow each, so a change to one can never rebuild another.</p>
+      <div class="verify-grid">
+        <div class="feature"><h3>Built from upstream source</h3><p>melange compiles the release tarball with upstream's own build flags into a signed APK.</p></div>
+        <div class="feature"><h3>Declarative assembly</h3><p>apko builds the image from a package list on Wolfi — no Dockerfile, no RUN steps, lockfile-guarded.</p></div>
+        <div class="feature"><h3>grype scan every build</h3><p>The full report for each published digest is published here and in <a href={href('/data/index.json')}>raw JSON</a>.</p></div>
+        <div class="feature"><h3>Cosign keyless signature</h3><p>Signed only when the scan has zero Low+ findings, with the building workflow as the certificate identity.</p></div>
+        <div class="feature"><h3>Smoke tested</h3><p>Every build runs the image's own <code>test.sh</code> against the published image before it is scanned or signed.</p></div>
+        <div class="feature"><h3>Multi-arch, native runners</h3><p>amd64 and arm64 legs build natively and are joined into one manifest index.</p></div>
+      </div>
+    </div>
+  </section>
+
+  {dataset.clusterImageCatalog.length > 0 && (
+    <section>
+      <div class="container">
+        <h2 class="section-title">CloudNativePG ClusterImageCatalog</h2>
+        <p class="section-sub">Every PostgreSQL major, pinned to its manifest digest and refreshed on every rebuild.</p>
+        <div class="container-narrow" style="padding:0">
+          <CopyButton code={`kubectl apply -f ${catalogUrl}`} />
+          <table class="data" style="margin-top:16px">
+            <thead><tr><th>Major</th><th>Image</th></tr></thead>
+            <tbody>
+              {dataset.clusterImageCatalog.map((c) => (
+                <tr><td>{c.major}</td><td class="mono" style="overflow-wrap:anywhere">{c.image}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  )}
+
+  <section>
+    <div class="container">
+      <div class="container-narrow" style="padding:0">
+        <h2 class="section-title">Common questions</h2>
+        <p class="section-sub">Short answers to what people ask before swapping an image.</p>
+        {faqs.map((f) => (
+          <details class="faq">
+            <summary>{f.q}</summary>
+            <p set:html={f.a.replace(/`([^`]+)`/g, '<code>$1</code>')} />
+          </details>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="container">
+      <h2 class="section-title">Popular images</h2>
+      <p class="section-sub">A few of the {stats.images} available. <a href={href('/images/')}>See all →</a></p>
+      <div class="grid">
+        {featured.map((img) => <ImageCard image={img} />)}
+      </div>
+      <p class="small muted" style="margin-top:28px">
+        Source, build recipes and workflows: <a href={GITHUB_URL} rel="noopener">{GITHUB_URL.replace('https://', '')}</a>.
+      </p>
+    </div>
+  </section>
+</Layout>

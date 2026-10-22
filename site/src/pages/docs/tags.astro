@@ -1,0 +1,55 @@
+---
+import Layout from '../../components/Layout.astro';
+import CopyButton from '../../components/CopyButton.astro';
+import { images, href } from '../../lib/catalog';
+const ex = images.find((i) => i.name === 'openbao') ?? images.find((i) => i.major == null);
+const pg = images.find((i) => i.major != null);
+const repo = ex?.repo ?? 'ghcr.io/tylerobara/containers/openbao';
+const ver = ex?.version ?? '2.7.1';
+const minor = ver.split('.').slice(0, 2).join('.');
+---
+<Layout title="Tags & pinning — which tag to use in production" description="What each published tag means and which one to pin for production, including digest pinning and PostgreSQL major tags.">
+  <section>
+    <div class="container-narrow">
+      <p class="eyebrow"><a href={href('/docs/')}>Docs</a></p>
+      <h1 class="section-title">Tags &amp; pinning</h1>
+      <p class="section-sub">Every build publishes several tags pointing at the same manifest. Which one you pin decides what happens when the software changes underneath you.</p>
+
+      <h2 style="font-size:1.1rem;margin-top:32px">Pin by digest for immutability</h2>
+      <p class="small muted">A digest is content-addressed — it can never move. Each image page lists the digest that was scanned.</p>
+      <CopyButton code={ex?.digest ? `${repo}:${ver}@${ex.digest}` : `${repo}@sha256:<digest>`} />
+
+      <h2 class="section-title" style="margin-top:44px">What each tag does</h2>
+      <table class="data">
+        <thead><tr><th>Reference</th><th>Example</th><th>Behavior</th></tr></thead>
+        <tbody>
+          <tr><td><b>Digest</b></td><td><code class="kv-mono">…@sha256:…</code></td><td>Immutable content identity. Never moves.</td></tr>
+          <tr><td><b>Version</b></td><td><code class="kv-mono">:{ver}</code></td><td>Moves when that upstream version is rebuilt with newer Wolfi packages (daily).</td></tr>
+          <tr><td><b>Minor line</b></td><td><code class="kv-mono">:{minor}</code></td><td>Newest patch within that minor line.</td></tr>
+          <tr><td><b>Latest</b></td><td><code class="kv-mono">:latest</code></td><td>Newest build, <b>including across major versions</b>.</td></tr>
+        </tbody>
+      </table>
+
+      {pg && (
+        <>
+          <h2 class="section-title" style="margin-top:44px">PostgreSQL</h2>
+          <p>
+            PostgreSQL publishes no <code class="kv-mono">latest</code>: CloudNativePG requires the tag to start with
+            the major version, and a rolling tag across majors would be a data-directory upgrade in disguise.
+            Each major publishes <code class="kv-mono">:{pg.major}</code>, <code class="kv-mono">:{pg.version}</code> and
+            <code class="kv-mono">-wolfi</code>-suffixed equivalents. For clusters, prefer the sha-pinned
+            <a href={href('/data/cluster-image-catalog.yaml')}>ClusterImageCatalog</a>.
+          </p>
+        </>
+      )}
+
+      <h2 class="section-title" style="margin-top:44px">Which should you pin?</h2>
+      <p>
+        <b>Pin a minor line</b> if you want ongoing patches and Wolfi CVE fixes without being moved to a new
+        feature release. An exact version tag still receives daily rebuilds of the same upstream version.
+        Pin a <b>digest</b> when you need a byte-identical artifact and will update it deliberately — Renovate
+        or Dependabot can keep digest pins fresh.
+      </p>
+    </div>
+  </section>
+</Layout>

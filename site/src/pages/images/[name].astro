@@ -1,0 +1,296 @@
+---
+import Layout from '../../components/Layout.astro';
+import CopyButton from '../../components/CopyButton.astro';
+import { images, dataset, categoryHref, imageHref, href, cosignVerify, GITHUB_URL } from '../../lib/catalog';
+
+export function getStaticPaths() {
+  return images.map((img) => ({ params: { name: img.slug }, props: { image: img } }));
+}
+
+const { image } = Astro.props;
+const v = image.vulnerabilities;
+const s = image.specs;
+const sevOrder = ['critical', 'high', 'medium', 'low', 'negligible', 'unknown'] as const;
+
+const tagRef = `${image.repo}:${image.version ?? 'latest'}`;
+const pinnedRef = image.digest ? `${tagRef}@${image.digest}` : null;
+const pageTitle = `${image.displayName} — container image built from source on Wolfi`;
+const pageDescription = image.description || image.summary;
+const sourceUrl = `${GITHUB_URL}/tree/main/${image.sourceDir}`;
+const workflowUrl = image.workflow ? `${GITHUB_URL}/actions/workflows/${image.workflow}` : null;
+const catalogUrl = new URL(href('/data/cluster-image-catalog.yaml'), Astro.site).href;
+
+const siblings = images
+  .filter((i) => i.category === image.category && i.slug !== image.slug)
+  .slice(0, 8);
+
+const schema = [{
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: image.displayName,
+  applicationCategory: 'DeveloperApplication',
+  description: image.summary,
+  operatingSystem: 'Linux',
+  url: new URL(imageHref(image.slug), Astro.site).href,
+  downloadUrl: `https://${image.repo}`,
+  isAccessibleForFree: true,
+  ...(image.version ? { softwareVersion: image.version } : {}),
+  ...(image.archs.length ? { processorRequirements: image.archs.join(', ') } : {}),
+  ...(image.builtAt ? { dateModified: image.builtAt } : {}),
+}];
+---
+<Layout
+  title={pageTitle}
+  description={pageDescription}
+  schema={schema}
+  breadcrumbs={[{ name: 'Images', href: href('/images/') }, { name: image.category, href: categoryHref(image.category) }]}>
+  <div class="detail-head">
+    <div class="container">
+      <p style="margin:0 0 6px"><a href={href('/images/')} class="small muted">← All images</a></p>
+      <h1>
+        {image.displayName}
+        <a class="cat" href={categoryHref(image.category)}>{image.category}</a>
+        {image.signed
+          ? <span class="pill clean" title="cosign keyless signature on the manifest digest">Signed</span>
+          : image.dataStatus.build && <span class="pill neutral" title="Signing is gated on 0 Low+ findings">Unsigned</span>}
+      </h1>
+      <p class="summary">{image.summary}</p>
+      <div class="quickfacts">
+        {image.version && <span><b>Version</b> {image.version}</span>}
+        {image.size?.human && <span><b>Size</b> {image.size.human}</span>}
+        {image.archs.length > 0 && <span><b>Arch</b> {image.archs.join(', ')}</span>}
+        {s?.user && <span><b>User</b> {s.user}</span>}
+        {image.updatedAgo && <span><b>Updated</b> {image.updatedAgo}</span>}
+        {image.upstreamUrl && <span><b>Upstream</b> <a href={image.upstreamUrl} rel="noopener">{image.upstreamUrl.replace(/^https?:\/\//, '')}</a></span>}
+      </div>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="true" data-tab="overview">Overview</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="specs">Specifications</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="tags">Tags <span class="muted">({image.tags.length})</span></button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="packages">Packages{s?.packagesRequested?.length ? <span class="muted"> ({s.packagesRequested.length})</span> : null}</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="advisories">Advisories{v ? <span class="muted"> ({v.total})</span> : null}</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="provenance">Provenance</button>
+    </div>
+
+    <!-- OVERVIEW -->
+    <div class="tabpanel" data-panel="overview">
+      <h2 class="section-title" style="font-size:1.1rem">Pull this image</h2>
+      <CopyButton code={`docker pull ${tagRef}`} />
+      {pinnedRef && (
+        <>
+          <p class="small muted" style="margin:14px 0 8px">Pinned to the scanned digest:</p>
+          <CopyButton code={`docker pull ${pinnedRef}`} />
+        </>
+      )}
+
+      {image.major != null && dataset.clusterImageCatalog.length > 0 && (
+        <>
+          <h2 class="section-title" style="font-size:1.1rem;margin-top:28px">Use with CloudNativePG</h2>
+          <p class="small muted" style="margin:0 0 8px">Every major, sha-pinned, as one ClusterImageCatalog — then set <code class="kv-mono">imageCatalogRef</code> with <code class="kv-mono">major: {image.major}</code> on your Cluster.</p>
+          <CopyButton code={`kubectl apply -f ${catalogUrl}`} />
+        </>
+      )}
+
+      <h2 class="section-title" style="font-size:1.1rem;margin-top:28px">Details</h2>
+      <dl class="spec-grid">
+        <dt>Repository</dt><dd class="kv-mono">{image.repo}</dd>
+        {image.digest && <><dt>Digest</dt><dd class="kv-mono">{image.digest}</dd></>}
+        {image.size?.human && <><dt>Size (compressed, amd64)</dt><dd>{image.size.human}</dd></>}
+        {image.builtAt && <><dt>Built</dt><dd>{image.builtAt} {image.updatedAgo ? `(${image.updatedAgo})` : ''}</dd></>}
+        {image.builtWith && <><dt>Built with</dt><dd>{image.builtWith === 'melange' ? 'melange (from source) + apko' : image.builtWith}</dd></>}
+        {image.archs.length > 0 && <><dt>Architectures</dt><dd>{image.archs.join(', ')}</dd></>}
+        {image.primaryPackage && <><dt>Primary package</dt><dd class="kv-mono">{image.primaryPackage}</dd></>}
+        <dt>Source</dt><dd><a href={sourceUrl} rel="noopener" class="kv-mono">{image.sourceDir}</a></dd>
+        {workflowUrl && <><dt>Workflow</dt><dd><a href={workflowUrl} rel="noopener" class="kv-mono">{image.workflow}</a></dd></>}
+      </dl>
+      {image.degraded && (
+        <p class="notice warn" style="margin-top:20px">Some data was unavailable for this build: {image.notes.join('; ') || 'partial'}.</p>
+      )}
+    </div>
+
+    <!-- SPECIFICATIONS -->
+    <div class="tabpanel" data-panel="specs">
+      {s ? (
+        <>
+          {s.source === 'apko' && <p class="notice" style="margin-bottom:20px">Read from the apko recipe — the published image config was not reachable for this build.</p>}
+          <dl class="spec-grid">
+            <dt>Entrypoint</dt><dd class="kv-mono">{s.entrypoint || '—'}</dd>
+            {s.cmd && <><dt>Cmd</dt><dd class="kv-mono">{s.cmd}</dd></>}
+            <dt>User</dt><dd>{s.user || 'root'}</dd>
+            <dt>Working dir</dt><dd class="kv-mono">{s.workdir || '/'}</dd>
+            <dt>Architectures</dt><dd>{(image.archs.length ? image.archs : s.archs).join(', ') || '—'}</dd>
+            {s.exposedPorts.length > 0 && <><dt>Exposed ports</dt><dd class="kv-mono">{s.exposedPorts.join(', ')}</dd></>}
+            {s.volumes.length > 0 && <><dt>Volumes</dt><dd class="kv-mono">{s.volumes.join(', ')}</dd></>}
+            {s.layers != null && <><dt>Layers</dt><dd>{s.layers}</dd></>}
+            <dt>Environment</dt>
+            <dd>
+              {Object.keys(s.env).length === 0 ? '—' : (
+                <div class="tag-list">
+                  {Object.entries(s.env).map(([k, val]) => <span class="tag-chip">{k}={val}</span>)}
+                </div>
+              )}
+            </dd>
+            <dt>Labels</dt>
+            <dd>
+              {Object.keys(s.labels).length === 0 ? '—' : (
+                <table class="data"><tbody>
+                  {Object.entries(s.labels).map(([k, val]) => <tr><td class="mono">{k}</td><td style="overflow-wrap:anywhere">{val}</td></tr>)}
+                </tbody></table>
+              )}
+            </dd>
+          </dl>
+        </>
+      ) : (
+        <p class="notice warn">Specifications unavailable for this image.</p>
+      )}
+    </div>
+
+    <!-- TAGS -->
+    <div class="tabpanel" data-panel="tags">
+      {image.tags.length === 0 ? (
+        <p class="notice warn">No published tags recorded yet. The tag list appears after the image's first publish.</p>
+      ) : (
+        <>
+          <p class="section-sub">All tags below point at the same build{image.digest ? <> (<code class="kv-mono">{image.digest.slice(0, 19)}…</code>)</> : null}. Pin a digest for an immutable reference.</p>
+          <table class="data">
+            <thead><tr><th>Tag</th><th>Pull</th></tr></thead>
+            <tbody>
+              {image.tags.map((t) => (
+                <tr>
+                  <td class="mono">{t}</td>
+                  <td class="mono" style="overflow-wrap:anywhere">{image.repo}:{t}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </div>
+
+    <!-- PACKAGES -->
+    <div class="tabpanel" data-panel="packages">
+      {s?.packagesRequested?.length ? (
+        <>
+          <p class="section-sub">Packages requested in the apko recipe (<a href={`${sourceUrl}/apko`} rel="noopener">{image.sourceDir}/apko</a>); apko resolves their dependencies against Wolfi at build time.</p>
+          <div class="tag-list">{s.packagesRequested.map((p) => <span class="tag-chip">{p}</span>)}</div>
+        </>
+      ) : (
+        <p class="notice warn">No package list available for this image.</p>
+      )}
+    </div>
+
+    <!-- ADVISORIES -->
+    <div class="tabpanel" data-panel="advisories">
+      {v ? (
+        v.total === 0 ? (
+          <p class="notice"><span class="pill clean">Clean</span> &nbsp; No known vulnerabilities in the latest scan ({v.scanner}).</p>
+        ) : (
+          <>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;align-items:center">
+              {sevOrder.map((sev) => v.counts[sev] > 0 && <span class={`pill ${sev === 'negligible' || sev === 'unknown' ? 'neutral' : sev}`}>{v.counts[sev]} {sev}</span>)}
+              <span class="pill neutral">{v.fixable} fixable</span>
+              <span class="small muted">{v.scanner}{v.dbBuilt ? ` · DB built ${v.dbBuilt.slice(0, 10)}` : ''}</span>
+            </div>
+            {v.lowPlus > 0 && (
+              <p class="notice warn" style="margin-bottom:16px">{v.lowPlus} finding{v.lowPlus === 1 ? '' : 's'} at Low or above — this build was not signed.</p>
+            )}
+            <div style="overflow-x:auto">
+              <table class="data">
+                <thead><tr><th>CVE</th><th>Severity</th><th>Package</th><th>Installed</th><th>Fixed in</th></tr></thead>
+                <tbody>
+                  {v.list.slice(0, 500).map((cve) => (
+                    <tr>
+                      <td class="mono">{cve.url ? <a href={cve.url} rel="noopener">{cve.id}</a> : cve.id}</td>
+                      <td><span class={`pill ${['critical', 'high', 'medium', 'low'].includes(cve.severity.toLowerCase()) ? cve.severity.toLowerCase() : 'neutral'}`}>{cve.severity}</span></td>
+                      <td>{cve.package}</td>
+                      <td class="mono">{cve.installed}</td>
+                      <td class="mono">{cve.fixedIn || cve.fixState || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {v.list.length > 500 && (
+              <p class="small muted" style="margin-top:12px">{v.list.length - 500} more not shown — the full report is in <a href={href('/data/index.json')}>data/index.json</a>.</p>
+            )}
+          </>
+        )
+      ) : (
+        <p class="notice">No scan data for this build yet. Advisories appear after the image's next build.</p>
+      )}
+    </div>
+
+    <!-- PROVENANCE -->
+    <div class="tabpanel" data-panel="provenance">
+      {image.signed ? (
+        <>
+          <p class="section-sub">Signed keyless with cosign by <code class="kv-mono">{image.workflow}</code> on <code class="kv-mono">main</code>. Copy and run:</p>
+          <CopyButton code={cosignVerify(image)} />
+          <p class="small muted" style="margin-top:20px">The signature is on the manifest digest and logged in the public <a href="https://rekor.sigstore.dev" rel="noopener">Rekor</a> transparency log.</p>
+        </>
+      ) : (
+        <p class="notice warn">
+          This build is not signed. Signing is gated on the grype scan reporting zero findings at
+          Low or above{v ? <> — this build has {v.lowPlus}</> : null}. See the Advisories tab.
+        </p>
+      )}
+      <h3 style="font-size:1rem;margin:24px 0 8px">Rebuild it yourself</h3>
+      <p class="small muted">
+        The melange and apko recipes are in <a href={sourceUrl} rel="noopener">{image.sourceDir}</a>;
+        {workflowUrl ? <> the pipeline that built this digest is <a href={workflowUrl} rel="noopener">{image.workflow}</a>.</> : ' see the repository workflows.'}
+      </p>
+    </div>
+
+    <div style="margin-top:48px;padding-top:28px;border-top:1px solid var(--border)">
+      {siblings.length > 0 && (
+        <>
+          <h2 class="section-title" style="font-size:1.05rem">
+            More <a href={categoryHref(image.category)}>{image.category}</a> images
+          </h2>
+          <div class="facets" style="margin-top:12px">
+            {siblings.map((sib) => <a class="facet" href={imageHref(sib.slug)}>{sib.displayName}</a>)}
+          </div>
+        </>
+      )}
+    </div>
+  </div>
+
+  <script is:inline>
+    // Collapse the panels during parse, before first paint, so JS users get the
+    // tab UI with no flash — but leave them in the markup (not `hidden`) so
+    // non-JS readers still get every panel.
+    (function () {
+      var panels = document.querySelectorAll('.tabpanel');
+      var initial = location.hash.replace('#', '') || 'overview';
+      var known = false;
+      for (var i = 0; i < panels.length; i++) {
+        if (panels[i].getAttribute('data-panel') === initial) known = true;
+      }
+      if (!known) initial = 'overview';
+      for (var j = 0; j < panels.length; j++) {
+        panels[j].hidden = panels[j].getAttribute('data-panel') !== initial;
+      }
+      var tabs = document.querySelectorAll('.tab');
+      for (var k = 0; k < tabs.length; k++) {
+        tabs[k].setAttribute('aria-selected', String(tabs[k].getAttribute('data-tab') === initial));
+      }
+    })();
+  </script>
+</Layout>
+
+<script>
+  const tabs = Array.from(document.querySelectorAll<HTMLElement>('.tab'));
+  const panels = Array.from(document.querySelectorAll<HTMLElement>('.tabpanel'));
+  function selectTab(name: string) {
+    for (const t of tabs) t.setAttribute('aria-selected', String(t.dataset.tab === name));
+    for (const p of panels) p.hidden = p.dataset.panel !== name;
+    history.replaceState(null, '', `#${name}`);
+  }
+  for (const t of tabs) t.addEventListener('click', () => selectTab(t.dataset.tab!));
+  const initial = location.hash.replace('#', '');
+  if (initial && tabs.some((t) => t.dataset.tab === initial)) selectTab(initial);
+</script>

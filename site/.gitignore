@@ -1,0 +1,17 @@
+# build output
+dist/
+.astro/
+
+# deps
+node_modules/
+
+# NOTE: src/data/images.json IS committed as a seed so a fresh clone renders
+# without a data run; CI overwrites it on every deploy. Do not ignore it.
+
+# local index fixture used for full-data testing (see README)
+index.json
+
+# env / logs
+.env
+.env.*
+npm-debug.log*

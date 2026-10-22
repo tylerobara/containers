@@ -1,0 +1,97 @@
+---
+import Layout from '../../components/Layout.astro';
+import ImageCard from '../../components/ImageCard.astro';
+import { byCategory, categories, categoryHref, images, imageHref, href } from '../../lib/catalog';
+const grouped = byCategory();
+
+const schema = [{
+  '@context': 'https://schema.org',
+  '@type': 'ItemList',
+  name: 'containers image directory',
+  numberOfItems: images.length,
+  itemListElement: images.map((img, i) => ({
+    '@type': 'ListItem',
+    position: i + 1,
+    name: img.displayName,
+    url: new URL(imageHref(img.slug), Astro.site).href,
+  })),
+}];
+---
+<Layout
+  title={`All ${images.length} images — built from source, scanned and signed`}
+  description={`Browse ${images.length} container images across ${categories.length} categories, built from upstream source with melange and apko on Wolfi, scanned with grype and cosign-signed when clean.`}
+  schema={schema}
+  breadcrumbs={[]}>
+  <section>
+    <div class="container">
+      <h1 class="section-title">All {images.length} images</h1>
+      <p class="section-sub">{images.length} images across {categories.length} categories — Wolfi-based, rebuilt daily, scan results for every published digest.</p>
+
+      <div class="controls">
+        <input id="search" type="search" placeholder="Search images, versions or tags — e.g. 18.6, cilium, latest…" autocomplete="off" autocapitalize="off" spellcheck="false" />
+      </div>
+      <div class="facets" id="facets">
+        <span class="facet" data-cat="all" aria-pressed="true">All</span>
+        {categories.map((c) => <span class="facet" data-cat={c} aria-pressed="false">{c}</span>)}
+      </div>
+
+      <p id="noresults" class="notice" hidden style="margin-top:20px">No images match your search.</p>
+
+      <div id="catalog" style="margin-top:24px">
+        {categories.filter((c) => grouped[c]?.length).map((c) => (
+          <div class="cat-group" data-category={c}>
+            <h2 class="section-title" style="font-size:1.15rem;margin-top:28px">
+              <a href={categoryHref(c)}>{c}</a>
+            </h2>
+            <div class="grid">
+              {grouped[c].map((img) => <ImageCard image={img} />)}
+            </div>
+          </div>
+        ))}
+      </div>
+      <p class="small muted" style="margin-top:32px">
+        Machine-readable: <a href={href('/data/index.json')}>data/index.json</a> (every build entry with its full grype report).
+      </p>
+    </div>
+  </section>
+</Layout>
+
+<script>
+  const search = document.getElementById('search') as HTMLInputElement;
+  const facets = Array.from(document.querySelectorAll<HTMLElement>('#facets .facet'));
+  const groups = Array.from(document.querySelectorAll<HTMLElement>('.cat-group'));
+  const cards = Array.from(document.querySelectorAll<HTMLElement>('.card'));
+  const noresults = document.getElementById('noresults') as HTMLElement;
+  let activeCat = 'all';
+
+  // Every whitespace-separated token must appear somewhere in the card's
+  // name/summary/version/tags, so "postgres 17" or "cert webhook" both work.
+  function apply() {
+    const toks = search.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    let visible = 0;
+    for (const card of cards) {
+      const hay = card.dataset.search || '';
+      const matchCat = activeCat === 'all' || card.dataset.category === activeCat;
+      const show = matchCat && toks.every((t) => hay.includes(t));
+      card.style.display = show ? '' : 'none';
+      if (show) visible++;
+    }
+    for (const g of groups) {
+      const anyVisible = Array.from(g.querySelectorAll<HTMLElement>('.card')).some((c) => c.style.display !== 'none');
+      g.style.display = anyVisible ? '' : 'none';
+    }
+    noresults.hidden = visible !== 0;
+  }
+
+  search.addEventListener('input', apply);
+  for (const f of facets) {
+    f.addEventListener('click', () => {
+      activeCat = f.dataset.cat || 'all';
+      for (const other of facets) other.setAttribute('aria-pressed', String(other === f));
+      apply();
+    });
+  }
+  // /images/?q=… (from the 404 search box)
+  const q = new URLSearchParams(location.search).get('q');
+  if (q) { search.value = q; apply(); }
+</script>

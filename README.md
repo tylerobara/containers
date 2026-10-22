@@ -16,9 +16,10 @@ base. **No Dockerfiles anywhere.**
 | Cilium (cilium, cilium-operator-generic, cilium-envoy) | `ghcr.io/tylerobara/containers/cilium` (+ `-operator-generic`, `-envoy`) | [`images/cilium/`](images/cilium/) |
 | cert-manager (controller, cainjector, webhook) | `ghcr.io/tylerobara/containers/cert-manager-controller` (+ `-cainjector`, `-webhook`) | [`images/cert-manager/`](images/cert-manager/) |
 
-Catalog + grype scan results: <https://tylerobara.github.io/containers/>
-(includes a sha-pinned `ClusterImageCatalog` for CNPG, copy-paste `docker pull`
-/ `cosign verify` commands, and a filter box).
+Catalog + grype scan results: <https://tylerobara.github.io/containers/> — an
+Astro site (`site/`) with a page per image (specs, tags, advisories, cosign
+verify commands), a sha-pinned `ClusterImageCatalog` for CNPG, and the raw
+build/scan data at `data/index.json`. See [`site/README.md`](site/README.md).
 
 ## CI
 
@@ -33,7 +34,11 @@ when the scan has 0 findings Low or above**. The cosign cert identity is each
 workflow's own filename (see the verify commands on the Pages catalog). PRs run
 the whole pipeline except publish/sign/pages (build, lock guard, local
 assemble, smoke test, scan) — see `lint.yml` and `update-versions.yml`
-alongside these.
+alongside these. Every image workflow's `pages` job calls the reusable
+`site.yml`, which merges the run's fresh entries into `data/index.json`,
+rebuilds the site and publishes gh-pages; `site.yml` also runs on its own for
+`site/**` / `catalog.json` changes (rebuild from the live index, no image
+build).
 
 ## Version updates
 
@@ -59,7 +64,8 @@ Manual bumps work the same way — just edit `version` + `vars.sha256` yourself.
 
 ## Adding an image
 
-Drop a directory at `images/<name>/` with `melange/*.yaml`, `apko/*.yaml` and
+Add the image to [`catalog.json`](catalog.json) (name, category, apko file,
+summary) so it gets a page on the site, then drop a directory at `images/<name>/` with `melange/*.yaml`, `apko/*.yaml` and
 `test.sh`, and clone `.github/workflows/openbao.yml` — the thinnest complete
 example (keygen → melange per-arch → apko lock guard + publish → test → grype
 → cosign → Pages merge) — adjusting the trigger paths, artifact names, package

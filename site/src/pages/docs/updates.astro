@@ -1,0 +1,47 @@
+---
+import Layout from '../../components/Layout.astro';
+import { href, GITHUB_URL } from '../../lib/catalog';
+---
+<Layout title="How images stay current — daily rebuilds and version bumps" description="Each image family rebuilds daily for Wolfi CVE patches, and upstream releases arrive as reviewed version-bump pull requests.">
+  <section>
+    <div class="container-narrow">
+      <p class="eyebrow"><a href={href('/docs/')}>Docs</a></p>
+      <h1 class="section-title">How images stay current</h1>
+      <p class="section-sub">Two independent loops: a daily rebuild that picks up Wolfi package fixes, and upstream version bumps that arrive as pull requests.</p>
+
+      <h2 class="section-title" style="margin-top:36px">One workflow per image family</h2>
+      <p>
+        Every family — PostgreSQL, the CloudNativePG operator, OpenBao, os-shell, DokuWiki, Grafana Image
+        Renderer, Cilium and cert-manager — has its own workflow. Routing is the native
+        <code class="kv-mono">on.push.paths</code> filter, so a change to one image's directory rebuilds only that
+        image, and one family's failure can never cancel another's build.
+      </p>
+
+      <h2 class="section-title" style="margin-top:36px">Daily rebuilds</h2>
+      <p>
+        Each workflow runs on its own daily schedule, staggered a few minutes apart from 06:00 UTC. A rebuild
+        re-resolves the apko package set against Wolfi, so a CVE fix that lands in Wolfi reaches a published tag
+        within a day — without a commit. Each rebuild runs the full pipeline:
+      </p>
+      <ol>
+        <li>melange compiles the upstream source on native amd64 and arm64 runners;</li>
+        <li>apko assembles the image, guarded by a committed lockfile;</li>
+        <li>the image's own <code class="kv-mono">test.sh</code> smoke-tests the published image;</li>
+        <li>grype scans the published digest;</li>
+        <li>cosign signs it — only if the scan has zero findings Low or above;</li>
+        <li>this site redeploys with the fresh entry.</li>
+      </ol>
+
+      <h2 class="section-title" style="margin-top:36px">Upstream version bumps</h2>
+      <p>
+        The <code class="kv-mono">update-versions</code> workflow checks upstream daily (PGDG for each tracked
+        PostgreSQL major, GitHub releases for everything else) and opens a pull request bumping
+        <code class="kv-mono">version</code> and <code class="kv-mono">sha256</code> in the melange config. Merging
+        the PR rebuilds, rescans and resigns only that image, and updates its entry here in place.
+      </p>
+      <p class="small muted">
+        Workflows: <a href={`${GITHUB_URL}/tree/main/.github/workflows`} rel="noopener">.github/workflows</a>.
+      </p>
+    </div>
+  </section>
+</Layout>
