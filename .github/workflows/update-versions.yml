@@ -3,13 +3,14 @@ name: update-versions
 # Version bump bot — the minimal repo's update-versions.yml pattern scaled to
 # this repo's image families. Checks upstream (PGDG ftp for each tracked
 # postgresql-<major>.yaml, GitHub releases for the operator, openbao,
-# dokuwiki, grafana-image-renderer, cilium and cert-manager; cilium-envoy
-# follows cilium's
-# own images/cilium/Dockerfile pin and gets its payload shas re-extracted) and
+# dokuwiki, grafana-image-renderer, cilium, cert-manager and frr-k8s;
+# cilium-envoy follows cilium's own images/cilium/Dockerfile pin and gets its
+# payload shas re-extracted; metallb's controller + speaker configs are bumped
+# together off the latest non-chart metallb tag) and
 # opens a PR bumping `version` + `vars.sha256` in the melange config. Nothing
 # is merged or published here: review the PR, validate it with that image's
 # own workflow (postgres / cloudnative-pg-operator / openbao / dokuwiki /
-# grafana-image-renderer / cert-manager) via
+# grafana-image-renderer / cert-manager / metallb) via
 # workflow_dispatch (ref = PR branch, validate_only = true),
 # then merge — the merge push rebuilds and publishes just that image.
 #
@@ -23,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       only:
-        description: "Comma-separated rows to check, e.g. postgresql-16,operator,openbao,cilium,cilium-envoy (blank = all)"
+        description: "Comma-separated rows to check, e.g. postgresql-16,operator,openbao,cilium,cilium-envoy,metallb,frr-k8s (blank = all)"
         required: false
         default: ""
 
@@ -348,6 +349,82 @@ jobs:
                   git switch -C scratch-"$branch" origin/main >/dev/null 2>&1
                 fi
               fi
+            fi
+          fi
+
+          # --- metallb: controller + speaker share one tarball and move in
+          # lockstep, so both configs are bumped in a single PR. releases/latest
+          # is the CHART tag (metallb-chart-x.y.z), so filter the tag listing to
+          # image tags ^v<digit>. No git_commit var: upstream releases ship the
+          # ldflag defaults "dev", so nothing to track. ---
+          if want metallb; then
+            mlb_yamls="images/metallb/melange/metallb-controller.yaml
+              images/metallb/melange/metallb-speaker.yaml"
+            cur=$(awk '/^  version:/{print $2; exit}' images/metallb/melange/metallb-controller.yaml)
+            latest=$(gh api --paginate repos/metallb/metallb/tags --jq '.[].name' \
+              | grep -E '^v[0-9]' | sort -V | tail -1 | sed 's/^v//')
+            if [ -z "$latest" ]; then
+              echo "::error::metallb: no release tag found upstream"
+              FAILED=1
+            fi
+            if [ "$(printf '%s\n%s\n' "$cur" "$latest" | sort -V | tail -1)" != "$latest" ] || [ "$cur" = "$latest" ]; then
+              echo "metallb: already at or ahead of $latest, skip"
+            else
+              url="https://github.com/metallb/metallb/archive/refs/tags/v${latest}.tar.gz"
+              if ! mlb_sha=$(curl -fsSL --retry 3 "$url" | sha256sum | awk '{print $1}'); then
+                echo "::error::metallb: could not download $url"
+                FAILED=1
+              else
+                for yaml in $mlb_yamls; do
+                  sed -i "0,/^  version: /s/^  version: .*/  version: $latest/" "$yaml"
+                  sed -i "0,/^  sha256: /s/^  sha256: .*/  sha256: $mlb_sha/" "$yaml"
+                done
+                ok=1
+                for yaml in $mlb_yamls; do
+                  [ "$(awk '/^  version:/{print $2; exit}' "$yaml")" = "$latest" ] || ok=0
+                  [ "$(awk '/^  sha256:/{print $2; exit}' "$yaml")" = "$mlb_sha" ] || ok=0
+                done
+                if [ "$ok" != 1 ]; then
+                  echo "::error::metallb: yaml edit did not land as expected"
+                  FAILED=1
+                  for yaml in $mlb_yamls; do git checkout -- "$yaml"; done
+                else
+                  branch="bump/metallb-$latest"
+                  git switch -c "$branch"
+                  for yaml in $mlb_yamls; do git add "$yaml"; done
+                  git commit -m "chore(metallb): bump $cur -> $latest"
+                  git push -f origin "$branch"
+                  if [ -n "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+                    echo "metallb: pushed update to existing PR for $branch"
+                  else
+                    gh pr create --head "$branch" --base main \
+                      --title "chore(metallb): bump $cur -> $latest" \
+                      --body "**metallb controller + speaker** \`$cur\` -> \`$latest\` (detected by the update-versions bot).
+
+          - melange configs: metallb-controller + metallb-speaker (\`version\` + \`vars.sha256\` bumped together — one shared tarball; \`epoch: 100\` untouched)
+          - upstream tarball hashed into the configs: <$url>
+          - \`sha256\`: \`$mlb_sha\`
+          - the \`vars.xnet_version\`/\`vars.otel_version\`/\`vars.grpc_version\` pins stay as-is; they are \`go get\` bumps that become no-ops once upstream ships >= them (drop them in the config then)
+
+          Bot PRs don't get automatic CI checks. To validate before merging, run **metallb.yml → Run workflow** with \`ref=$branch\` and **validate_only** checked: it builds, assembles and grype-scans the family without publishing or signing anything. The merge push to main then publishes the metallb pair."
+                  fi
+                  echo "metallb: opened/updated bump PR $cur -> $latest" >> "$GITHUB_STEP_SUMMARY"
+                  git switch -C scratch-"$branch" origin/main >/dev/null 2>&1
+                fi
+              fi
+            fi
+          fi
+
+          # --- frr-k8s: separate upstream repo + version line (own tarball);
+          # releases/latest is a plain vX.Y.Z tag ---
+          if want frr-k8s; then
+            latest=$(gh api repos/metallb/frr-k8s/releases/latest --jq '.tag_name | ltrimstr("v")')
+            if [ -z "$latest" ]; then
+              echo "::error::frr-k8s: no release found upstream"
+              FAILED=1
+            else
+              bump_row frr-k8s images/metallb/melange/metallb-frr-k8s.yaml "$latest" \
+                "https://github.com/metallb/frr-k8s/archive/refs/tags/v${latest}.tar.gz" metallb
             fi
           fi
 

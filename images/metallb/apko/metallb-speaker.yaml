@@ -1,0 +1,30 @@
+# MetalLB speaker image, assembled by apko (no Dockerfile). The binaries
+# (/speaker plus the chart-relevant /cp-tool, /frr-metrics, /frr-reloader.sh)
+# are built from the upstream release tarball by melange (see
+# ../melange/metallb-speaker.yaml); everything else is Wolfi. Mirrors
+# upstream's distroless/static image (speaker/Dockerfile), with the repo-wide
+# busybox debug shell instead of a bare scratch base.
+#
+# No run-as: upstream runs user 0 and the helm chart grants the daemonset's
+# securityContext (NET_RAW/NET_ADMIN for memberlist/BGP) at deploy time.
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    # Debug shell only — the binaries are static Go. /bin/sh + cp also serve
+    # the chart's cp-tool-based speaker init containers.
+    - busybox
+    - ca-certificates
+    # Built by melange; supplied via --repository-append at build time.
+    - metallb-speaker
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+
+entrypoint:
+  command: /speaker
+# The chart's speaker container sets no command by default, so this
+# ENTRYPOINT is what runs (matching upstream's ENTRYPOINT ["/speaker"]).

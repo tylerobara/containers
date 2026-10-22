@@ -1,0 +1,102 @@
+# Melange build for the frr-k8s image (github.com/metallb/frr-k8s).
+# Build contract from the upstream Makefile/Dockerfile: four static Go
+# binaries with CGO_ENABLED=0 (cmd/frr-k8s-controller -> /frr-k8s,
+# cmd/metrics -> /frr-metrics, cmd/status -> /frr-status,
+# cmd/statuscleaner -> /statuscleaner) plus the cmd/reloader/frr-reloader.sh
+# script; ldflags inject internal/version.gitCommit/gitBranch, which upstream
+# releases ship as the defaults "dev"/"dev", so we leave them alone.
+#
+# This image is a toolbox, not a runnable service: the frr-k8s DaemonSet runs
+# /frr-k8s as the daemon, and its init containers copy /frr-reloader.sh,
+# /frr-metrics and /frr-status out of this image (via /bin/sh + cp) into an
+# emptyDir that the sidecars of the official quay.io/frrouting/frr container
+# image execute. The root paths and the exec bits are therefore load-bearing;
+# /statuscleaner is the Deployment of the same image. Upstream ships no
+# ENTRYPOINT (every consumer passes an explicit command) so neither do we.
+#
+# Go deps at 0.0.27 need one preemptive bump: the build list carries
+# golang.org/x/net v0.57.0 (Critical/High advisories fixed in 0.60.0), so we
+# `go get` it up before compiling (otel is already at a clean 1.45.0). Like
+# the metallb pair, go get only raises requirements, so this is a no-op once
+# upstream ships >= 0.60.0 — retire the pin then.
+
+package:
+  name: metallb-frr-k8s
+  version: 0.0.27
+  epoch: 100
+  description: "frr-k8s (MetalLB's FRR integration) built from upstream source"
+  copyright:
+    - license: Apache-2.0
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the GitHub release tarball
+  sha256: 4dca9e2e5aa2a0e18f60a3caf278a9be1053714f43662dc15d75eea2ffdfa346
+  # patched x/net release (see header)
+  xnet_version: 0.60.0
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      # go.mod wants go 1.26.0 (upstream builds with golang:1.26.8).
+      - go-1.26
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/metallb/frr-k8s/archive/refs/tags/v${{package.version}}.tar.gz" \
+        -o /home/build/frrk.tar.gz
+      echo "${{vars.sha256}}  /home/build/frrk.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf frrk.tar.gz && rm frrk.tar.gz
+
+  - working-directory: /home/build/frr-k8s-${{package.version}}
+    runs: |
+      # No vendor/ in the tarball, so modules resolve from the network.
+      export CGO_ENABLED=0 GOTOOLCHAIN=local
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      # Raise the vulnerable x/net pin (see vars); a no-op once upstream
+      # ships >= it. (Only `go build` gets build flags — `go get` rejects
+      # them; upstream passes no GOFLAGS at all.)
+      go get golang.org/x/net@v${{vars.xnet_version}}
+      D="${{targets.destdir}}"
+      go build -o frr-k8s ./cmd/frr-k8s-controller
+      install -D -m 0755 frr-k8s "$D/frr-k8s"
+      go build -o frr-metrics ./cmd/metrics
+      install -D -m 0755 frr-metrics "$D/frr-metrics"
+      go build -o frr-status ./cmd/status
+      install -D -m 0755 frr-status "$D/frr-status"
+      go build -o statuscleaner ./cmd/statuscleaner
+      install -D -m 0755 statuscleaner "$D/statuscleaner"
+      # The frr-k8s DaemonSet's cp-* init containers copy this script out of
+      # the image; the frr "reloader" sidecar then executes it with bash.
+      install -D -m 0755 cmd/reloader/frr-reloader.sh "$D/frr-reloader.sh"
+
+  - runs: |
+      # No --version flag upstream and no startup banner either; prove each
+      # daemon gets as far as wanting an API server (they die fast and loudly
+      # without in-cluster config when run bare, output verified against the
+      # upstream image), and that the sidecar payloads exist.
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      for b in frr-k8s statuscleaner frr-metrics; do
+        out=$(timeout 60 "${{targets.destdir}}/$b" 2>&1 || true)
+        echo "$out"
+        echo "$out" | grep -qi "in-cluster"
+      done
+      test -x "${{targets.destdir}}/frr-status"
+      sh -n "${{targets.destdir}}/frr-reloader.sh"
+      # grype reads Go deps from the embedded build info — assert the
+      # bumped pin actually landed in the main binary.
+      ver=$(go version -m "${{targets.destdir}}/frr-k8s" \
+        | awk -F'\t' '$3=="golang.org/x/net"{print $4; exit}')
+      [ "$(printf '%s\n%s\n' "$ver" "v${{vars.xnet_version}}" | sort -V | head -1)" = "v${{vars.xnet_version}}" ] \
+        || { echo "golang.org/x/net is '$ver' in the binary, want >= v${{vars.xnet_version}}"; exit 1; }

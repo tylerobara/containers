@@ -1,0 +1,35 @@
+# frr-k8s image, assembled by apko (no Dockerfile). The five payloads
+# (/frr-k8s, /statuscleaner, /frr-metrics, /frr-status, /frr-reloader.sh) are
+# built from the upstream release tarball by melange (see
+# ../melange/metallb-frr-k8s.yaml); everything else is Wolfi.
+#
+# This image is a toolbox for the frr-k8s DaemonSet: the daemon runs
+# /frr-k8s, the cp-* init containers exec /bin/sh + cp to hand /frr-metrics,
+# /frr-status and /frr-reloader.sh to the sidecars of the official
+# quay.io/frrouting/frr containers image (chart value frr.image — left on
+# upstream, out of scope here), and the statuscleaner Deployment runs
+# /statuscleaner. All paths are hardcoded by the chart, hence root placement.
+# Upstream ships busybox + applets too (its base); ours is the Wolfi busybox.
+#
+# No run-as and no entrypoint: upstream sets neither (user root, every
+# consumer passes an explicit command), and the frr sidecars' file reads
+# across the shared emptyDirs assume root ownership.
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    # /bin/sh + cp for the chart's cp-reloader/cp-metrics/cp-frr-status init
+    # containers; ca-certificates for the daemon's API connections.
+    - busybox
+    - ca-certificates
+    # Built by melange; supplied via --repository-append at build time.
+    - metallb-frr-k8s
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+
+# No entrypoint: upstream has none; the DaemonSet/Deployment always pass
+# command (/frr-k8s or /statuscleaner).

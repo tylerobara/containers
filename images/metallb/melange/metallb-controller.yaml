@@ -1,0 +1,98 @@
+# Melange build for the MetalLB controller image (github.com/metallb/metallb),
+# from the release tarball with upstream's exact build contract
+# (controller/Dockerfile): CGO_ENABLED=0, go build ./controller, ldflags
+# injecting internal/version.gitCommit/gitBranch — which upstream releases
+# ship as the defaults "dev"/"dev", so we leave them alone for banner parity.
+# Upstream copies the static binary onto distroless/static at /controller
+# (root path; the helm chart's .Values.controller.command and the image
+# ENTRYPOINT both reference it); here that base is the apko config.
+#
+# controller + speaker share one tarball and move in lockstep — the
+# update-versions bot bumps both configs in a single PR. Wolfi ships its own
+# metallb-controller package, hence provider-priority + high epoch.
+
+package:
+  name: metallb-controller
+  version: 0.16.1
+  epoch: 100
+  description: "MetalLB controller built from upstream source"
+  copyright:
+    - license: Apache-2.0
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the GitHub release tarball (shared with metallb-speaker)
+  sha256: ed66950e5306ab8e383ed4d1ca943defb40b43d6f3a4461ee34f7cae3e285757
+  # Upstream 0.16.1 pins vulnerable Go modules (grype Critical/High in
+  # x/net <0.60.0; High in grpc <1.83.1/1.83.2 (GHSA-2v4p-qf9q-27wj,
+  # GHSA-vp52-pcj8-j9qc); Low GHSA-8wmf-6v46-5gfg in otel <=1.44.0); we
+  # `go get` them up to the patched releases before compiling. go get only
+  # raises requirements (MVS never downgrades), so once upstream ships >=
+  # these the bumps are no-ops — retire the pins then.
+  xnet_version: 0.60.0
+  otel_version: 1.45.0
+  grpc_version: 1.83.2
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      # go.mod wants go 1.25.0 (upstream builds with golang:1.25.9); the
+      # go-1.26 toolchain satisfies the directive and matches the frr-k8s
+      # config in this family.
+      - go-1.26
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/metallb/metallb/archive/refs/tags/v${{package.version}}.tar.gz" \
+        -o /home/build/mlb.tar.gz
+      echo "${{vars.sha256}}  /home/build/mlb.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf mlb.tar.gz && rm mlb.tar.gz
+
+  - working-directory: /home/build/metallb-${{package.version}}
+    runs: |
+      # No vendor/ in the tarball, so modules resolve from the network.
+      export CGO_ENABLED=0 GOTOOLCHAIN=local
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      # Raise the vulnerable dep pins (see vars); no-ops once upstream
+      # ships >= these. (Only `go build` gets build flags — `go get`
+      # rejects them; upstream passes no GOFLAGS at all.)
+      go get golang.org/x/net@v${{vars.xnet_version}} \
+        go.opentelemetry.io/otel/sdk@v${{vars.otel_version}} \
+        go.opentelemetry.io/otel/exporters/otlp/otlptrace@v${{vars.otel_version}} \
+        go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v${{vars.otel_version}} \
+        google.golang.org/grpc@v${{vars.grpc_version}}
+      go build -o metallb-controller ./controller
+      install -D -m 0755 metallb-controller "${{targets.destdir}}/controller"
+
+  - runs: |
+      # No --version flag upstream; the JSON startup banner carries the
+      # version before the binary dies on missing in-cluster config.
+      out=$(timeout 60 "${{targets.destdir}}/controller" 2>&1 || true)
+      echo "$out"
+      echo "$out" | grep -q "MetalLB controller starting version ${{package.version}}"
+      # grype reads Go deps from the embedded build info — assert every
+      # bumped pin actually landed in the binary.
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      for spec in \
+          "golang.org/x/net v${{vars.xnet_version}}" \
+          "go.opentelemetry.io/otel/sdk v${{vars.otel_version}}" \
+          "go.opentelemetry.io/otel/exporters/otlp/otlptrace v${{vars.otel_version}}" \
+          "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v${{vars.otel_version}}" \
+          "google.golang.org/grpc v${{vars.grpc_version}}"; do
+        set -- $spec
+        ver=$(go version -m "${{targets.destdir}}/controller" \
+          | awk -F'\t' -v m="$1" '$3==m{print $4; exit}')
+        [ "$(printf '%s\n%s\n' "$ver" "$2" | sort -V | head -1)" = "$2" ] \
+          || { echo "$1 is '$ver' in the binary, want >= $2"; exit 1; }
+      done
