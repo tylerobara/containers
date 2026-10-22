@@ -46,6 +46,7 @@ cilium)
     clang     --version >/dev/null || exit 6
     bpftool   version   >/dev/null || exit 8
     command -v bash     >/dev/null || exit 9
+    command -v mount    >/dev/null || exit 12  # mount-bpf-fs initContainer
     printf "#include <linux/if_ether.h>\nint t(void *ctx){return 0;}\n" > /tmp/t.c
     clang -target bpf -O2 -I /var/lib/cilium/bpf/include -c /tmp/t.c -o /tmp/t.o || exit 10
     test -f /tmp/t.o || exit 11' \

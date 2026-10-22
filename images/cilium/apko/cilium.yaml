@@ -27,9 +27,14 @@ contents:
   packages:
     # Runtime dependencies mirroring images/runtime/install-runtime-deps.sh.
     # bash: the chart's init/poststart hooks exec /bin/bash scripts; busybox
-    # covers the sh applets (mount, sleep, ...) the agent shells out to.
+    # covers the rest of the sh applets the agent shells out to.
     - busybox
     - bash
+    # Wolfi splits util-linux per-binary: `mount` is its own package (the
+    # chart's mount-bpf-fs initContainer execs `mount -t bpf bpf /sys/fs/bpf`
+    # and Wolfi's busybox ships no mount applet — without this the cilium
+    # daemonset sits in Init:CrashLoopBackOff).
+    - mount
     - iproute2
     - iptables
     - ipset
