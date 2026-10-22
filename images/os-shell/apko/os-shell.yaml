@@ -1,0 +1,54 @@
+# os-shell image, assembled by apko (no Dockerfile, nothing built from
+# source — the whole image is Wolfi packages). Bitnami's os-shell counterpart
+# (github.com/bitnami/containers/tree/main/bitnami/os-shell): a nonroot helper
+# image for init containers and one-off shell tasks.
+#
+# Bitnami's stack is minideb + ca-certificates/curl/jq/procps + five in-house
+# tools (yq, wait-for-port, render-template, ini-file, scuttle). Differences
+# here, on purpose:
+#   - Wolfi instead of minideb (no apt at runtime), nonroot 65532 instead of
+#     uid 1001
+#   - yq/jq/curl/procps/bash come from Wolfi (yq matches bitnami's version)
+#   - wait-for-port → netcat-openbsd's `nc -z`; render-template / ini-file /
+#     scuttle are bitnami-isms nobody in a k8s init container needs (their jobs
+#     are env-var templating and proxy wrapping) — skipped, see README.md
+#   - no DB clients (bitnami ships mysql/postgres clients in some variants);
+#     pull an image for that, this one is a shell
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    - busybox
+    # busybox here is built without the nc applet, and `nc -z` is our
+    # wait-for-port replacement — ship the real thing (OpenBSD netcat).
+    - netcat-openbsd
+    - ca-certificates
+    # bitnami's os-shell scripts assume bash; busybox sh alone would break
+    # everyone's `command: ["bash", "-c", ...]` init containers.
+    - bash
+    - curl
+    - jq
+    - procps
+    - yq
+
+accounts:
+  groups:
+    - groupname: nonroot
+      gid: 65532
+  users:
+    - username: nonroot
+      uid: 65532
+      gid: 65532
+      shell: /bin/false
+  # bitnami runs os-shell as its 1001 nonroot user; we use the repo-wide 65532.
+  run-as: 65532
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+
+# No entrypoint: callers always set their own command. Plain `docker run`
+# drops into the shell.
+cmd: /bin/sh

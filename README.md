@@ -10,6 +10,7 @@ base. **No Dockerfiles anywhere.**
 | PostgreSQL 15–18 (PGDG source) | `ghcr.io/tylerobara/containers/cnpg-postgres` | [`images/cloudnative-pg/`](images/cloudnative-pg/) |
 | CloudNativePG operator | `ghcr.io/tylerobara/containers/cloudnative-pg` | [`images/cloudnative-pg-operator/`](images/cloudnative-pg-operator/) |
 | OpenBao | `ghcr.io/tylerobara/containers/openbao` | [`images/openbao/`](images/openbao/) |
+| os-shell (bitnami os-shell counterpart) | `ghcr.io/tylerobara/containers/os-shell` | [`images/os-shell/`](images/os-shell/) |
 
 Catalog + grype scan results: <https://tylerobara.github.io/containers/>
 (includes a sha-pinned `ClusterImageCatalog` for CNPG, copy-paste `docker pull`
@@ -18,7 +19,7 @@ Catalog + grype scan results: <https://tylerobara.github.io/containers/>
 ## CI
 
 One workflow per image family — `postgres.yml`, `cloudnative-pg-operator.yml`,
-`openbao.yml` — so a change to one image can never rebuild or cancel another.
+`openbao.yml`, `os-shell.yml` — so a change to one image can never rebuild or cancel another.
 Routing is the native `on.push.paths` filter: a bump PR/push rebuilds **only
 the image whose directory moved**; each workflow's daily schedule rebuilds just
 its own image (fresh Wolfi CVE patches), staggered 06:00/06:05/06:10 UTC.
@@ -58,3 +59,6 @@ and image name (matrix legs run native per-arch runners; keep the
 `epoch: 100` + version-guard convention so a Wolfi same-version package can
 never win resolution). Postgres majors are detected from the melange config
 filenames — adding `postgresql-19.yaml` alone slots it into every matrix.
+An image with nothing to compile from source (like `os-shell`, pure Wolfi
+packages) skips melange/keygen entirely: clone `os-shell.yml` instead — one
+apko build job, version from `VERSION`, tag = image version.
