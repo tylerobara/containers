@@ -1,0 +1,147 @@
+name: site
+
+# Builds the Astro catalog site (site/) and publishes it to the gh-pages branch
+# (https://tylerobara.github.io/containers/).
+#
+# Two ways in:
+#   workflow_call — every image workflow's `pages` job calls this with the
+#                   pattern of the pages-data-* artifacts its build uploaded.
+#                   Those fresh entries are merged over the live
+#                   data/index.json (keyed on image+major, fresh wins) and the
+#                   site is rebuilt from the merged index.
+#   push/dispatch — site/, catalog.json or apko changes: rebuild the site from
+#                   the live index alone, no image rebuild. PRs build only.
+#
+# Concurrency: deliberately NOT a concurrency group. GitHub keeps only one
+# pending run per group and cancels the rest, which would silently drop a
+# sibling family's fresh entries. Instead the publish is a compare-and-swap:
+# the push is --force-with-lease against the gh-pages commit the index was
+# read from, and on a lost race the whole merge → build → push is redone on
+# top of the winner's index.
+
+on:
+  workflow_call:
+    inputs:
+      artifact-pattern:
+        description: "download-artifact pattern for this run's pages-data-* entries"
+        type: string
+        default: ""
+      ref:
+        description: "Ref to check out (the caller's inputs.ref || github.ref)"
+        type: string
+        default: ""
+  push:
+    branches: [main]
+    paths:
+      - site/**
+      - catalog.json
+      - images/*/apko/**
+      - .github/workflows/site.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - site/**
+      - catalog.json
+      - .github/workflows/site.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # force-push the built site to gh-pages
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: actions/download-artifact@v8
+        if: inputs.artifact-pattern != ''
+        with:
+          pattern: ${{ inputs.artifact-pattern }}
+          path: fresh
+          merge-multiple: true
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install site dependencies
+        working-directory: site
+        run: npm ci --no-audit --no-fund
+
+      - name: Merge index, build and publish
+        env:
+          PUBLISH: ${{ github.event_name != 'pull_request' }}
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(fresh/*.json)
+          if [ ${#files[@]} -gt 0 ]; then jq -s '.' "${files[@]}" > /tmp/new.json
+          else echo '[]' > /tmp/new.json; fi
+          echo "Fresh entries: $(jq length /tmp/new.json)"
+          export COMMIT_SHA="${GITHUB_SHA:0:7}"
+
+          for attempt in 1 2 3 4 5; do
+            # Previous deployment: read the gh-pages BRANCH (ground truth the
+            # moment any sibling workflow pushes it), not the Pages URL — that
+            # cache can lag ~10 min. The URL stays only as a first-deploy
+            # fallback. $BASE is the commit the lease below is taken against.
+            BASE=""
+            if git fetch -q --depth 1 origin gh-pages 2>/dev/null; then
+              BASE=$(git rev-parse FETCH_HEAD)
+            fi
+            { { [ -n "$BASE" ] && git show "$BASE:data/index.json" 2>/dev/null; } \
+              || curl -fsSL --retry 3 "https://tylerobara.github.io/containers/data/index.json" 2>/dev/null \
+              || echo '[]'; } > /tmp/old.json
+            jq -e 'type == "array"' /tmp/old.json >/dev/null 2>&1 || echo '[]' > /tmp/old.json
+
+            rm -rf out && mkdir -p out/data
+            jq -s '(.[0] // []) as $old | .[1] as $new
+                   | reduce ($old + $new)[] as $e ({}; .[($e.image + "/" + ($e.major|tostring))] = $e)
+                   | [.[]] | sort_by(.major // 0) | reverse' \
+              /tmp/old.json /tmp/new.json > out/data/index.json
+            # CNPG ClusterImageCatalog, sha-pinned to each multi-arch manifest
+            # (same shape as cloudnative-pg's postgresql-minimal-trixie catalogs).
+            {
+              printf 'apiVersion: postgresql.cnpg.io/v1\nkind: ClusterImageCatalog\nmetadata:\n  name: cnpg-postgres-wolfi\n  labels:\n    images.cnpg.io/family: postgresql\n    images.cnpg.io/type: minimal\n    images.cnpg.io/os: wolfi\n    images.cnpg.io/date: "%s"\n    images.cnpg.io/publisher: tylerobara.github.io\nspec:\n  images:\n' "$(date -u +%Y%m%d)"
+              jq -r 'map(select(.major)) | sort_by(.major)[] | "  - major: \(.major)\n    image: \(.image):\(.version)@\(.digest)"' out/data/index.json
+            } > out/data/cluster-image-catalog.yaml
+
+            BUILD_DATE="$(date -u +"%Y-%m-%d %H:%M UTC")"
+            export BUILD_DATE
+            (cd site && node scripts/build-data.mjs ../out/data/index.json && npx astro build)
+            cp -r out/data site/dist/data
+            touch site/dist/.nojekyll
+
+            if [ "$PUBLISH" != true ]; then
+              echo "Pull request: site built, not published."
+              exit 0
+            fi
+
+            dst=$(mktemp -d)
+            cp -r site/dist/. "$dst/"
+            git -C "$dst" init -q -b gh-pages
+            git -C "$dst" add -A
+            git -C "$dst" -c user.name=github-actions[bot] \
+                             -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
+              commit -qm "Deploy $(date -u +%FT%TZ) · site ${COMMIT_SHA} · run ${GITHUB_RUN_ID}"
+            # Empty lease value = "gh-pages must not exist yet" (first deploy).
+            if git -C "$dst" push -q --force-with-lease="gh-pages:${BASE}" \
+                 "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:gh-pages; then
+              echo "Published (attempt $attempt, base ${BASE:-none})"
+              exit 0
+            fi
+            echo "::notice::gh-pages moved during deploy (attempt $attempt) — re-merging on top of it"
+            sleep $(( attempt * 5 ))
+          done
+          echo "::error::Could not publish gh-pages after 5 attempts"
+          exit 1

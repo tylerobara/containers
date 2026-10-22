@@ -1,0 +1,114 @@
+---
+import '../styles/global.css';
+import { dataset, href, GITHUB_URL } from '../lib/catalog';
+export interface Props {
+  title?: string;
+  description?: string;
+  /** JSON-LD objects for this page. Rendered as one script per entry. */
+  schema?: object[];
+  /** Trail for BreadcrumbList, excluding Home (added here) and the current page. */
+  breadcrumbs?: { name: string; href: string }[];
+}
+const {
+  title = 'containers — Wolfi images built from source, scanned and signed',
+  description = 'Container images built the Chainguard way: binaries compiled from upstream source by melange, assembled by apko on Wolfi, scanned with grype and cosign-signed when clean.',
+  schema = [],
+  breadcrumbs,
+} = Astro.props;
+const year = new Date().getFullYear();
+
+const canonical = new URL(Astro.url.pathname, Astro.site).href;
+
+const crumbs = breadcrumbs && [
+  { name: 'Home', href: href('/') },
+  ...breadcrumbs,
+  { name: title, href: Astro.url.pathname },
+];
+const breadcrumbSchema = crumbs && {
+  '@context': 'https://schema.org',
+  '@type': 'BreadcrumbList',
+  itemListElement: crumbs.map((c, i) => ({
+    '@type': 'ListItem',
+    position: i + 1,
+    name: c.name,
+    item: new URL(c.href, Astro.site).href,
+  })),
+};
+const allSchema = [...schema, ...(breadcrumbSchema ? [breadcrumbSchema] : [])];
+---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{title}</title>
+  <meta name="description" content={description} />
+  <link rel="canonical" href={canonical} />
+  <meta property="og:title" content={title} />
+  <meta property="og:description" content={description} />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content={canonical} />
+  <meta property="og:site_name" content="containers" />
+  <meta name="twitter:card" content="summary" />
+  {allSchema.map((s) => (
+    <script type="application/ld+json" set:html={JSON.stringify(s)} />
+  ))}
+  <link rel="icon" type="image/svg+xml" href={href('/icon.svg')} />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;550;600;640;680;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <a href={href('/')} class="brand">
+        <img src={href('/icon.svg')} alt="" class="logo" width="26" height="26" />
+        <span class="brand-name">containers</span>
+      </a>
+      <nav class="nav">
+        <a href={href('/images/')}>Images</a>
+        <a href={href('/docs/')}>Docs</a>
+        <a href={href('/about/')}>Verify</a>
+        <a href={GITHUB_URL} rel="noopener" class="nav-cta">GitHub ↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <slot />
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div>
+        <a href={GITHUB_URL} rel="noopener">{dataset.repository}</a> · built from
+        <a href="https://github.com/wolfi-dev" rel="noopener">Wolfi</a> with
+        <a href="https://github.com/chainguard-dev/melange" rel="noopener">melange</a> and
+        <a href="https://github.com/chainguard-dev/apko" rel="noopener">apko</a> ·
+        <a href={href('/data/index.json')}>raw data</a>
+      </div>
+      <div>
+        Updated {dataset.buildDate}
+        {dataset.commitSha && (dataset.runUrl
+          ? <> · <a href={dataset.runUrl} rel="noopener">{dataset.commitSha}</a></>
+          : <> · {dataset.commitSha}</>)}
+        · &copy; {year}
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Global copy-to-clipboard for any [data-copy] button.
+    document.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-copy]');
+      if (!btn) return;
+      const text = btn.getAttribute('data-copy') || '';
+      navigator.clipboard.writeText(text).then(() => {
+        const prev = btn.textContent;
+        btn.textContent = 'Copied';
+        setTimeout(() => { btn.textContent = prev; }, 1400);
+      }).catch(() => { btn.textContent = 'Failed'; });
+    });
+  </script>
+</body>
+</html>

@@ -250,60 +250,14 @@ jobs:
           path: scans/dokuwiki.json
 
   pages:
-    # Merge this image's fresh entry over the live index (sibling entries are
-    # preserved from the live gh-pages data/index.json, keyed on image+major
-    # with fresh entries winning), regenerate the catalog, and deploy.
+    # Merge this run's fresh entries over the live index (sibling entries are
+    # preserved, keyed on image+major with fresh entries winning), rebuild the
+    # Astro site and deploy — see site.yml.
     if: ${{ !cancelled() && github.event_name != 'pull_request' }}
     needs: [build]
-    runs-on: ubuntu-latest
     permissions:
       contents: write # push the generated gh-pages branch
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref || github.ref }}
-
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: pages-data-dokuwiki
-          path: data
-          merge-multiple: true
-
-      - name: Assemble index
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          files=(data/*.json)
-          if [ ${#files[@]} -gt 0 ]; then jq -s '.' "${files[@]}" > /tmp/new.json
-          else echo '[]' > /tmp/new.json; fi
-          # Previous deployment. Read the gh-pages BRANCH (ground truth the
-          # moment any sibling workflow pushes it), not the Pages URL — that
-          # cache can lag ~10 min, and sibling workflows deploying minutes
-          # apart would otherwise resurrect each other's stale entries.
-          git fetch -q --depth 1 origin gh-pages 2>/dev/null || true
-          { git show FETCH_HEAD:data/index.json 2>/dev/null \
-            || curl -fsSL --retry 3 "https://tylerobara.github.io/containers/data/index.json" 2>/dev/null \
-            || echo '[]'; } > /tmp/old.json
-          jq -e . /tmp/old.json >/dev/null 2>&1 || echo '[]' > /tmp/old.json
-          jq -s '(.[0] // []) as $old | .[1] as $new
-                 | reduce ($old + $new)[] as $e ({}; .[($e.image + "/" + ($e.major|tostring))] = $e)
-                 | [.[]] | sort_by(.major // 0) | reverse' \
-            /tmp/old.json /tmp/new.json > data/index.json
-          # CNPG ClusterImageCatalog, sha-pinned to each multi-arch manifest
-          # (same shape as cloudnative-pg's postgresql-minimal-trixie catalogs).
-          {
-            printf 'apiVersion: postgresql.cnpg.io/v1\nkind: ClusterImageCatalog\nmetadata:\n  name: cnpg-postgres-wolfi\n  labels:\n    images.cnpg.io/family: postgresql\n    images.cnpg.io/type: minimal\n    images.cnpg.io/os: wolfi\n    images.cnpg.io/date: "%s"\n    images.cnpg.io/publisher: tylerobara.github.io\nspec:\n  images:\n' "$(date -u +%Y%m%d)"
-            jq -r 'map(select(.major)) | sort_by(.major)[] | "  - major: \(.major)\n    image: \(.image):\(.version)@\(.digest)"' data/index.json
-          } > data/cluster-image-catalog.yaml
-
-      - name: Deploy to gh-pages
-        run: |
-          dst=$(mktemp -d)
-          git -C "$dst" init -q
-          cp pages/index.html "$dst/index.html"
-          cp -r data "$dst/data"
-          git -C "$dst" add -A
-          git -C "$dst" -c user.name=github-actions[bot] \
-                           -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
-            commit -qm "Deploy $(date -u +%FT%TZ)"
-          git -C "$dst" push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/$GITHUB_REPOSITORY.git" HEAD:gh-pages
+    uses: ./.github/workflows/site.yml
+    with:
+      artifact-pattern: pages-data-dokuwiki
+      ref: ${{ inputs.ref || github.ref }}

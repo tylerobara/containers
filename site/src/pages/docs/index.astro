@@ -1,0 +1,50 @@
+---
+import Layout from '../../components/Layout.astro';
+import { href, GITHUB_URL } from '../../lib/catalog';
+
+const sections = [
+  {
+    href: href('/docs/tags/'),
+    cat: 'Using the images',
+    title: 'Tags & pinning',
+    desc: 'What each published tag means, which one to pin, and how the PostgreSQL major tags differ.',
+  },
+  {
+    href: href('/docs/updates/'),
+    cat: 'How it works',
+    title: 'How images stay current',
+    desc: 'Daily per-image rebuilds for Wolfi CVE patches, plus upstream version bumps arriving as pull requests.',
+  },
+  {
+    href: href('/docs/vulnerabilities/'),
+    cat: 'How it works',
+    title: 'Scans & signing',
+    desc: 'How each digest is scanned with grype, why signing is gated on zero Low+ findings, and how to read the counts.',
+  },
+];
+---
+<Layout title="Docs — using the images and how they are built" description="How to pull, pin and verify the images, and how they are rebuilt, scanned and signed.">
+  <section>
+    <div class="container-narrow">
+      <h1 class="section-title">Docs</h1>
+      <p class="section-sub">How to use the images, and how they are kept current. For the full inventory see <a href={href('/images/')}>Images</a>; to check the claims yourself see <a href={href('/about/')}>Verify</a>.</p>
+
+      <div class="grid" style="margin-top:28px">
+        {sections.map((s) => (
+          <article class="card">
+            <span class="cat">{s.cat}</span>
+            <a class="card-title" href={s.href}>{s.title}</a>
+            <p class="desc">{s.desc}</p>
+          </article>
+        ))}
+      </div>
+
+      <h2 class="section-title" style="margin-top:44px">Adding an image</h2>
+      <p class="small muted">
+        Build recipes, per-image READMEs and the add-an-image checklist live in the
+        repository: <a href={GITHUB_URL} rel="noopener">{GITHUB_URL.replace('https://', '')}</a>.
+        A new image also needs an entry in <code class="kv-mono">catalog.json</code> to appear on this site.
+      </p>
+    </div>
+  </section>
+</Layout>

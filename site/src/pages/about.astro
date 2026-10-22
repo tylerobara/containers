@@ -1,0 +1,49 @@
+---
+import Layout from '../components/Layout.astro';
+import CopyButton from '../components/CopyButton.astro';
+import { images, dataset, href, cosignVerify, identityRegexp, OIDC_ISSUER, GITHUB_URL } from '../lib/catalog';
+const ex = images.find((i) => i.signed && i.name === 'openbao') ?? images.find((i) => i.signed) ?? images[0];
+const workflows = [...new Set(images.map((i) => i.workflow).filter(Boolean))] as string[];
+---
+<Layout title="Verify image signatures and scan results" description="Check the cosign keyless signature and grype scan of any image from your terminal — the certificate identity is the workflow that built it.">
+  <section>
+    <div class="container-narrow">
+      <h1 class="section-title">Verify any image</h1>
+      <p class="section-sub">You don't have to trust this page. Every claim below is checkable from your terminal.</p>
+
+      <h2 style="font-size:1.1rem;margin-top:28px">1 · Pull it</h2>
+      <CopyButton code={`docker pull ${ex.repo}:${ex.version ?? 'latest'}`} />
+
+      <h2 style="font-size:1.1rem;margin-top:28px">2 · Verify the cosign signature</h2>
+      <p class="small muted">Keyless: the certificate identity is the workflow file that built the image, on <code class="kv-mono">main</code>. A signature exists only when that build scanned with zero Low+ findings.</p>
+      <CopyButton code={cosignVerify(ex)} />
+
+      <h2 style="font-size:1.1rem;margin-top:28px">3 · Re-run the scan</h2>
+      <CopyButton code={`grype ${ex.repo}:${ex.version ?? 'latest'}${ex.digest ? `@${ex.digest}` : ''}`} />
+
+      <h2 class="section-title" style="margin-top:44px">Signing identities</h2>
+      <p class="small muted">Each image family signs with its own workflow. Use the matching identity regexp with <code class="kv-mono">--certificate-oidc-issuer {OIDC_ISSUER}</code>:</p>
+      <div style="overflow-x:auto">
+        <table class="data">
+          <thead><tr><th>Workflow</th><th>Images</th><th>Identity regexp</th></tr></thead>
+          <tbody>
+            {workflows.map((wf) => (
+              <tr>
+                <td class="mono"><a href={`${GITHUB_URL}/blob/main/.github/workflows/${wf}`} rel="noopener">{wf}</a></td>
+                <td>{images.filter((i) => i.workflow === wf).map((i) => i.displayName).join(', ')}</td>
+                <td class="mono" style="overflow-wrap:anywhere">{identityRegexp(wf)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="section-title" style="margin-top:44px">More</h2>
+      <p>
+        Source, recipes and workflows live on <a href={GITHUB_URL} rel="noopener">GitHub</a>.
+        Images are published to <code class="kv-mono">{dataset.registry}/{dataset.repository}/*</code>; the raw
+        build + scan data behind this site is <a href={href('/data/index.json')}>data/index.json</a>.
+      </p>
+    </div>
+  </section>
+</Layout>

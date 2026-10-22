@@ -28,9 +28,6 @@ on:
     paths:
       - images/cloudnative-pg/**
       - .github/workflows/postgres.yml
-      # pages/** is watched HERE ONLY: the Pages template is one file shared
-      # by all image workflows, so exactly one of them owns redeploying it.
-      - pages/**
   pull_request:
     branches: [main]
     paths:
@@ -77,7 +74,6 @@ jobs:
       pg-matrix: ${{ steps.filter.outputs.pg-matrix }}
       build-pg-matrix: ${{ steps.filter.outputs.build-pg-matrix }}
       has-pg: ${{ steps.filter.outputs.has-pg }}
-      has-pages: ${{ steps.filter.outputs.has-pages }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -90,7 +86,7 @@ jobs:
           EVENT='${{ github.event_name }}'
           ALL_MAJORS=$(find images/cloudnative-pg/melange -name 'postgresql-*.yaml' 2>/dev/null \
             | sed -nE 's|.*/postgresql-([0-9]+)\.yaml$|\1|p' || true)
-          FULL=false; HAS_PAGES=false; MAJORS=""
+          FULL=false; MAJORS=""
 
           if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; then
             FULL=true
@@ -108,7 +104,6 @@ jobs:
               [ -z "${CHANGED:-}" ] && FULL=true
               # Any change to the pipeline itself → trust nothing, rebuild all.
               echo "${CHANGED:-}" | grep -qE '^\.github/' && FULL=true
-              echo "${CHANGED:-}" | grep -q '^pages/' && HAS_PAGES=true
               PG_CHANGED=$(echo "${CHANGED:-}" | grep '^images/cloudnative-pg/' || true)
               if [ -n "$PG_CHANGED" ]; then
                 if echo "$PG_CHANGED" | grep -qvE '^images/cloudnative-pg/melange/postgresql-[0-9]+\.yaml$'; then
@@ -145,13 +140,11 @@ jobs:
             echo "pg-matrix=$(tr -d '\n\r' <<<"$PG_MATRIX")"
             echo "build-pg-matrix=$(tr -d '\n\r' <<<"$BUILD_PG_MATRIX")"
             echo "has-pg=$(jq 'length > 0' <<<"$MAJ_JSON")"
-            echo "has-pages=$HAS_PAGES"
           } >> "$GITHUB_OUTPUT"
 
           {
             echo "### Build plan"
             echo "- postgres majors: $(jq -c . <<<"$MAJ_JSON")"
-            echo "- pages deploy: $HAS_PAGES"
             echo "- full rebuild: $FULL ($EVENT)"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -413,65 +406,14 @@ jobs:
           path: scans/cnpg-postgres-${{ matrix.major }}.json
 
   pages:
-    # Deploy when this run produced scans and at least one of its builders got
-    # far enough. Partial builds are fine: entries for images that did NOT
-    # rebuild are preserved from the live index.json (each image family has
-    # its own workflow now; bump PRs land per image), keyed on image+major
-    # with fresh entries winning.
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.detect-changes.outputs.has-pages == 'true' || needs.detect-changes.outputs.has-pg == 'true') }}
+    # Merge this run's fresh entries over the live index (entries for images
+    # that did NOT rebuild are preserved, keyed on image+major with fresh
+    # entries winning), rebuild the Astro site and deploy — see site.yml.
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.detect-changes.outputs.has-pg == 'true' }}
     needs: [detect-changes, build]
-    runs-on: ubuntu-latest
     permissions:
       contents: write # push the generated gh-pages branch
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref || github.ref }}
-
-      - uses: actions/download-artifact@v8
-        if: needs.detect-changes.outputs.has-pg == 'true'
-        with:
-          pattern: pages-data-pg-*
-          path: data
-          merge-multiple: true
-
-      - name: Assemble index
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          files=(data/*.json)
-          if [ ${#files[@]} -gt 0 ]; then jq -s '.' "${files[@]}" > /tmp/new.json
-          else echo '[]' > /tmp/new.json; fi
-          # Previous deployment. Read the gh-pages BRANCH (ground truth the
-          # moment any sibling workflow pushes it), not the Pages URL — that
-          # cache can lag ~10 min, and sibling workflows deploying minutes
-          # apart would otherwise resurrect each other's stale entries (the
-          # split push lost openbao's entry exactly this way; the URL stays
-          # only as fallback for the very first fetch failure).
-          git fetch -q --depth 1 origin gh-pages 2>/dev/null || true
-          { git show FETCH_HEAD:data/index.json 2>/dev/null \
-            || curl -fsSL --retry 3 "https://tylerobara.github.io/containers/data/index.json" 2>/dev/null \
-            || echo '[]'; } > /tmp/old.json
-          jq -e . /tmp/old.json >/dev/null 2>&1 || echo '[]' > /tmp/old.json
-          jq -s '(.[0] // []) as $old | .[1] as $new
-                 | reduce ($old + $new)[] as $e ({}; .[($e.image + "/" + ($e.major|tostring))] = $e)
-                 | [.[]] | sort_by(.major // 0) | reverse' \
-            /tmp/old.json /tmp/new.json > data/index.json
-          # CNPG ClusterImageCatalog, sha-pinned to each multi-arch manifest
-          # (same shape as cloudnative-pg's postgresql-minimal-trixie catalogs).
-          {
-            printf 'apiVersion: postgresql.cnpg.io/v1\nkind: ClusterImageCatalog\nmetadata:\n  name: cnpg-postgres-wolfi\n  labels:\n    images.cnpg.io/family: postgresql\n    images.cnpg.io/type: minimal\n    images.cnpg.io/os: wolfi\n    images.cnpg.io/date: "%s"\n    images.cnpg.io/publisher: tylerobara.github.io\nspec:\n  images:\n' "$(date -u +%Y%m%d)"
-            jq -r 'map(select(.major)) | sort_by(.major)[] | "  - major: \(.major)\n    image: \(.image):\(.version)@\(.digest)"' data/index.json
-          } > data/cluster-image-catalog.yaml
-
-      - name: Deploy to gh-pages
-        run: |
-          dst=$(mktemp -d)
-          git -C "$dst" init -q
-          cp pages/index.html "$dst/index.html"
-          cp -r data "$dst/data"
-          git -C "$dst" add -A
-          git -C "$dst" -c user.name=github-actions[bot] \
-                           -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
-            commit -qm "Deploy $(date -u +%FT%TZ)"
-          git -C "$dst" push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/$GITHUB_REPOSITORY.git" HEAD:gh-pages
+    uses: ./.github/workflows/site.yml
+    with:
+      artifact-pattern: pages-data-pg-*
+      ref: ${{ inputs.ref || github.ref }}

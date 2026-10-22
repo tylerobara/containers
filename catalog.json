@@ -1,0 +1,159 @@
+{
+  "org": "tylerobara",
+  "registry": "ghcr.io",
+  "repository": "tylerobara/containers",
+  "categories": [
+    "Databases",
+    "Kubernetes & Networking",
+    "Security & Secrets",
+    "Apps",
+    "Base & Utilities"
+  ],
+  "images": [
+    {
+      "name": "cnpg-postgres",
+      "display_name": "PostgreSQL",
+      "per_major": true,
+      "dir": "cloudnative-pg",
+      "apko": "postgresql.yaml.tpl",
+      "workflow": "postgres.yml",
+      "category": "Databases",
+      "primary_package": "postgresql-@@MAJOR@@",
+      "upstream_url": "https://www.postgresql.org",
+      "summary": "CloudNativePG-compatible PostgreSQL, built from PGDG source by melange.",
+      "description": "PostgreSQL built from the PGDG source tarball by melange and assembled by apko on Wolfi. Drop-in for CloudNativePG clusters, with a sha-pinned ClusterImageCatalog."
+    },
+    {
+      "name": "cloudnative-pg",
+      "display_name": "CloudNativePG operator",
+      "dir": "cloudnative-pg-operator",
+      "apko": "operator.yaml",
+      "workflow": "cloudnative-pg-operator.yml",
+      "category": "Kubernetes & Networking",
+      "primary_package": "cloudnative-pg",
+      "upstream_url": "https://cloudnative-pg.io",
+      "summary": "CloudNativePG operator manager, built from upstream source.",
+      "description": "The CloudNativePG Kubernetes operator, compiled from upstream source by melange and assembled by apko on Wolfi. Scanned with grype, cosign-signed when clean."
+    },
+    {
+      "name": "cilium",
+      "display_name": "Cilium agent",
+      "dir": "cilium",
+      "apko": "cilium.yaml",
+      "workflow": "cilium.yml",
+      "category": "Kubernetes & Networking",
+      "primary_package": "cilium",
+      "upstream_url": "https://cilium.io",
+      "summary": "Cilium eBPF networking agent, built from upstream source.",
+      "description": "The Cilium agent for eBPF-based Kubernetes networking, security and observability, built from upstream source by melange and assembled by apko on Wolfi."
+    },
+    {
+      "name": "cilium-operator-generic",
+      "display_name": "Cilium operator (generic)",
+      "dir": "cilium",
+      "apko": "cilium-operator-generic.yaml",
+      "workflow": "cilium.yml",
+      "category": "Kubernetes & Networking",
+      "primary_package": "cilium-operator-generic",
+      "upstream_url": "https://cilium.io",
+      "summary": "Cilium operator for generic (non-cloud) clusters.",
+      "description": "The cloud-agnostic Cilium operator that manages IPAM and cluster-wide state, built from upstream source by melange and assembled by apko on Wolfi."
+    },
+    {
+      "name": "cilium-envoy",
+      "display_name": "Cilium Envoy",
+      "dir": "cilium",
+      "apko": "cilium-envoy.yaml",
+      "workflow": "cilium.yml",
+      "category": "Kubernetes & Networking",
+      "primary_package": "cilium-envoy",
+      "upstream_url": "https://github.com/cilium/proxy",
+      "summary": "Cilium's Envoy proxy build, pinned to the agent's release.",
+      "description": "The Cilium Envoy proxy for L7 policy and ingress, following the pin in Cilium's own release. Built by melange and assembled by apko on Wolfi."
+    },
+    {
+      "name": "cert-manager-controller",
+      "display_name": "cert-manager controller",
+      "dir": "cert-manager",
+      "apko": "cert-manager-controller.yaml",
+      "workflow": "cert-manager.yml",
+      "category": "Kubernetes & Networking",
+      "primary_package": "cert-manager",
+      "upstream_url": "https://cert-manager.io",
+      "summary": "cert-manager controller, built from upstream source.",
+      "description": "The cert-manager controller that issues and renews X.509 certificates in Kubernetes, built from upstream source by melange and assembled by apko on Wolfi."
+    },
+    {
+      "name": "cert-manager-cainjector",
+      "display_name": "cert-manager cainjector",
+      "dir": "cert-manager",
+      "apko": "cert-manager-cainjector.yaml",
+      "workflow": "cert-manager.yml",
+      "category": "Kubernetes & Networking",
+      "primary_package": "cert-manager",
+      "upstream_url": "https://cert-manager.io",
+      "summary": "cert-manager CA injector for webhooks and API services.",
+      "description": "The cert-manager cainjector that injects CA bundles into webhooks and API services, built from upstream source by melange and assembled by apko on Wolfi."
+    },
+    {
+      "name": "cert-manager-webhook",
+      "display_name": "cert-manager webhook",
+      "dir": "cert-manager",
+      "apko": "cert-manager-webhook.yaml",
+      "workflow": "cert-manager.yml",
+      "category": "Kubernetes & Networking",
+      "primary_package": "cert-manager",
+      "upstream_url": "https://cert-manager.io",
+      "summary": "cert-manager admission webhook, built from upstream source.",
+      "description": "The cert-manager admission webhook that validates and mutates cert-manager resources, built from upstream source by melange and assembled by apko on Wolfi."
+    },
+    {
+      "name": "openbao",
+      "display_name": "OpenBao",
+      "dir": "openbao",
+      "apko": "openbao.yaml",
+      "workflow": "openbao.yml",
+      "category": "Security & Secrets",
+      "primary_package": "openbao",
+      "upstream_url": "https://openbao.org",
+      "summary": "OpenBao secrets manager, built from upstream source.",
+      "description": "OpenBao, the open source secrets manager forked from Vault. The bao binary is built from upstream source by melange; the image is assembled by apko on Wolfi."
+    },
+    {
+      "name": "dokuwiki",
+      "display_name": "DokuWiki",
+      "dir": "dokuwiki",
+      "apko": "dokuwiki.yaml",
+      "workflow": "dokuwiki.yml",
+      "category": "Apps",
+      "primary_package": "dokuwiki",
+      "upstream_url": "https://www.dokuwiki.org",
+      "summary": "DokuWiki plain-file wiki on Wolfi apache2 + mod_php.",
+      "description": "DokuWiki, the plain-file wiki that needs no database, packaged from the pinned release tarball by melange and served by Wolfi apache2 with mod_php."
+    },
+    {
+      "name": "grafana-image-renderer",
+      "display_name": "Grafana Image Renderer",
+      "dir": "grafana-image-renderer",
+      "apko": "grafana-image-renderer.yaml",
+      "workflow": "grafana-image-renderer.yml",
+      "category": "Apps",
+      "primary_package": "grafana-image-renderer",
+      "upstream_url": "https://github.com/grafana/grafana-image-renderer",
+      "summary": "Grafana's headless-browser panel renderer service.",
+      "description": "Grafana Image Renderer v5, a static Go server driving headless Chromium to render panels to PNG and PDF. Built by melange, assembled by apko on Wolfi."
+    },
+    {
+      "name": "os-shell",
+      "display_name": "os-shell",
+      "dir": "os-shell",
+      "apko": "os-shell.yaml",
+      "workflow": "os-shell.yml",
+      "category": "Base & Utilities",
+      "primary_package": null,
+      "upstream_url": "https://github.com/bitnami/containers/tree/main/bitnami/os-shell",
+      "summary": "Nonroot helper shell for init containers \u2014 a bitnami os-shell counterpart.",
+      "description": "A tiny nonroot helper image with bash, curl, jq and yq for Kubernetes init containers, sidecars and one-off shell tasks, assembled by apko from Wolfi packages only."
+    }
+  ]
+}
