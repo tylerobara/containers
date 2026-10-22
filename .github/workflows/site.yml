@@ -68,7 +68,9 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          # Astro's engines floor is >=22.23.4; the runner's cached 22.x can lag
+          # behind it, so track the current LTS instead.
+          node-version: '24'
           cache: npm
           cache-dependency-path: site/package-lock.json
 
