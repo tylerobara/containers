@@ -6,9 +6,12 @@
 # (github.com/openbao/openbao/blob/main/Dockerfile): /usr/bin/bao, nonroot,
 # server on 8200. Differences from upstream, on purpose:
 #   - busybox+ca-certs Wolfi base instead of alpine (no apk-tools at runtime)
-#   - nonroot 65532 instead of the adduser-assigned uid
+#   - nonroot 65532 (username openbao) instead of the adduser-assigned uid
 #   - default args are `server` (production posture, mount your own
 #     /openbao/config) instead of upstream's dev-mode CMD
+#   - upstream's /usr/local/bin/docker-entrypoint.sh is shipped by the melange
+#     package (the official Helm chart hardcodes that path), with dumb-init
+#     and su-exec from Wolfi for its shebang/drop-root paths
 # No setcap for mlock lives here (no libcap in base): run the server either
 # with the IPC_LOCK capability or mlock=false — see README.md.
 
@@ -22,6 +25,10 @@ contents:
     # upstream TLS (ACME, OIDC issuers, SMTP), tzdata-free: it speaks UTC.
     - busybox
     - ca-certificates
+    # Upstream release entrypoint needs these: dumb-init (its shebang, PID 1
+    # zombie reaping) and su-exec (root→openbao drop when started as uid 0).
+    - dumb-init
+    - su-exec
     # Built by melange; supplied via --repository-append at build time.
     - openbao
 

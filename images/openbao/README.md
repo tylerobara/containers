@@ -25,6 +25,10 @@ Data/config live on volumes you own: `/openbao/config` (drop-in config
 files), `/openbao/file` (file storage backend), `/openbao/logs` (audit
 device). Everything runs as uid 65532 — chown your volumes accordingly.
 
+The official OpenBao Helm chart works as-is: the image ships upstream's
+`/usr/local/bin/docker-entrypoint.sh` (with its dumb-init/su-exec deps), which
+is the path the chart's server command hardcodes.
+
 ## Signing
 
 Same keyless policy as every image here: signed only when the CI grype scan

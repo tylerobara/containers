@@ -11,7 +11,7 @@
 package:
   name: openbao
   version: 2.7.1
-  epoch: 100
+  epoch: 101
   description: "OpenBao secrets management built from upstream source"
   copyright:
     - license: MPL-2.0
@@ -69,7 +69,24 @@ pipeline:
       install -Dm755 bao "${{targets.destdir}}/usr/bin/bao"
       # Upstream ships a vault compat symlink.
       ln -sfn bao "${{targets.destdir}}/usr/bin/vault"
+      # The official openbao Helm chart hardcodes this path in its server
+      # command — ship upstream's exact release entrypoint from the tarball
+      # (its shebang runs dumb-init; apko adds dumb-init + su-exec).
+      install -Dm755 .release/docker/docker-entrypoint.sh \
+        "${{targets.destdir}}/usr/local/bin/docker-entrypoint.sh"
+      # Upstream's data dirs (audit logs, file backend, config drop-ins),
+      # owned like upstream's image does: the entrypoint script chowns them
+      # when owner != openbao and only /openbao/config tolerates chown
+      # failure — root-owned dirs here would abort our nonroot default user
+      # under set -e on any bare (non-chart) `docker run`.
+      mkdir -p "${{targets.destdir}}/openbao/config" \
+        "${{targets.destdir}}/openbao/logs" "${{targets.destdir}}/openbao/file" \
+        "${{targets.destdir}}/openbao/data"
+      chown -R 65532:65532 "${{targets.destdir}}/openbao"
 
   - runs: |
       # Verify the build actually produced this version
       "${{targets.destdir}}/usr/bin/bao" version | grep -q "${{package.version}}"
+      # The chart hardcodes this path; ship-no-verify ships-no-image.
+      test -x "${{targets.destdir}}/usr/local/bin/docker-entrypoint.sh"
+      sh -n "${{targets.destdir}}/usr/local/bin/docker-entrypoint.sh"

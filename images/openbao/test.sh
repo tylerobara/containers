@@ -29,6 +29,18 @@ docker run --rm --entrypoint /bin/sh "$IMAGE" -c '
   command -v apk  >/dev/null 2>&1 && exit 1
   exit 0' || fail "bash or apk-tools present in prod image"
 
+echo "Testing the official chart's server path (bundled docker-entrypoint.sh)..."
+# openbao-helm hardcodes /usr/local/bin/docker-entrypoint.sh in the server
+# command; running it with "bao version" exercises the shebang (dumb-init),
+# the script's bao branch, su-exec and the /openbao dirs in one shot.
+docker run --rm --entrypoint /bin/sh "$IMAGE" -ec '
+  command -v dumb-init >/dev/null || exit 1
+  command -v su-exec  >/dev/null || exit 2
+  test -x /usr/local/bin/docker-entrypoint.sh || exit 3
+  for d in config logs file data; do test -d "/openbao/$d" || exit 4; done
+  /usr/local/bin/docker-entrypoint.sh bao version >/dev/null || exit 5' \
+  || fail "chart server path broken (docker-entrypoint.sh, dumb-init/su-exec or /openbao dirs)"
+
 echo "Testing dev server actually comes up (healthz on :8200)..."
 cid=$(docker run -d --rm -p 127.0.0.1::8200 "$IMAGE" \
   server -dev -dev-no-store-token \
