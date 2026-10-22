@@ -428,4 +428,16 @@ jobs:
             fi
           fi
 
+          # --- k8s-sidecar: releases/latest is a plain X.Y.Z tag (no 'v') ---
+          if want k8s-sidecar; then
+            latest=$(gh api repos/kiwigrid/k8s-sidecar/releases/latest --jq '.tag_name | ltrimstr("v")')
+            if [ -z "$latest" ]; then
+              echo "::error::k8s-sidecar: no release found upstream"
+              FAILED=1
+            else
+              bump_row k8s-sidecar images/k8s-sidecar/melange/k8s-sidecar.yaml "$latest" \
+                "https://github.com/kiwigrid/k8s-sidecar/archive/refs/tags/${latest}.tar.gz" k8s-sidecar
+            fi
+          fi
+
           exit $FAILED
