@@ -13,7 +13,7 @@
 package:
   name: cert-manager-controller
   version: 1.21.2
-  epoch: 100
+  epoch: 101
   description: "cert-manager controller built from upstream source"
   copyright:
     - license: Apache-2.0
@@ -26,6 +26,13 @@ vars:
   # Commit behind the upstream tag; injected exactly like upstream's release
   # build so the startup banner (version/git_commit) matches it.
   git_commit: 922a06aa49ee4bb802db268ef72a174af70edd32
+  # Upstream 1.21.2 pins vulnerable Go modules (grype Critical/High in
+  # x/net <0.60.0; Low GHSA-8wmf-6v46-5gfg in otel <=1.44.0); we `go get`
+  # them up to the patched releases before compiling. go get only raises
+  # requirements (MVS never downgrades), so once upstream ships >= these
+  # the bumps are no-ops — retire the pins then.
+  xnet_version: 0.60.0
+  otel_version: 1.45.0
 
 environment:
   contents:
@@ -57,9 +64,18 @@ pipeline:
       # from inside it, as upstream's go-workspace-based build resolves it.
       # No vendor/ in the tarball, so modules resolve from the network
       # (same as the cilium loopback build).
-      export CGO_ENABLED=0 GOTOOLCHAIN=local GOFLAGS=-trimpath
+      export CGO_ENABLED=0 GOTOOLCHAIN=local
       export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
-      go build -buildvcs=false \
+      # Raise the vulnerable dep pins (see vars); no-ops once upstream
+      # ships >= these. (GOFLAGS=-trimpath stays on `go build` only —
+      # `go get` rejects it.)
+      go get golang.org/x/net@v${{vars.xnet_version}} \
+        go.opentelemetry.io/otel@v${{vars.otel_version}} \
+        go.opentelemetry.io/otel/sdk@v${{vars.otel_version}} \
+        go.opentelemetry.io/otel/trace@v${{vars.otel_version}} \
+        go.opentelemetry.io/otel/exporters/otlp/otlptrace@v${{vars.otel_version}} \
+        go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v${{vars.otel_version}}
+      GOFLAGS=-trimpath go build -buildvcs=false \
         -ldflags "-w -s \
           -X github.com/cert-manager/cert-manager/pkg/util.AppVersion=v${{package.version}} \
           -X github.com/cert-manager/cert-manager/pkg/util.AppGitCommit=${{vars.git_commit}}" \
@@ -75,3 +91,17 @@ pipeline:
       echo "$out" | grep -q "starting cert-manager controller"
       echo "$out" | grep -q "version=\"v${{package.version}}\""
       echo "$out" | grep -q "git_commit=\"${{vars.git_commit}}\""
+      # grype reads Go deps from the embedded build info — assert every
+      # bumped pin actually landed in the binary.
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      for spec in \
+          "golang.org/x/net v${{vars.xnet_version}}" \
+          "go.opentelemetry.io/otel/sdk v${{vars.otel_version}}" \
+          "go.opentelemetry.io/otel/exporters/otlp/otlptrace v${{vars.otel_version}}" \
+          "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v${{vars.otel_version}}"; do
+        set -- $spec
+        ver=$(go version -m "${{targets.destdir}}/usr/bin/cert-manager-controller" \
+          | awk -F'\t' -v m="$1" '$3==m{print $4; exit}')
+        [ "$(printf '%s\n%s\n' "$ver" "$2" | sort -V | head -1)" = "$2" ] \
+          || { echo "$1 is '$ver' in the binary, want >= $2"; exit 1; }
+      done

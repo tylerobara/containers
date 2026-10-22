@@ -13,7 +13,7 @@
 package:
   name: cert-manager-cainjector
   version: 1.21.2
-  epoch: 100
+  epoch: 101
   description: "cert-manager cainjector built from upstream source"
   copyright:
     - license: Apache-2.0
@@ -26,6 +26,11 @@ vars:
   # Commit behind the upstream tag; injected exactly like upstream's release
   # build so the startup banner (version/git_commit) matches it.
   git_commit: 922a06aa49ee4bb802db268ef72a174af70edd32
+  # Upstream 1.21.2 pins vulnerable Go modules (grype Critical/High in
+  # x/net <0.60.0; cainjector's dep graph has no otel, so no otel pin
+  # here). go get only raises requirements (MVS never downgrades), so
+  # once upstream ships >= this the bump is a no-op — retire it then.
+  xnet_version: 0.60.0
 
 environment:
   contents:
@@ -57,9 +62,13 @@ pipeline:
       # from inside it, as upstream's go-workspace-based build resolves it.
       # No vendor/ in the tarball, so modules resolve from the network
       # (same as the cilium loopback build).
-      export CGO_ENABLED=0 GOTOOLCHAIN=local GOFLAGS=-trimpath
+      export CGO_ENABLED=0 GOTOOLCHAIN=local
       export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
-      go build -buildvcs=false \
+      # Raise the vulnerable x/net pin (vars.xnet_version); MVS never
+      # downgrades, so this is a no-op once upstream ships >= that version.
+      # (GOFLAGS=-trimpath stays on `go build` only — `go get` rejects it.)
+      go get golang.org/x/net@v${{vars.xnet_version}}
+      GOFLAGS=-trimpath go build -buildvcs=false \
         -ldflags "-w -s \
           -X github.com/cert-manager/cert-manager/pkg/util.AppVersion=v${{package.version}} \
           -X github.com/cert-manager/cert-manager/pkg/util.AppGitCommit=${{vars.git_commit}}" \
@@ -75,3 +84,10 @@ pipeline:
       echo "$out" | grep -q "starting cert-manager ca-injector"
       echo "$out" | grep -q "version=\"v${{package.version}}\""
       echo "$out" | grep -q "git_commit=\"${{vars.git_commit}}\""
+      # grype reads Go deps from the embedded build info — assert the
+      # x/net pin actually landed in the binary.
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      xn=$(go version -m "${{targets.destdir}}/usr/bin/cert-manager-cainjector" \
+        | awk -F'\t' '$3=="golang.org/x/net"{print $4; exit}')
+      [ "$(printf '%s\n%s\n' "$xn" "v${{vars.xnet_version}}" | sort -V | head -1)" = "v${{vars.xnet_version}}" ] \
+        || { echo "embedded golang.org/x/net is '$xn', want >= v${{vars.xnet_version}}"; exit 1; }

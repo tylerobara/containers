@@ -61,6 +61,12 @@ reports zero Low+ findings — see the Pages catalog for current state.)
   dns01 self-checks still pull `quay.io/jetstack/...` — same static Go
   pattern, trivially added later if wanted; or disable the check Job with
   `--set startupapicheck.enabled=false`.
+- **Vulnerable Go deps are raised** before compiling (`go get` of the
+  patched releases; `vars.xnet_version`/`vars.otel_version` in the configs):
+  upstream 1.21.2 ships `golang.org/x/net v0.58.0` (Critical/High advisories
+  fixed in 0.60.0) and otel ≤1.44.0 (GHSA-8wmf-6v46-5gfg, Low, fixed in
+  1.45.0). The melange verify step asserts the patched versions land in the
+  binary's embedded build info (what grype reads).
 - **No `/licenses` layer** from the Containerfiles; the melange package
   carries SPDX metadata and the tarball's LICENSEs.
 - The chart's `runAsNonRoot` + `runAsUser: 1001` securityContext governs the
