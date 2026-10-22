@@ -133,8 +133,10 @@ jobs:
             cp -r site/dist/. "$dst/"
             git -C "$dst" init -q -b gh-pages
             git -C "$dst" add -A
-            git -C "$dst" -c user.name=github-actions[bot] \
-                             -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
+            # quoted: nullglob above would glob [bot] away to nothing (git then
+            # sees bare -c and dies: "key does not contain a section: -c")
+            git -C "$dst" -c "user.name=github-actions[bot]" \
+                             -c "user.email=41898282+github-actions[bot]@users.noreply.github.com" \
               commit -qm "Deploy $(date -u +%FT%TZ) · site ${COMMIT_SHA} · run ${GITHUB_RUN_ID}"
             # Empty lease value = "gh-pages must not exist yet" (first deploy).
             if git -C "$dst" push -q --force-with-lease="gh-pages:${BASE}" \
