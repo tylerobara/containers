@@ -83,10 +83,14 @@ pipeline:
       esac
       make GOARCH="$GOARCH" DESTDIR="${{targets.destdir}}" PKG_BUILD=1 NOSTRIP=1 \
         build-container install-container-binary
-      # install-bpf creates /var/lib/cilium via `install -m 0750 -d`; a
-      # root-owned 0750 dir breaks melange's host-side workspace xattr pass
-      # on non-root runners. Runtime-irrelevant (the agent runs as root).
-      chmod 0755 "${{targets.destdir}}/var/lib/cilium"
+      # install-bpf creates /var/lib/cilium via `install -m 0750 -d`; those
+      # root-owned 0750 dirs block melange's host-side xattr pass and the
+      # mkdirat for the apk SBOM on non-root runners (same fix dokuwiki
+      # uses: 0777 SBOM leaf). Runtime-irrelevant (the agent runs as root).
+      D="${{targets.destdir}}"
+      install -d -m 0755 "$D/var/lib/cilium" "$D/var/lib/db/sbom"
+      chmod 0755 "$D/var" "$D/var/lib" "$D/var/lib/cilium"
+      chmod 0777 "$D/var/lib/db/sbom"
 
   - working-directory: /home/build/plugins-${{vars.cni_version}}
     runs: |
