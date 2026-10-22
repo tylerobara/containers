@@ -51,7 +51,12 @@ pipeline:
   - working-directory: /home/build
     runs: |
       D="${{targets.destdir}}"
-      install -d -m755 "$D/var/www/html" "$D/etc/apache2/dokuwiki" "$D/etc/php/conf.d"
+      # melange writes the apk SBOM host-side, but the container's uid owns
+      # everything the pipeline mkdirs; pre-create the leaf at 0777 so the
+      # host melange can drop var/lib/db/sbom/*.spdx.json in (postgres and
+      # openbao never hit this because their trees are all under /usr).
+      install -d -m755 "$D/var/www/html" "$D/etc/apache2/dokuwiki" "$D/etc/php/conf.d" "$D/var/lib/db/sbom"
+      chmod 0777 "$D/var/lib/db/sbom"
       cp -a /home/build/src/. "$D/var/www/html/"
 
       # ---- upstream dokuwiki/docker config overlay (root/ tree) ----
@@ -355,3 +360,5 @@ pipeline:
       test -x "$D/entrypoint.sh"
       sh -n "$D/entrypoint.sh"
       grep -q "^exec /usr/sbin/\$HTTPD_CMD" "$D/entrypoint.sh"
+      # SBOM landing spot must be host-writable (see install step above)
+      test -d "$D/var/lib/db/sbom"
