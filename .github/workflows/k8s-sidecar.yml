@@ -1,0 +1,271 @@
+name: k8s-sidecar
+
+# Builds + publishes ghcr.io/tylerobara/containers/k8s-sidecar (kiwigrid/
+# k8s-sidecar — the Grafana dashboards sidecar), built from the upstream
+# release tarball by melange (self-contained /app/.venv), assembled by apko on
+# Wolfi (no Dockerfile). Wolfi's own k8s-sidecar package is stale (2.7.3), so
+# the melange config carries provider-priority + epoch to win resolution.
+# One workflow per image family; routing is the native on.push.paths filter.
+# cosign identity = THIS file:
+#   cosign verify \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#     --certificate-identity-regexp '^https://github.com/tylerobara/containers/\.github/workflows/k8s-sidecar\.yml@refs/heads/main$' \
+#     ghcr.io/tylerobara/containers/k8s-sidecar:<tag>
+# PRs run everything except publish/sign/pages; validate a bot bump PR via
+# workflow_dispatch (ref = bump branch, validate_only checked).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - images/k8s-sidecar/**
+      - .github/workflows/k8s-sidecar.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - images/k8s-sidecar/**
+      - .github/workflows/k8s-sidecar.yml
+  schedule:
+    - cron: '45 6 * * *' # daily, staggered after metallb (06:40)
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Ref to build (defaults to the branch dispatched from). Use a bump-PR branch to validate it."
+        required: false
+        default: ""
+      validate_only:
+        description: "Build + scan without publishing/signing/deploying pages"
+        type: boolean
+        default: false
+
+concurrency:
+  group: k8s-sidecar-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+
+env:
+  MELANGE_VERSION: v0.63.0
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  keygen:
+    runs-on: ubuntu-latest
+    outputs:
+      pub: ${{ steps.k.outputs.pub }}
+      priv: ${{ steps.k.outputs.priv }}
+    steps:
+      - name: Install melange
+        run: go install chainguard.dev/melange@${{ env.MELANGE_VERSION }}
+
+      - name: Generate key
+        id: k
+        run: |
+          ~/go/bin/melange keygen
+          { echo "pub=$(base64 -w0 melange.rsa.pub)"; echo "priv=$(base64 -w0 melange.rsa)"; } >> "$GITHUB_OUTPUT"
+
+  melange:
+    needs: keygen
+    if: ${{ !cancelled() && needs.keygen.result == 'success' }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30 # pure-python venv build; networked pip install
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Install melange
+        run: go install chainguard.dev/melange@${{ env.MELANGE_VERSION }}
+
+      - name: Restore signing key
+        # melange signs with the private key but never re-derives the .pub,
+        # so write it here — it ships in the artifact for apko's keyring.
+        run: |
+          echo '${{ needs.keygen.outputs.priv }}' | base64 -d > melange.rsa && chmod 600 melange.rsa
+          echo '${{ needs.keygen.outputs.pub }}' | base64 -d > melange.rsa.pub
+
+      - name: Build k8s-sidecar package (${{ matrix.arch }})
+        run: |
+          ~/go/bin/melange build images/k8s-sidecar/melange/k8s-sidecar.yaml \
+            --arch ${{ matrix.arch }} \
+            --signing-key melange.rsa \
+            --out-dir ./packages \
+            --runner docker
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packages-k8s-sidecar-${{ matrix.arch }}
+          path: |
+            packages/
+            melange.rsa.pub
+
+  build:
+    needs: [keygen, melange]
+    if: ${{ !cancelled() && needs.keygen.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # only for cosign keyless below
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}/k8s-sidecar
+      PUBLISH: ${{ github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.validate_only != true) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: packages-k8s-sidecar-*
+          path: .
+          merge-multiple: true
+
+      - name: Resolve pinned version + version guard
+        run: |
+          set -eu
+          VER=$(awk '/^  version:/{print $2; exit}' images/k8s-sidecar/melange/k8s-sidecar.yaml)
+          EPOCH=$(awk '/^  epoch:/{print $2; exit}' images/k8s-sidecar/melange/k8s-sidecar.yaml)
+          case "$VER" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "bad version '$VER'"; exit 1 ;; esac
+
+          # A bare `k8s-sidecar` also exists in Wolfi at 2.7.3 — if provider
+          # priority/epoch ever slips, apko would silently downgrade.
+          docker run --rm --user root \
+            -v "$PWD:/work" \
+            cgr.dev/chainguard/apko lock "/work/images/k8s-sidecar/apko/k8s-sidecar.yaml" \
+              --arch x86_64 --arch aarch64 \
+              --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
+              --output /work/img.lock.json
+          RESOLVED=$(jq -r '.contents.packages[] | select(.name=="k8s-sidecar") | .version' img.lock.json | head -1)
+          # exact pkgver match or our melange package lost resolution to Wolfi's k8s-sidecar
+          if [ "$RESOLVED" != "$VER-r$EPOCH" ]; then
+            echo "apko resolved k8s-sidecar as '$RESOLVED', expected '$VER-r$EPOCH'"; exit 1
+          fi
+
+          { echo "VER=$VER"
+            echo "MINOR=$(echo "$VER" | cut -d. -f1,2)"; } >> "$GITHUB_ENV"
+
+      - name: Log in to ghcr
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Publish multi-arch k8s-sidecar image to ghcr
+        if: env.PUBLISH == 'true'
+        run: |
+          cfg="images/k8s-sidecar/apko/k8s-sidecar.yaml"
+          for i in 1 2 3; do
+            if docker run --rm --user root \
+              -v "$PWD:/work:ro" \
+              -v "$HOME/.docker:/root/.docker:ro" \
+              cgr.dev/chainguard/apko publish "/work/$cfg" \
+                "$IMAGE:$VER" "$IMAGE:$MINOR" "$IMAGE:latest" \
+                --arch x86_64,aarch64 \
+                --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
+                --lockfile /work/img.lock.json; then
+              break
+            fi
+            [ "$i" = 3 ] && { echo "apko publish failed after 3 attempts"; exit 1; }
+            echo "publish attempt $i failed; retrying in 15s"; sleep 15
+          done
+          echo "IMG_REF=$IMAGE:$VER" >> "$GITHUB_ENV"
+          echo "GRYPE_SRC=registry:$IMAGE:$VER" >> "$GITHUB_ENV"
+
+      - name: Build image locally (validate-only, no registry)
+        if: env.PUBLISH != 'true'
+        run: |
+          docker run --rm --user root \
+            -v "$PWD:/work" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            cgr.dev/chainguard/apko publish "/work/images/k8s-sidecar/apko/k8s-sidecar.yaml" \
+              "img:validate" \
+              --arch x86_64 \
+              --local \
+              --repository-append /work/packages --keyring-append /work/melange.rsa.pub
+          echo "IMG_REF=img:validate" >> "$GITHUB_ENV"
+          echo "GRYPE_SRC=docker:img:validate" >> "$GITHUB_ENV"
+
+      - name: Smoke test image
+        run: |
+          [ "$PUBLISH" = true ] && docker pull --platform linux/amd64 "$IMG_REF"
+          IMAGE="$IMG_REF" ./images/k8s-sidecar/test.sh
+
+      - name: Scan image with grype
+        id: scan
+        run: |
+          mkdir -p scans
+          docker run --rm --user 0:0 \
+            -v "$PWD/scans:/out" \
+            -v "$HOME/.docker:/root/.docker:ro" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            ghcr.io/anchore/grype:latest "$GRYPE_SRC" \
+              --output json --file "/out/k8s-sidecar.json" || true
+          # Same signing gate as every other image here: any Low+ finding blocks.
+          LOWPLUS=$(jq '[.matches[] | select(.vulnerability.severity
+                     | IN("Low","Medium","High","Critical"))] | length' "scans/k8s-sidecar.json")
+          echo "lowplus=$LOWPLUS" >> "$GITHUB_OUTPUT"
+          echo "k8s-sidecar Low+ findings: $LOWPLUS" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Sign with cosign (only when scan has 0 Low+ findings)
+        if: env.PUBLISH == 'true' && steps.scan.outputs.lowplus == '0'
+        run: |
+          DIGEST=$(docker buildx imagetools inspect "$IMG_REF" \
+            --format '{{json .Manifest}}' | jq -r .digest)
+          docker run --rm --user 0:0 \
+            -v "$HOME/.docker:/root/.docker:ro" \
+            -e DOCKER_CONFIG=/root/.docker \
+            -e GITHUB_ACTIONS \
+            -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+            ghcr.io/sigstore/cosign/cosign:latest sign --yes "$IMG_REF@$DIGEST"
+          echo "SIGNED=true" >> "$GITHUB_ENV"
+
+      - name: Build pages data
+        if: env.PUBLISH == 'true'
+        run: |
+          DIGEST=$(docker buildx imagetools inspect "$IMG_REF" \
+            --format '{{json .Manifest}}' | jq -r .digest)
+          jq -n \
+            --arg image "$IMAGE" --arg version "$VER" \
+            --arg digest "$DIGEST" --arg built "$(date -u +%FT%TZ)" \
+            --arg tags "$VER $MINOR latest" \
+            --arg built_with melange --argjson signed "${SIGNED:-false}" \
+            --arg signed_by k8s-sidecar.yml \
+            --slurpfile scan "scans/k8s-sidecar.json" \
+            '{image: $image, major: null, version: $version,
+              tags: ($tags | split(" ")), digest: $digest, built: $built, built_with: $built_with,
+              signed: $signed, signed_by: $signed_by,
+              scan: $scan[0]}' > "scans/k8s-sidecar.json.tmp"
+          mv "scans/k8s-sidecar.json.tmp" "scans/k8s-sidecar.json"
+
+      - uses: actions/upload-artifact@v7
+        if: env.PUBLISH == 'true'
+        with:
+          name: pages-data-k8s-sidecar
+          path: scans/*.json
+
+  pages:
+    # Merge this run's fresh entry over the live index (sibling entries are
+    # preserved, keyed on image+major with fresh entries winning), rebuild the
+    # Astro site and deploy — see site.yml.
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    needs: [build]
+    permissions:
+      contents: write # push the generated gh-pages branch
+    uses: ./.github/workflows/site.yml
+    with:
+      artifact-pattern: pages-data-k8s-sidecar*
+      ref: ${{ inputs.ref || github.ref }}

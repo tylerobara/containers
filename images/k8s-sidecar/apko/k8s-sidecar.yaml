@@ -1,0 +1,70 @@
+# apko config for ghcr.io/tylerobara/containers/k8s-sidecar
+# (kiwigrid/k8s-sidecar — Grafana dashboard sidecar). The app is built from
+# the upstream release tarball by melange into a self-contained /app/.venv
+# (Wolfi's own k8s-sidecar package is stale at 2.7.3, so provider-priority +
+# epoch make apko pick ours). No Dockerfile.
+#
+# Contract parity with upstream ghcr.io/kiwigrid/k8s-sidecar:
+#   USER 65534:65534, PYTHONUNBUFFERED=1,
+#   PATH=/app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin,
+#   ENTRYPOINT ["python","-u","-m","sidecar"].
+# Runs as nobody: a mounted target folder must be group-writable (or 777) —
+# same requirement as upstream.
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    # Base filesystem + debug shell (repo-wide convention: busybox-only,
+    # no apk-tools).
+    - wolfi-baselayout
+    - busybox
+    - ca-certificates-bundle
+
+    # Interpreter for the melange-built venv (the apk also records it as a
+    # runtime dep; listed here so the interpreter never floats). 3.15 rather
+    # than upstream's 3.14: CVE-2025-15367 (poplib, flagged by the grype
+    # gate) is only fixed in 3.15+.
+    - python-3.15
+
+    # The sidecar app (self-contained venv), built by melange from the
+    # upstream release tarball; supplied via --repository-append at build
+    # time. provider-priority: 100 in the melange config makes apko pick it
+    # over Wolfi's stale same-named package.
+    - k8s-sidecar
+
+environment:
+  # Mirrors the upstream image config exactly.
+  PATH: /app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  PYTHONUNBUFFERED: "1"
+
+accounts:
+  groups:
+    - groupname: nogroup
+      gid: 65534
+  users:
+    - username: nobody
+      uid: 65534
+      gid: 65534
+      shell: /bin/sh
+  # Upstream runs `USER 65534:65534`.
+  run-as: 65534
+
+entrypoint:
+  # apko splits this into the OCI array ["python","-u","-m","sidecar"] —
+  # verified via docker inspect in test.sh.
+  command: python -u -m sidecar
+
+annotations:
+  org.opencontainers.image.title: "k8s-sidecar-minimal"
+  org.opencontainers.image.description: "Minimal kiwigrid/k8s-sidecar (Grafana dashboards sidecar) image built on Wolfi with daily CVE patches"
+  org.opencontainers.image.url: "https://github.com/tylerobara/containers"
+  org.opencontainers.image.source: "https://github.com/tylerobara/containers/tree/main/images/k8s-sidecar"
+  org.opencontainers.image.licenses: "MIT"
+  io.wolfi.os.apko: "true"
+
+archs:
+  - x86_64
+  - aarch64

@@ -188,8 +188,20 @@
       "category": "Base & Utilities",
       "primary_package": null,
       "upstream_url": "https://github.com/bitnami/containers/tree/main/bitnami/os-shell",
-      "summary": "Nonroot helper shell for init containers \u2014 a bitnami os-shell counterpart.",
+      "summary": "Nonroot helper shell for init containers — a bitnami os-shell counterpart.",
       "description": "A tiny nonroot helper image with bash, curl, jq and yq for Kubernetes init containers, sidecars and one-off shell tasks, assembled by apko from Wolfi packages only."
+    },
+    {
+      "name": "k8s-sidecar",
+      "display_name": "k8s-sidecar",
+      "dir": "k8s-sidecar",
+      "apko": "k8s-sidecar.yaml",
+      "workflow": "k8s-sidecar.yml",
+      "category": "Apps",
+      "primary_package": "k8s-sidecar",
+      "upstream_url": "https://github.com/kiwigrid/k8s-sidecar",
+      "summary": "kiwigrid/k8s-sidecar (Grafana dashboards sidecar) built from source; Wolfi’s package is stale.",
+      "description": "The Grafana dashboard sidecar that syncs ConfigMaps/Secrets to files, built from the upstream release tarball into a self-contained venv and assembled by apko on Wolfi. Drop-in for ghcr.io/kiwigrid/k8s-sidecar: USER 65534, same entrypoint and CLI contract."
     }
   ]
 }

@@ -1,0 +1,108 @@
+# Melange build for the k8s-sidecar image (github.com/kiwigrid/k8s-sidecar),
+# the Grafana dashboards sidecar that syncs ConfigMaps/Secrets to files.
+#
+# Built from the upstream release tarball with upstream's exact build contract
+# (Dockerfile): a self-contained venv at /app/.venv, `pip install .` against
+# the pyproject pins (kubernetes 36.0.3, requests, python-json-logger,
+# logfmter), pip bumped to 26.1.2 during the build, then upstream's
+# test/pyc strip. pip + setuptools never run at runtime, so we also remove
+# them from the final venv (upstream keeps pip; smaller + a cleaner grype
+# gate otherwise). The apko config supplies the rest (python-3.15 — one minor
+# ahead of upstream's 3.14, see the build env comment for why, USER
+# 65534, PYTHONUNBUFFERED, `python -u -m sidecar` entrypoint).
+#
+# Why not Wolfi's k8s-sidecar package: stale at 2.7.3 vs upstream 2.14.1, so
+# provider-priority + high epoch win resolution with our from-source build.
+# The app has no version flag at all (upstream's pyproject `version` is a
+# literal 1.0.0 placeholder even in their released image), so tag identity is
+# pinned by sha256 on the release tarball; smoke checks import every pinned
+# dependency and run the entrypoint module with --help.
+#
+# Bump `version` + `vars.sha256` on each release (the update-versions bot
+# handles it; releases/latest is a plain X.Y.Z tag).
+
+package:
+  name: k8s-sidecar
+  version: 2.14.1
+  # Above any future Wolfi re-sync of their stale 2.7.3 package:
+  epoch: 100
+  description: "Kubernetes sidecar to collect configmaps and secrets as files"
+  copyright:
+    - license: MIT
+  dependencies:
+    provider-priority: 100
+    runtime:
+      # The venv's interpreter; matches what the apko config also pins.
+      - python-3.15
+
+vars:
+  # SHA256 of the GitHub release tarball
+  sha256: 8032c1cb153a992e22d4bee0baf71e3fa5746c439b61865e9884ce8d587377de
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      # Interpreter for the venv build; matches the apko runtime package.
+      # 3.15, not upstream's 3.14: the one grype finding is CVE-2025-15367
+      # (poplib command injection) which upstream only fixed in 3.15+ — no
+      # 3.14.x release carries it, so the signing gate could never clear
+      # otherwise. The sidecar's pyproject is requires-python >=3.12; the
+      # pinned deps are pure-python and import-verified in the pipeline.
+      - python-3.15
+      - py3-pip
+      # Some PyPI deps ship only sdists with C-extension fallbacks — the
+      # compiler stack upstream's builder stage installs (gcc + libc dev
+      # headers; Wolfi is glibc-based, so glibc-dev, + CPython headers).
+      - gcc
+      - glibc-dev
+      - python-3.15-dev
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/kiwigrid/k8s-sidecar/archive/refs/tags/${{package.version}}.tar.gz" \
+        -o /home/build/k8s-sidecar.tar.gz
+      echo "${{vars.sha256}}  /home/build/k8s-sidecar.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf k8s-sidecar.tar.gz && rm k8s-sidecar.tar.gz
+
+  - working-directory: /home/build/k8s-sidecar-${{package.version}}
+    runs: |
+      set -e
+      # Explicit 3.15 (not the default python3 symlink) — see the env comment
+      # for why this image moves a minor ahead of upstream's 3.14.
+      python3.15 -m venv /app/.venv
+      /app/.venv/bin/python -c 'import sys; assert sys.version_info[:2] == (3, 15), sys.version'
+      /app/.venv/bin/pip install --no-cache-dir pip==26.1.2
+      /app/.venv/bin/pip install --no-cache-dir .
+      # Upstream's own strip step.
+      find /app/.venv \
+        \( -type d -a \( -name test -o -name tests \) \) \
+        -o \( -type f -a \( -name '*.pyc' -o -name '*.pyo' \) \) \
+        -exec rm -rf '{}' +
+      # pip/setuptools only ever built the venv — drop them from the image.
+      rm -rf /app/.venv/bin/pip* \
+             /app/.venv/lib/python*/site-packages/pip* \
+             /app/.venv/lib/python*/site-packages/setuptools* \
+             /app/.venv/lib/python*/site-packages/pkg_resources*
+
+      # Smoke: the entrypoint module + every pinned dependency must import.
+      # --help exits 0 without needing a cluster (argparse only); the imports
+      # cover the kubernetes client, the HTTP layer, the JSON logger.
+      for imp in \
+        "import sidecar, client, resources, logger, healthz, helpers" \
+        "import kubernetes, requests, pythonjsonlogger, logfmter" ; do
+        /app/.venv/bin/python -c "$imp"
+      done
+      /app/.venv/bin/python -m sidecar --help > /dev/null
+
+      mkdir -p "${{targets.destdir}}/app"
+      cp -a /app/.venv "${{targets.destdir}}/app/.venv"
