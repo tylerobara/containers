@@ -16,7 +16,7 @@
 
 package:
   name: cilium-envoy
-  version: 1.38.6
+  version: 1.39.5
   epoch: 100
   description: "Cilium Envoy proxy (extracted from the upstream published image)"
   copyright:
@@ -27,16 +27,16 @@ package:
       - glibc   # envoy is linked against glibc (libc/libm/ld-linux)
 
 vars:
-  upstream_tag: v1.38.6-1791537840-00e749f11f69334c625e53fc1ce2fc6c7f34a51f
+  upstream_tag: v1.39.5-1792733054-8c73b2816bc8239e27f1fd53b271884688137459
   # Multi-arch index digest of the quay.io/cilium/cilium-envoy image above.
-  digest: d6c8c0c91954d1885026d82a31b341f37dcd34a4b127fdaf1587e43ddd224cef
+  digest: 547ab45f6092f681d9f54f3be9fa8fb1e705c9c5dc2df388efe3a52aa6965629
   # sha256 of the extracted /usr/bin/cilium-envoy, -starter, and the gcc
   # libatomic the binary links against (no Wolfi package ships it; upstream
   #'s ubuntu base carries it — libatomic1 in install-runtime-deps.sh) per arch.
-  sha256_amd64: 55a280cbf648d065fd88800d8e3bf06b00a8e9cd1b7939f582f9d78304bc16fc
+  sha256_amd64: 5aec3a1e93b74261dbd12d4f7a793fa171190b40d027c2125f4236b1f186a312
   sha256_starter_amd64: ebf97e60a561d2355c2b6c60e58711d9d879941ad934bdcd11c3a1a59c1f2244
   sha256_libatomic_amd64: 9d8a34468e614a71a6427dbabb0ac24eb8cb1e324dc6aa3bf95eb6f59201f000
-  sha256_arm64: 19b188ecb3ab649324fd6d4c93035b3a5efabbb84caa73ad48a78830b9b6d59b
+  sha256_arm64: 2b9363871451c54d4c976d6717c232f3e27dc02347de659e7f90daad48a73997
   sha256_starter_arm64: 1e0baa446c1cdfba5e2c69fdd7e2efad67bb6b8258509f16c76045efc22ea3c6
   sha256_libatomic_arm64: 2896f2608b49113496e6872c77cb591f51f4e646fec01e59f517a971199979fe
 
