@@ -20,6 +20,7 @@ base. **No Dockerfiles anywhere.**
 | Homepage | `ghcr.io/tylerobara/containers/homepage` | [`images/homepage/`](images/homepage/) |
 | Local Path Provisioner | `ghcr.io/tylerobara/containers/local-path-provisioner` | [`images/local-path-provisioner/`](images/local-path-provisioner/) |
 | Gatus | `ghcr.io/tylerobara/containers/gatus` | [`images/gatus/`](images/gatus/) |
+| Kubernetes Reflector | `ghcr.io/tylerobara/containers/kubernetes-reflector` | [`images/kubernetes-reflector/`](images/kubernetes-reflector/) |
 
 Catalog + grype scan results: <https://tylerobara.github.io/containers/> — an
 Astro site (`site/`) with a page per image (specs, tags, advisories, cosign

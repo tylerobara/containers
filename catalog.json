@@ -238,6 +238,18 @@
       "upstream_url": "https://github.com/kiwigrid/k8s-sidecar",
       "summary": "kiwigrid/k8s-sidecar (Grafana dashboards sidecar) built from source; Wolfi’s package is stale.",
       "description": "The Grafana dashboard sidecar that syncs ConfigMaps/Secrets to files, built from the upstream release tarball into a self-contained venv and assembled by apko on Wolfi. Drop-in for ghcr.io/kiwigrid/k8s-sidecar: USER 65534, same entrypoint and CLI contract."
+    },
+    {
+      "name": "kubernetes-reflector",
+      "display_name": "Kubernetes Reflector",
+      "dir": "kubernetes-reflector",
+      "apko": "kubernetes-reflector.yaml",
+      "workflow": "kubernetes-reflector.yml",
+      "category": "Kubernetes & Networking",
+      "primary_package": "kubernetes-reflector",
+      "upstream_url": "https://github.com/emberstack/kubernetes-reflector",
+      "summary": "EmberStack Reflector (secret/configmap mirroring) built from upstream source.",
+      "description": "The Reflector controller that mirrors secrets and configmaps across namespaces, built from the upstream .NET release tarball by melange into a self-contained tree and assembled by apko on Wolfi. Drop-in for docker.io/emberstack/kubernetes-reflector."
     }
   ]
 }
