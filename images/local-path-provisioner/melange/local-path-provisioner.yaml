@@ -1,0 +1,92 @@
+# Melange build for Rancher's local-path-provisioner
+# (github.com/rancher/local-path-provisioner) — static Go binary off the
+# release tarball with upstream's exact build contract (scripts/build +
+# scripts/version): CGO_ENABLED=0, go build . , ldflags -X main.VERSION=<tag>
+# (unstamped builds self-report the main.go default "0.0.1"; release builds
+# stamp the git tag, so we stamp v${{package.version}} for parity) and
+# -extldflags -static -s -w. Upstream's image (package/Dockerfile) is scratch
+# + ca-certificates with the binary at /usr/bin/local-path-provisioner; here
+# that base is the apko config.
+#
+# Wolfi ships its own local-path-provisioner package (currently lagging at
+# 0.0.36), hence provider-priority + high epoch: same-version resolutions can
+# never silently pick Wolfi's build.
+#
+# Bump `version` + `vars.sha256` on each release
+# (https://github.com/rancher/local-path-provisioner/releases) — the
+# update-versions bot covers this row.
+
+package:
+  name: local-path-provisioner
+  version: 0.0.37
+  epoch: 100
+  description: "Rancher local-path-provisioner built from upstream source"
+  copyright:
+    - license: Apache-2.0
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the GitHub release tarball
+  sha256: 3602edf85bb1513d463073917adc930752177d034e1f944fb8f7610c779a34f6
+  # Upstream 0.0.37 vendors vulnerable Go modules (grype Critical/High in
+  # x/net <0.60.0); we raise the requirement and re-vendor before compiling.
+  # go get only raises requirements (MVS never downgrades), so once upstream
+  # ships >= these the bump is a no-op — retire the pin then.
+  xnet_version: 0.60.0
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      # go.mod wants go 1.26.3 (upstream builds with golang:1.26); the
+      # Wolfi go-1.26 toolchain satisfies the directive.
+      - go-1.26
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/rancher/local-path-provisioner/archive/refs/tags/v${{package.version}}.tar.gz" \
+        -o /home/build/lpp.tar.gz
+      echo "${{vars.sha256}}  /home/build/lpp.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf lpp.tar.gz && rm lpp.tar.gz
+
+  - working-directory: /home/build/local-path-provisioner-${{package.version}}
+    runs: |
+      # Upstream builds with GOFLAGS=-mod=vendor off the tarball's committed
+      # vendor/ dir, so the vulnerable x/net pin goes through go.mod +
+      # `go mod vendor` (go get alone would leave vendor/ stale).
+      export CGO_ENABLED=0 GOTOOLCHAIN=local
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      go get golang.org/x/net@v${{vars.xnet_version}}
+      go mod vendor
+      # Upstream's scripts/build invocation (per-arch stripped down to the
+      # target arch melange builds); -trimpath/-buildvcs are repo convention
+      # (openbao, grafana-image-renderer).
+      go build -trimpath -buildvcs=false \
+        -ldflags "-X main.VERSION=v${{package.version}} -extldflags -static -s -w" \
+        -o local-path-provisioner .
+      install -Dm755 local-path-provisioner "${{targets.destdir}}/usr/bin/local-path-provisioner"
+
+  - runs: |
+      # No startup banner and no `version` subcommand (that panics); the
+      # urfave/cli --version flag is the version surface, and `start` is what
+      # the deploy manifests run — it dies on the missing in-cluster config.
+      "${{targets.destdir}}/usr/bin/local-path-provisioner" --version \
+        | grep -q "local-path-provisioner version v${{package.version}}"
+      out=$(timeout 60 "${{targets.destdir}}/usr/bin/local-path-provisioner" start 2>&1 || true)
+      echo "$out" | grep -q "unable to get client config"
+      # grype reads Go deps from the embedded build info — assert the bumped
+      # pin actually landed in the binary.
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      go version -m "${{targets.destdir}}/usr/bin/local-path-provisioner" \
+        | awk -F'\t' -v want="v${{vars.xnet_version}}" \
+            '$3=="golang.org/x/net" && $4==want {found=1} END{exit !found}'

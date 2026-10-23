@@ -3,14 +3,15 @@ name: update-versions
 # Version bump bot — the minimal repo's update-versions.yml pattern scaled to
 # this repo's image families. Checks upstream (PGDG ftp for each tracked
 # postgresql-<major>.yaml, GitHub releases for the operator, openbao, homepage,
-# dokuwiki, grafana-image-renderer, cilium, cert-manager and frr-k8s;
+# dokuwiki, grafana-image-renderer, cilium, cert-manager, frr-k8s, k8s-sidecar
+# and local-path-provisioner;
 # cilium-envoy follows cilium's own images/cilium/Dockerfile pin and gets its
 # payload shas re-extracted; metallb's controller + speaker configs are bumped
 # together off the latest non-chart metallb tag) and
 # opens a PR bumping `version` + `vars.sha256` in the melange config. Nothing
 # is merged or published here: review the PR, validate it with that image's
 # own workflow (postgres / cloudnative-pg-operator / openbao / homepage / dokuwiki /
-# grafana-image-renderer / cert-manager / metallb) via
+# grafana-image-renderer / cert-manager / metallb / k8s-sidecar / local-path-provisioner) via
 # workflow_dispatch (ref = PR branch, validate_only = true),
 # then merge — the merge push rebuilds and publishes just that image.
 #
@@ -24,7 +25,7 @@ on:
   workflow_dispatch:
     inputs:
       only:
-        description: "Comma-separated rows to check, e.g. postgresql-16,operator,openbao,cilium,cilium-envoy,metallb,frr-k8s (blank = all)"
+        description: "Comma-separated rows to check, e.g. postgresql-16,operator,openbao,cilium,cilium-envoy,metallb,frr-k8s,k8s-sidecar,local-path-provisioner (blank = all)"
         required: false
         default: ""
 
@@ -451,6 +452,19 @@ jobs:
               bump_row k8s-sidecar images/k8s-sidecar/melange/k8s-sidecar.yaml "$latest" \
                 "https://github.com/kiwigrid/k8s-sidecar/archive/refs/tags/${latest}.tar.gz" k8s-sidecar
             fi
+          fi
+
+          # --- local-path-provisioner: latest GitHub release ---
+          if want local-path-provisioner; then
+            yaml=images/local-path-provisioner/melange/local-path-provisioner.yaml
+            latest=$(gh api repos/rancher/local-path-provisioner/releases/latest --jq '.tag_name | ltrimstr("v")')
+            if [ -z "$latest" ]; then
+              echo "::error::local-path-provisioner: no release found upstream"
+              FAILED=1
+            fi
+            bump_row local-path-provisioner "$yaml" "$latest" \
+              "https://github.com/rancher/local-path-provisioner/archive/refs/tags/v${latest}.tar.gz" \
+              local-path-provisioner
           fi
 
           exit $FAILED
