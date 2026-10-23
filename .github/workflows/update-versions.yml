@@ -41,6 +41,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # git commit needs an identity; scheduled runs have none on the runner
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
       - name: Check upstream and open bump PRs
         run: |
           set -uo pipefail
