@@ -1,0 +1,46 @@
+# Local Path Provisioner image, assembled by apko (no Dockerfile). The binary
+# is built from the upstream release tarball by melange (see
+# ../melange/local-path-provisioner.yaml); everything else is Wolfi. Mirrors
+# upstream's scratch image (package/Dockerfile: /usr/bin/local-path-provisioner
+# + ca-certificates, no shell) with the repo-wide busybox debug shell on top.
+#
+# run-as 65532 is deliberate: upstream's scratch base has no user at all and
+# the helm chart's deployment sets no runAsUser, so containerd would otherwise
+# run the static binary as root. The provisioner talks to the API server only
+# (via its in-cluster ServiceAccount token) and never touches host paths
+# itself — the helper pods it creates do the volume work on the host — so a
+# nonroot uid here changes nothing functionally.
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    # Debug shell + the coreutils/sh helpers; ca-certificates for the
+    # API-server TLS connection. (The provisioner's helper pods run their own
+    # busybox image — HELPER_IMAGE flag — that is a separate image entirely.)
+    - busybox
+    - ca-certificates
+    # Built by melange; supplied via --repository-append at build time.
+    - local-path-provisioner
+
+accounts:
+  groups:
+    - groupname: nonroot
+      gid: 65532
+  users:
+    - username: nonroot
+      uid: 65532
+      gid: 65532
+      shell: /bin/false
+  run-as: 65532
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+
+entrypoint:
+  command: /usr/bin/local-path-provisioner
+# Upstream's CMD is the bare binary too; the deploy manifests and the helm
+# chart always pass `--debug start --config ...` explicitly, so there is no
+# default arg to mirror here (apko `cmd` stays unset).

@@ -144,6 +144,18 @@
       "description": "frr-k8s, the FRR routing integration MetalLB's BGP backend runs on, built from upstream source by melange and assembled by apko on Wolfi."
     },
     {
+      "name": "local-path-provisioner",
+      "display_name": "Local Path Provisioner",
+      "dir": "local-path-provisioner",
+      "apko": "local-path-provisioner.yaml",
+      "workflow": "local-path-provisioner.yml",
+      "category": "Kubernetes & Networking",
+      "primary_package": "local-path-provisioner",
+      "upstream_url": "https://github.com/rancher/local-path-provisioner",
+      "summary": "Rancher's local-path storage provisioner, built from upstream source.",
+      "description": "Rancher's local-path-provisioner, the lightweight local-volume StorageClass provisioner, built from upstream source by melange and assembled by apko on Wolfi."
+    },
+    {
       "name": "openbao",
       "display_name": "OpenBao",
       "dir": "openbao",
