@@ -22,7 +22,7 @@
 
 package:
   name: cilium
-  version: 1.20.3
+  version: 1.20.4
   epoch: 100
   description: "Cilium CNI (cilium-agent + tooling), built from upstream source"
   copyright:
@@ -32,7 +32,7 @@ package:
 
 vars:
   # SHA256 of the GitHub release tarball
-  sha256: 5ebbd251ed8890d809aee3a6dcaec4cb15cc00bd8e9e8c0be379d220e44aa743
+  sha256: 90e4f8796db57542eed10f34e0a70d47b2e03f2d3767785adb5fdd66621ca7ec
   # images/runtime/build-cni.sh pins containernetworking/plugins v1.9.1
   cni_version: "1.9.1"
   cni_sha256: 34bd82d47e981940751619c9cc44c095bb90bfcaf8d71865cbb822c37690a764
