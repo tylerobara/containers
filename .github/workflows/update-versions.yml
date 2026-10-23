@@ -5,6 +5,8 @@ name: update-versions
 # postgresql-<major>.yaml, GitHub releases for the operator, openbao, homepage,
 # dokuwiki, grafana-image-renderer, cilium, cert-manager, frr-k8s, k8s-sidecar,
 # local-path-provisioner and gatus;
+# dokuwiki, grafana-image-renderer, cilium, cert-manager, frr-k8s, k8s-sidecar
+# , local-path-provisioner and dozzle;
 # cilium-envoy follows cilium's own images/cilium/Dockerfile pin and gets its
 # payload shas re-extracted; metallb's controller + speaker configs are bumped
 # together off the latest non-chart metallb tag) and

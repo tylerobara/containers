@@ -214,6 +214,16 @@
       "upstream_url": "https://github.com/TwiN/gatus",
       "summary": "Gatus health monitor and status page, built from upstream source.",
       "description": "Gatus, a health monitor with a status page and prometheus metrics. The gatus binary is built from upstream source by melange; the image is assembled by apko on Wolfi."
+      "name": "dozzle",
+      "display_name": "Dozzle",
+      "dir": "dozzle",
+      "apko": "dozzle.yaml",
+      "workflow": "dozzle.yml",
+      "category": "Apps",
+      "primary_package": "dozzle",
+      "upstream_url": "https://github.com/amir20/dozzle",
+      "summary": "Dozzle real-time container log UI, built from upstream source.",
+      "description": "Dozzle, the lightweight web UI for container logs. The Go binary with its embedded frontend (bun-built, like upstream) is compiled from source by melange and assembled by apko on Wolfi."
     },
     {
       "name": "os-shell",
