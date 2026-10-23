@@ -574,4 +574,21 @@ jobs:
           fi
 
 
+          # --- traefik: releases/latest is not maintained (patch releases are
+          # created with gh --latest=false), so take the highest fully-released
+          # tag; the strict X.Y.Z regex drops beta/rc tags (v3.9.0-rc1...). ---
+          if want traefik; then
+            yaml=images/traefik/melange/traefik.yaml
+            latest=$(gh api --paginate repos/traefik/traefik/tags --jq '.[].name' \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 | sed 's/^v//')
+            if [ -z "$latest" ]; then
+              echo "::error::traefik: no release tag found upstream"
+              FAILED=1
+            else
+              bump_row traefik "$yaml" "$latest" \
+                "https://github.com/traefik/traefik/archive/refs/tags/v${latest}.tar.gz" traefik
+            fi
+          fi
+
+
           exit $FAILED

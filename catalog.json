@@ -286,6 +286,16 @@
       "upstream_url": "https://frrouting.org",
       "summary": "FRRouting BGP suite (zebra/bgpd/vtysh), built from upstream source.",
       "description": "The FRRouting protocol suite (zebra, bgpd, vtysh, watchfrr), built from the upstream release tarball by melange and assembled by apko on Wolfi. Drop-in for the quay.io/frrouting/frr BGP speaker used by Cilium and MetalLB."
+      "name": "traefik",
+      "display_name": "Traefik",
+      "dir": "traefik",
+      "apko": "traefik.yaml",
+      "workflow": "traefik.yml",
+      "category": "Kubernetes & Networking",
+      "primary_package": "traefik",
+      "upstream_url": "https://traefik.io",
+      "summary": "Traefik reverse proxy / ingress controller, built from upstream source.",
+      "description": "The Traefik reverse proxy and Kubernetes ingress controller, compiled from the upstream release tarball by melange (static Go binary, upstream release ldflags) and assembled by apko on Wolfi. Dashboard UI assets not embedded; API and ping endpoints unaffected."
     }
   ]
 }
