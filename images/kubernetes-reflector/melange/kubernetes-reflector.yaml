@@ -64,7 +64,10 @@ pipeline:
         aarch64) RID=linux-arm64 ;;
         *) echo "unsupported arch $(uname -m)"; exit 1 ;;
       esac
-      export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
+      # melange archives the whole workspace after each step; keep dotnet's
+      # ~/.dotnet + ~/.nuget writes OUT of /home/build (its 0700 root dirs
+      # break the workspace xattr store), and opt out of the first-run noise.
+      export HOME=/root DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
       dotnet publish src/ES.Kubernetes.Reflector/ES.Kubernetes.Reflector.csproj \
         -c Release -o publish -r "$RID" --self-contained true \
         /p:Version=${{package.version}} \
@@ -106,7 +109,7 @@ pipeline:
       # appsettings.json — like upstream's WORKDIR /app. Busybox here has no
       # wget applet, hence curl (already in environment.contents).
       cd "$tree"
-      export ASPNETCORE_HTTP_PORTS=8080
+      export HOME=/root ASPNETCORE_HTTP_PORTS=8080
       ./ES.Kubernetes.Reflector >/tmp/kr-boot.log 2>&1 &
       pid=$!
       i=0
