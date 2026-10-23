@@ -1,0 +1,52 @@
+# Gatus image, assembled by apko (no Dockerfile). The gatus binary and the
+# example config are built from upstream source by melange (see
+# ../melange/gatus.yaml); everything else is Wolfi.
+#
+# Reference: upstream's scratch-image Dockerfile (github.com/TwiN/gatus/blob/
+# main/Dockerfile): static /gatus, config.yaml baked as the live config,
+# 0.0.0.0:8080, ENTRYPOINT. Differences from upstream, on purpose:
+#   - busybox+ca-certs Wolfi base instead of scratch (debug shell, no
+#     apk-tools at runtime)
+#   - /usr/bin/gatus instead of /gatus (FHS), nonroot 65532
+#   - upstream's demo config ships as /etc/gatus/config.yaml.example, not as
+#     the live config: GATUS_CONFIG_PATH points at /etc/gatus/config.yaml,
+#     which you mount yourself (production posture, same as openbao here)
+# Web port is 0.0.0.0:8080 (gatus' own default; apko has no EXPOSE fields).
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    # Debug shell only — gatus is a static Go binary. ca-certificates for the
+    # HTTPS/SMTP/dns/whois endpoint checks it exists to run.
+    - busybox
+    - ca-certificates
+    # Built by melange; supplied via --repository-append at build time.
+    - gatus
+
+accounts:
+  groups:
+    - groupname: gatus
+      gid: 65532
+  users:
+    - username: gatus
+      uid: 65532
+      gid: 65532
+      shell: /bin/false
+  run-as: 65532
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+  # Upstream has no -config flag (config comes only from this env var); the
+  # image defaults it to /etc/gatus/config.yaml so `docker run -v
+  # ./my-config.yaml:/etc/gatus/config.yaml:ro <img>` is the whole story.
+  # Without a mounted config gatus panics with a clear "no configuration
+  # file" error; the bundled example lives at /etc/gatus/config.yaml.example.
+  GATUS_CONFIG_PATH: /etc/gatus/config.yaml
+
+entrypoint:
+  command: /usr/bin/gatus
+# No top-level cmd: upstream's ENTRYPOINT is a bare ["/gatus"], so args passed
+# to docker run go nowhere useful (main.go parses no flags) — nothing to add.
