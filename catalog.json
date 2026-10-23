@@ -262,6 +262,18 @@
       "upstream_url": "https://github.com/emberstack/kubernetes-reflector",
       "summary": "EmberStack Reflector (secret/configmap mirroring) built from upstream source.",
       "description": "The Reflector controller that mirrors secrets and configmaps across namespaces, built from the upstream .NET release tarball by melange into a self-contained tree and assembled by apko on Wolfi. Drop-in for docker.io/emberstack/kubernetes-reflector."
+    },
+    {
+      "name": "alpine-k8s",
+      "display_name": "Kubernetes toolbox (kubectl + helm)",
+      "dir": "alpine-k8s",
+      "apko": "alpine-k8s.yaml",
+      "workflow": "alpine-k8s.yml",
+      "category": "Base & Utilities",
+      "primary_package": null,
+      "upstream_url": "https://github.com/alpine-docker/k8s",
+      "summary": "kubectl/helm pipeline toolbox \u2014 an alpine/k8s counterpart on Wolfi.",
+      "description": "The kubectl + helm + kustomize toolbox the minilab pipelines run, assembled by apko from Wolfi packages only. Image version = kubectl version, mirroring the reference tag."
     }
   ]
 }

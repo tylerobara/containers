@@ -22,6 +22,7 @@ base. **No Dockerfiles anywhere.**
 | Gatus | `ghcr.io/tylerobara/containers/gatus` | [`images/gatus/`](images/gatus/) |
 | Kubernetes Reflector | `ghcr.io/tylerobara/containers/kubernetes-reflector` | [`images/kubernetes-reflector/`](images/kubernetes-reflector/) |
 | Dozzle | `ghcr.io/tylerobara/containers/dozzle` | [`images/dozzle/`](images/dozzle/) |
+| alpine-k8s (alpine/k8s counterpart) | `ghcr.io/tylerobara/containers/alpine-k8s` | [`images/alpine-k8s/`](images/alpine-k8s/) |
 
 Catalog + grype scan results: <https://tylerobara.github.io/containers/> — an
 Astro site (`site/`) with a page per image (specs, tags, advisories, cosign
@@ -32,6 +33,7 @@ build/scan data at `data/index.json`. See [`site/README.md`](site/README.md).
 
 One workflow per image family — `postgres.yml`, `cloudnative-pg-operator.yml`,
 `openbao.yml`, `os-shell.yml`, `dokuwiki.yml`, `grafana-image-renderer.yml`, `homepage.yml`, `cilium.yml`, `cert-manager.yml`, `metallb.yml`, `k8s-sidecar.yml`, `local-path-provisioner.yml`, `gatus.yml` — so a change to one image can never rebuild or cancel another.
+`openbao.yml`, `os-shell.yml`, `dokuwiki.yml`, `grafana-image-renderer.yml`, `homepage.yml`, `cilium.yml`, `cert-manager.yml`, `metallb.yml`, `k8s-sidecar.yml`, `local-path-provisioner.yml`, `alpine-k8s.yml` — so a change to one image can never rebuild or cancel another.
 Routing is the native `on.push.paths` filter: a bump PR/push rebuilds **only
 the image whose directory moved**; each workflow's daily schedule rebuilds just
 its own image (fresh Wolfi CVE patches), staggered 06:00/06:05/06:10/06:15/06:20/06:25/06:30/06:35/06:40/06:45/07:10/07:15/07:25 UTC.
@@ -58,6 +60,7 @@ tracked `postgresql-<major>`, GitHub releases for the operator, openbao,
 homepage, dokuwiki, grafana-image-renderer, cilium, cert-manager, frr-k8s,
 k8s-sidecar, local-path-provisioner and gatus — cilium-envoy
 k8s-sidecar, local-path-provisioner and dozzle — cilium-envoy
+k8s-sidecar, local-path-provisioner and alpine-k8s (whose bot row bumps the image VERSION on new kubectl patches) — cilium-envoy
 follows the pin in cilium's own `images/cilium/Dockerfile`, cert-manager's
 three configs share one tarball so they bump together in a single PR, and so
 do metallb's controller + speaker (frr-k8s is its own upstream repo with its
@@ -70,6 +73,7 @@ bumping `version` + `vars.sha256` in the melange config. Review the PR, then:
    `grafana-image-renderer.yml` / `cilium.yml` / `cert-manager.yml` /
    `metallb.yml` / `k8s-sidecar.yml` / `local-path-provisioner.yml` / `gatus.yml` / `homepage.yml`) manually with
    `metallb.yml` / `k8s-sidecar.yml` / `local-path-provisioner.yml` / `dozzle.yml`) manually with
+   `metallb.yml` / `k8s-sidecar.yml` / `local-path-provisioner.yml` / `alpine-k8s.yml`) manually with
    `ref = <bump branch>` and **validate_only** checked — builds + scans the
    branch without publishing anything. (Needed because GITHUB_TOKEN-authored
    PRs don't run checks automatically; a GitHub App fixes that if it gets
