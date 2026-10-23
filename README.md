@@ -17,6 +17,7 @@ base. **No Dockerfiles anywhere.**
 | cert-manager (controller, cainjector, webhook) | `ghcr.io/tylerobara/containers/cert-manager-controller` (+ `-cainjector`, `-webhook`) | [`images/cert-manager/`](images/cert-manager/) |
 | MetalLB (controller, speaker, frr-k8s) | `ghcr.io/tylerobara/containers/metallb-controller` (+ `-speaker`, `-frr-k8s`) | [`images/metallb/`](images/metallb/) |
 | k8s-sidecar (Grafana dashboards sidecar) | `ghcr.io/tylerobara/containers/k8s-sidecar` | [`images/k8s-sidecar/`](images/k8s-sidecar/) |
+| Homepage | `ghcr.io/tylerobara/containers/homepage` | [`images/homepage/`](images/homepage/) |
 
 Catalog + grype scan results: <https://tylerobara.github.io/containers/> — an
 Astro site (`site/`) with a page per image (specs, tags, advisories, cosign
@@ -26,7 +27,7 @@ build/scan data at `data/index.json`. See [`site/README.md`](site/README.md).
 ## CI
 
 One workflow per image family — `postgres.yml`, `cloudnative-pg-operator.yml`,
-`openbao.yml`, `os-shell.yml`, `dokuwiki.yml`, `grafana-image-renderer.yml`, `cilium.yml`, `cert-manager.yml`, `metallb.yml`, `k8s-sidecar.yml` — so a change to one image can never rebuild or cancel another.
+`openbao.yml`, `os-shell.yml`, `dokuwiki.yml`, `grafana-image-renderer.yml`, `homepage.yml`, `cilium.yml`, `cert-manager.yml`, `metallb.yml`, `k8s-sidecar.yml` — so a change to one image can never rebuild or cancel another.
 Routing is the native `on.push.paths` filter: a bump PR/push rebuilds **only
 the image whose directory moved**; each workflow's daily schedule rebuilds just
 its own image (fresh Wolfi CVE patches), staggered 06:00/06:05/06:10/06:15/06:20/06:25/06:30/06:35/06:40/06:45 UTC.
@@ -46,7 +47,7 @@ build).
 
 The **update-versions** workflow checks upstream daily (PGDG ftp for each
 tracked `postgresql-<major>`, GitHub releases for the operator, openbao,
-dokuwiki, grafana-image-renderer, cilium, cert-manager, frr-k8s and k8s-sidecar — cilium-envoy
+homepage, dokuwiki, grafana-image-renderer, cilium, cert-manager, frr-k8s and k8s-sidecar — cilium-envoy
 follows the pin in cilium's own `images/cilium/Dockerfile`, cert-manager's
 three configs share one tarball so they bump together in a single PR, and so
 do metallb's controller + speaker (frr-k8s is its own upstream repo with its

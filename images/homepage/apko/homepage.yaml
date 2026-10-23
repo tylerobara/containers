@@ -1,0 +1,86 @@
+# Homepage image, assembled by apko (no Dockerfile). The Next.js standalone
+# app tree (/app) + entrypoint are built by melange (see
+# ../melange/homepage.yaml); node and the helpers come from Wolfi.
+#
+# Reference: the runner stage of the upstream Dockerfile
+# (github.com/gethomepage/homepage/blob/v2.6.0/Dockerfile): node server.js on
+# :3000, config at /app/config, su-exec PUID/PGID drop, iputils for the ping
+# widget. Differences from upstream, on purpose:
+#   - nodejs-24 from Wolfi (upstream node:22-alpine; Wolfi streams are 24+26)
+#   - default user is nonroot 65532 "homepage" (upstream defaults to root and
+#     drops via PUID/PGID; both modes work here — the entrypoint keeps that
+#     contract for root runs)
+#   - dumb-init PID 1 shebang on the entrypoint
+#   - /app/src/skeleton is shipped by the package so an empty /app/config
+#     self-seeds and the server boots out of the box
+# No EXPOSE semantics live here (apko has no ports fields): the server listens
+# on $PORT (default 3000, $HOSTNAME dual-stack probed by the entrypoint) — see
+# README.md.
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    - busybox
+    # /etc/os-release + the world-writable base dirs (/tmp 1777)
+    - wolfi-baselayout
+    # outbound TLS for the API widgets (same reason upstream runs the app on
+    # the node image's ca-certificates)
+    - ca-certificates
+    # PID 1 reaping (entrypoint shebang) + root->PUID drop helper (upstream
+    # runner stage apk-adds su-exec for exactly this)
+    - dumb-init
+    - su-exec
+    # upstream's runner apk-adds iputils-ping: the status ping widget shells
+    # out to the system ping
+    - iputils
+    # runtime matching the melange build env (../melange/homepage.yaml pins
+    # nodejs-24); explicit stream instead of the nodejs virtual so a Wolfi
+    # stream rollover cannot silently change the runtime major
+    - nodejs-24
+    # Built by melange; supplied via --repository-append at build time.
+    - homepage
+
+accounts:
+  groups:
+    - groupname: homepage
+      gid: 65532
+  users:
+    - username: homepage
+      uid: 65532
+      gid: 65532
+      shell: /sbin/nologin
+  run-as: 65532
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+  # the upstream Dockerfile ENV lines (server.js reads PORT/HOSTNAME; docker
+  # overrides HOSTNAME with the container id, as upstream)
+  NODE_ENV: production
+  HOSTNAME: '::'
+  PORT: 3000
+
+entrypoint:
+  command: /entrypoint.sh
+
+# Writable state for the nonroot default: the app's config dir (settings.yaml
+# self-seeds from the shipped skeleton; mount your own volume over it to take
+# ownership — chown it to 65532, k8s fsGroup: 65532) and the logs dir winston
+# writes into. melange cannot ship owned nonroot dirs (melange#1395), so apko
+# paths: owns this instead — same lesson as openbao/dokuwiki. PathMutation's
+# mode field is `permissions` (omitting it creates the dir at mode 0!).
+paths:
+  - path: /app/config
+    type: directory
+    uid: 65532
+    gid: 65532
+    permissions: 0o755
+    recursive: true
+  - path: /app/config/logs
+    type: directory
+    uid: 65532
+    gid: 65532
+    permissions: 0o755
+    recursive: true

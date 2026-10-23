@@ -180,6 +180,18 @@
       "description": "Grafana Image Renderer v5, a static Go server driving headless Chromium to render panels to PNG and PDF. Built by melange, assembled by apko on Wolfi."
     },
     {
+      "name": "homepage",
+      "display_name": "Homepage",
+      "dir": "homepage",
+      "apko": "homepage.yaml",
+      "workflow": "homepage.yml",
+      "category": "Apps",
+      "primary_package": "homepage",
+      "upstream_url": "https://github.com/gethomepage/homepage",
+      "summary": "gethomepage dashboard, built from upstream source, served by Wolfi node.",
+      "description": "Homepage, the self-hosted application dashboard for your services wall. The Next.js app is built from the pinned release tarball by melange and served by Wolfi nodejs on :3000 as nonroot, with config at /app/config."
+    },
+    {
       "name": "os-shell",
       "display_name": "os-shell",
       "dir": "os-shell",

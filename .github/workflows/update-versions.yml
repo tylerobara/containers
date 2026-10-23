@@ -2,14 +2,14 @@ name: update-versions
 
 # Version bump bot — the minimal repo's update-versions.yml pattern scaled to
 # this repo's image families. Checks upstream (PGDG ftp for each tracked
-# postgresql-<major>.yaml, GitHub releases for the operator, openbao,
+# postgresql-<major>.yaml, GitHub releases for the operator, openbao, homepage,
 # dokuwiki, grafana-image-renderer, cilium, cert-manager and frr-k8s;
 # cilium-envoy follows cilium's own images/cilium/Dockerfile pin and gets its
 # payload shas re-extracted; metallb's controller + speaker configs are bumped
 # together off the latest non-chart metallb tag) and
 # opens a PR bumping `version` + `vars.sha256` in the melange config. Nothing
 # is merged or published here: review the PR, validate it with that image's
-# own workflow (postgres / cloudnative-pg-operator / openbao / dokuwiki /
+# own workflow (postgres / cloudnative-pg-operator / openbao / homepage / dokuwiki /
 # grafana-image-renderer / cert-manager / metallb) via
 # workflow_dispatch (ref = PR branch, validate_only = true),
 # then merge — the merge push rebuilds and publishes just that image.
@@ -143,6 +143,19 @@ jobs:
             bump_row openbao "$yaml" "$latest" \
               "https://github.com/openbao/openbao/archive/refs/tags/v${latest}.tar.gz" \
               openbao
+          fi
+
+          # --- homepage: latest GitHub release ---
+          if want homepage; then
+            yaml=images/homepage/melange/homepage.yaml
+            latest=$(gh api repos/gethomepage/homepage/releases/latest --jq '.tag_name | ltrimstr("v")')
+            if [ -z "$latest" ]; then
+              echo "::error::homepage: no release found upstream"
+              FAILED=1
+            fi
+            bump_row homepage "$yaml" "$latest" \
+              "https://github.com/gethomepage/homepage/archive/refs/tags/v${latest}.tar.gz" \
+              homepage
           fi
 
           # --- dokuwiki: latest GitHub release (release-2026-07-14c -> 2026.07.14c) ---

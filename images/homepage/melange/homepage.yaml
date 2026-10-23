@@ -1,0 +1,176 @@
+# Melange build for Homepage (github.com/gethomepage/homepage) — assembles the
+# Next.js app tree + container wiring from the pinned official release tarball,
+# mirroring the upstream Dockerfile: builder stage = pnpm install (frozen
+# lockfile) + next build (output: "standalone"), runtime stage = standalone
+# tree + .next/static + public copied to /app. No Wolfi homepage package
+# exists today, so provider-priority/epoch are belt-and-suspenders (openbao
+# convention).
+#
+# Upstream builds on node:22 + corepack's pnpm@latest; Wolfi's node streams
+# are 24 + 26, so the build pins nodejs-24 (the older stream, closest to
+# upstream) and installs pnpm/npm from Wolfi at explicit streams instead of
+# corepack's rolling "latest" — same install the release was built with
+# (repo ships lockfileVersion 9.0 and no packageManager field), but
+# reproducible.
+#
+# Bump `version` + `vars.sha256` on each release
+# (https://github.com/gethomepage/homepage/releases) — the update-versions bot
+# covers this row.
+
+package:
+  name: homepage
+  version: 2.6.0
+  epoch: 100
+  description: "Homepage — a self-hosted application dashboard for your services wall"
+  copyright:
+    - license: Apache-2.0
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of https://github.com/gethomepage/homepage/archive/refs/tags/v2.6.0.tar.gz
+  sha256: cc736d92c0ed52cca7231616632ed4539b335e8d31b52c1e11cbd9bc75abf3e7
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      # build-base + python are the node-gyp fallback for native modules whose
+      # prebuilds a platform misses (ohif-viewer's pnpm-build precedent)
+      - build-base
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      - nodejs-24
+      - npm-12
+      - pnpm-12
+      - python-3.13
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/gethomepage/homepage/archive/refs/tags/v${{package.version}}.tar.gz" \
+        -o /home/build/homepage.tar.gz
+      echo "${{vars.sha256}}  /home/build/homepage.tar.gz" | sha256sum -c -
+      mkdir /home/build/src
+      tar xf homepage.tar.gz -C /home/build/src --strip-components 1
+      rm homepage.tar.gz
+
+  - working-directory: /home/build/src
+    runs: |
+      # Builder stage of the upstream Dockerfile: devDeps included (webpack
+      # build tooling), frozen lockfile, the telemetry kill switch and the
+      # version stamps the UI shows (REVISION is the git sha upstream stamps;
+      # a tarball build has none). The project preinstall is
+      # `npx only-allow pnpm`, which passes under Wolfi pnpm + npm.
+      pnpm install --frozen-lockfile --prefer-offline
+      NEXT_TELEMETRY_DISABLED=1 \
+      NEXT_PUBLIC_BUILDTIME=$(date +%s) \
+      NEXT_PUBLIC_VERSION=${{package.version}} \
+      NEXT_PUBLIC_REVISION=unknown \
+        pnpm run build
+
+  - runs: |
+      D="${{targets.destdir}}"
+      # melange writes the apk SBOM host-side, but the container's uid owns
+      # everything the pipeline mkdirs; pre-create the leaf at 0777 so the
+      # host melange can drop var/lib/db/sbom/*.spdx.json in (same workaround
+      # as dokuwiki — only the trees outside /usr hit this).
+      install -d -m755 "$D/app" "$D/var/lib/db/sbom"
+      chmod 0777 "$D/var/lib/db/sbom"
+
+      # Runtime stage of the upstream Dockerfile — its exact copy list:
+      # standalone tree, .next/static, public.
+      cp -a /home/build/src/.next/standalone/. "$D/app/"
+      mkdir -p "$D/app/.next"
+      cp -a /home/build/src/.next/static "$D/app/.next/static"
+      cp -a /home/build/src/public "$D/app/public"
+      # checkAndCopyConfig() seeds missing config/*.yaml from
+      # <cwd>/src/skeleton and exits(1) if it cannot — standalone tracing
+      # drops src/ (the YAMLs are never required()), so ship the skeleton
+      # explicitly. This is what lets the image boot with an empty
+      # /app/config (created nonroot-owned by apko paths).
+      mkdir -p "$D/app/src"
+      cp -a /home/build/src/src/skeleton "$D/app/src/skeleton"
+
+      # ---- entrypoint: dumb-init shebang (openbao/dokuwiki precedent),
+      # upstream's docker-entrypoint.sh contract kept: PUID/PGID root drop
+      # via su-exec, /config volume symlink, IPv6->IPv4 bind probe,
+      # HOMEPAGE_BUILDTIME stamp, then the fixed CMD `node server.js`
+      # (apko has no array-typed CMD, so it lives here).
+      cat > "$D/entrypoint.sh" <<'EEOF'
+      #!/usr/bin/dumb-init /bin/sh
+      # PID 1: dumb-init reaps orphans and forwards signals to the node server.
+      set -e
+
+      cd /app
+
+      # Upstream default: stay root unless PUID/PGID say otherwise. The image
+      # default user is already nonroot 65532, where the chown paths no-op.
+      export PUID=${PUID:-0}
+      export PGID=${PGID:-0}
+
+      # lscr-style /config volume support (upstream). Never fires under the
+      # nonroot default (apko pre-creates /app/config); the || keeps set -e
+      # from aborting when a root run mounts a read-only /app.
+      if [ ! -d /app/config ]; then
+        ln -s /config /app/config || echo "Could not link /config into /app/config; mount /app/config directly"
+      fi
+
+      export HOMEPAGE_BUILDTIME=$(date +%s)
+
+      # Try IPv6 first (dual stack when available), fall back to IPv4 —
+      # upstream verbatim. Note docker injects its own HOSTNAME (the container
+      # id), which the app binds like any other name — same as upstream.
+      export HOSTNAME=${HOSTNAME:-::}
+      if [ "$HOSTNAME" = "::" ]; then
+        if ! node -e "const server = require('http').createServer(() => {}); const host = '::'; const port = process.env.PORT || 3000; server.once('error', (err) => { console.error('IPv6 bind failed:', err.message); process.exit(1); }); server.listen(port, host, () => server.close(() => process.exit(0)));"; then
+          echo "Falling back to IPv4 bind at 0.0.0.0"
+          export HOSTNAME=0.0.0.0
+        fi
+      fi
+
+      # Root + PUID contract (upstream): fix config + log dir ownership before
+      # dropping, tolerating volumes this uid cannot chown.
+      if [ "$(id -u)" = 0 ] && [ "$PUID" != 0 ]; then
+        chown -R "$PUID:$PGID" /app/config 2>/dev/null || echo "Could not chown /app/config; continuing anyway"
+        chown -R "$PUID:$PGID" /app/.next 2>/dev/null || echo "Could not chown /app/.next; continuing anyway"
+      fi
+
+      # winston's file transport logs to /app/config/logs/homepage.log
+      # (settings.logpath overrides); pre-create so the dir is there whatever
+      # the mount looks like.
+      mkdir -p /app/config/logs 2>/dev/null || true
+
+      # Drop privileges when started root with a PUID (upstream), else run as
+      # the image user; then upstream's fixed CMD.
+      if [ "$(id -u)" = 0 ] && [ "$PUID" != 0 ]; then
+        exec su-exec "$PUID:$PGID" node server.js
+      fi
+      exec node server.js
+      EEOF
+      chmod 755 "$D/entrypoint.sh"
+
+  - runs: |
+      D="${{targets.destdir}}"
+      # app tree integrity (melange#1395 lesson: assert shipped bits)
+      test -f "$D/app/server.js"
+      test -f "$D/app/package.json"
+      grep -q '"version": "${{package.version}}"' "$D/app/package.json"
+      test -d "$D/app/node_modules"
+      test -n "$(ls -A "$D/app/.next/static")"
+      test -f "$D/app/public/favicon-16x16.png"
+      test -f "$D/app/src/skeleton/settings.yaml"
+      # server.js must parse without executing (node from the build env)
+      node --check "$D/app/server.js"
+      # entrypoint sanity (openbao precedent)
+      test -x "$D/entrypoint.sh"
+      sh -n "$D/entrypoint.sh"
+      grep -q "^exec node server.js" "$D/entrypoint.sh"
+      grep -q "su-exec" "$D/entrypoint.sh"
+      # SBOM landing spot must be host-writable (see install step above)
+      test -d "$D/var/lib/db/sbom"
