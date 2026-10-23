@@ -591,4 +591,31 @@ jobs:
           fi
 
 
+          # --- pocket-id: own upstream repo + version line (NOT lockstep with
+          # the operator, which lives in aclerici38/pocket-id-operator and gets
+          # its own row below) ---
+          if want pocket-id; then
+            latest=$(gh api repos/pocket-id/pocket-id/releases/latest --jq '.tag_name | ltrimstr("v")')
+            if [ -z "$latest" ]; then
+              echo "::error::pocket-id: no release found upstream"
+              FAILED=1
+            else
+              bump_row pocket-id images/pocket-id/melange/pocket-id.yaml "$latest" \
+                "https://github.com/pocket-id/pocket-id/archive/refs/tags/v${latest}.tar.gz" pocket-id
+            fi
+          fi
+
+          # --- pocket-id-operator: separate upstream repo + version line ---
+          if want pocket-id-operator; then
+            latest=$(gh api repos/aclerici38/pocket-id-operator/releases/latest --jq '.tag_name | ltrimstr("v")')
+            if [ -z "$latest" ]; then
+              echo "::error::pocket-id-operator: no release found upstream"
+              FAILED=1
+            else
+              bump_row pocket-id-operator images/pocket-id/melange/pocket-id-operator.yaml "$latest" \
+                "https://github.com/aclerici38/pocket-id-operator/archive/refs/tags/v${latest}.tar.gz" pocket-id
+            fi
+          fi
+
+
           exit $FAILED

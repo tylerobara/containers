@@ -28,7 +28,7 @@ on:
       - images/pocket-id/**
       - .github/workflows/pocket-id.yml
   schedule:
-    - cron: '5 7 * * *' # daily, staggered after update-versions (07:30 checks yesterday's tags)
+    - cron: '5 7 * * *' # daily, staggered after k8s-sidecar (06:45)
   workflow_dispatch:
     inputs:
       ref:
