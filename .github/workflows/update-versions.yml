@@ -102,7 +102,7 @@ jobs:
           - upstream tarball hashed into the config: <$url>
           - \`sha256\`: \`$sha\`
 
-          Bot PRs don't get automatic CI checks. To validate before merging, run **$wf.yml → Run workflow** with \`ref=$branch\` and **validate_only** checked: it builds, assembles and grype-scans this branch without publishing or signing anything. The merge push to main then publishes only this image."
+          Bot PRs don't get automatic CI checks. To validate before merging, run **$wf.yml → Run workflow** with \`ref=$branch\` and **validate_only** checked: it builds, assembles and grype-scans this branch without publishing or signing anything. The merge push to main then publishes only this image." || FAILED=1
             fi
             echo "$name: opened/updated bump PR $cur -> $latest" >> "$GITHUB_STEP_SUMMARY"
             # back to the pristine baseline for the next row
@@ -214,7 +214,7 @@ jobs:
             yaml=images/cilium/melange/cilium-envoy.yaml
             ct=$(gh api repos/cilium/cilium/releases/latest --jq '.tag_name')
             line=$(gh api "repos/cilium/cilium/contents/images/cilium/Dockerfile?ref=${ct}" --jq .content \
-              | base64 -d | grep -m1 '^ARG CILIUM_ENVOY_IMAGE=')
+              | base64 -d | grep -m1 '^ARG CILIUM_ENVOY_IMAGE=' || true)
             ref=${line#*=}
             etag=${ref#*:}; etag=${etag%@*}            # v<maj>.<min>.<pat>-<ts>-<proxy sha>
             edigest=${ref##*@sha256:}
@@ -299,7 +299,7 @@ jobs:
           - melange config: \`$yaml\` (\`version\`, \`vars.upstream_tag\`, \`vars.digest\` + all six per-arch \`vars.sha256_*\` re-extracted from the digest-pinned image; \`epoch: 100\` untouched)
           - upstream reference: \`quay.io/cilium/cilium-envoy:${etag}@sha256:${edigest}\`
 
-          Bot PRs don't get automatic CI checks. To validate before merging, run **cilium.yml → Run workflow** with \`ref=$branch\` and **validate_only** checked. The merge push to main then publishes just the cilium-envoy image."
+          Bot PRs don't get automatic CI checks. To validate before merging, run **cilium.yml → Run workflow** with \`ref=$branch\` and **validate_only** checked. The merge push to main then publishes just the cilium-envoy image." || FAILED=1
                   fi
                   echo "cilium-envoy: opened/updated bump PR $cur -> $ever" >> "$GITHUB_STEP_SUMMARY"
                   git switch -C scratch-"$branch" origin/main >/dev/null 2>&1
@@ -362,7 +362,7 @@ jobs:
           - \`sha256\`: \`$cm_sha\`
           - \`git_commit\`: \`$cm_commit\` (tag ref, so the startup banner matches upstream)
 
-          Bot PRs don't get automatic CI checks. To validate before merging, run **cert-manager.yml → Run workflow** with \`ref=$branch\` and **validate_only** checked: it builds, assembles and grype-scans all three without publishing or signing anything. The merge push to main then publishes the family."
+          Bot PRs don't get automatic CI checks. To validate before merging, run **cert-manager.yml → Run workflow** with \`ref=$branch\` and **validate_only** checked: it builds, assembles and grype-scans all three without publishing or signing anything. The merge push to main then publishes the family." || FAILED=1
                   fi
                   echo "cert-manager: opened/updated bump PR $cur -> $latest" >> "$GITHUB_STEP_SUMMARY"
                   git switch -C scratch-"$branch" origin/main >/dev/null 2>&1
@@ -425,7 +425,7 @@ jobs:
           - \`sha256\`: \`$mlb_sha\`
           - the \`vars.xnet_version\`/\`vars.otel_version\`/\`vars.grpc_version\` pins stay as-is; they are \`go get\` bumps that become no-ops once upstream ships >= them (drop them in the config then)
 
-          Bot PRs don't get automatic CI checks. To validate before merging, run **metallb.yml → Run workflow** with \`ref=$branch\` and **validate_only** checked: it builds, assembles and grype-scans the family without publishing or signing anything. The merge push to main then publishes the metallb pair."
+          Bot PRs don't get automatic CI checks. To validate before merging, run **metallb.yml → Run workflow** with \`ref=$branch\` and **validate_only** checked: it builds, assembles and grype-scans the family without publishing or signing anything. The merge push to main then publishes the metallb pair." || FAILED=1
                   fi
                   echo "metallb: opened/updated bump PR $cur -> $latest" >> "$GITHUB_STEP_SUMMARY"
                   git switch -C scratch-"$branch" origin/main >/dev/null 2>&1
