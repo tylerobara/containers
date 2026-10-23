@@ -1,0 +1,40 @@
+# Pocket ID operator image, assembled by apko (no Dockerfile). The manager
+# binary is built from the upstream release tarball by melange (see
+# ../melange/pocket-id-operator.yaml); everything else is Wolfi. Mirrors
+# upstream's distroless/static + single-binary image (its Dockerfile: /manager,
+# USER 65532, ENTRYPOINT ["/manager"]) — including the /manager path, which the
+# upstream helm chart hardcodes as `command:`, with the repo-wide busybox debug
+# shell instead of a bare distroless base.
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    # Debug shell only — the manager is static Go. ca-certificates for the
+    # k8s API, the Pocket ID admin API it reconciles against, and the logo
+    # reachability probes it runs per OIDC client.
+    - busybox
+    - ca-certificates
+    # Built by melange; supplied via --repository-append at build time.
+    - pocket-id-operator
+
+accounts:
+  groups:
+    - groupname: nonroot
+      gid: 65532
+  users:
+    - username: nonroot
+      uid: 65532
+      gid: 65532
+      shell: /bin/false
+  # Upstream runs as the distroless nonroot user (65532:65532). The helm
+  # chart's pod securityContext (runAsNonRoot) governs deploys either way.
+  run-as: 65532
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+
+entrypoint:
+  command: /manager

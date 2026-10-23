@@ -1,0 +1,71 @@
+# Pocket ID image, assembled by apko (no Dockerfile). The binary — with the
+# SvelteKit frontend already embedded — is built by melange (see
+# ../melange/pocket-id.yaml); everything else is Wolfi. Mirrors upstream's
+# -distroless image contract (docker/Dockerfile-distroless: single static
+# binary, nonroot, APP_ENV=production, :1411), with the repo-wide
+# busybox debug shell instead of a bare distroless base and the binary at
+# /usr/bin/pocket-id instead of /app/pocket-id.
+#
+# Upstream's alpine image runs an entrypoint.sh that only exists to chown
+# /app/data and re-exec as PUID/PGID; the nonroot default here makes it dead
+# weight, so it is not shipped (same call as the other single-binary images).
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    # Debug shell only — the binary is static Go (SQLite is pure Go too).
+    # ca-certificates for the outbound TLS it does: OIDC/SAML IdP fetches,
+    # SMTP, S3, webhooks and the optional icon CDN.
+    - busybox
+    - ca-certificates
+    # Built by melange; supplied via --repository-append at build time.
+    - pocket-id
+
+accounts:
+  groups:
+    - groupname: nonroot
+      gid: 65532
+  users:
+    - username: nonroot
+      uid: 65532
+      gid: 65532
+      shell: /bin/false
+  # Upstream distroless runs as the nonroot user too; its alpine variant
+  # drops to PUID/PGID=1000 via the entrypoint.
+  run-as: 65532
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+  # Upstream image ENV line (release.yml sets it in both Dockerfiles).
+  APP_ENV: production
+
+# No `cmd:` and no per-entrypoint args (apko has neither EXPOSE nor args): a
+# bare run starts the server, exactly like upstream's CMD ["/app/pocket-id"],
+# and `docker run <img> version` / `healthcheck` still work as subcommands.
+# Port 1411 is just the default listen address (HTTP_PORT).
+entrypoint:
+  command: /usr/bin/pocket-id
+
+# The SQLite backend's default path is CWD-relative ("data/pocket-id.db"), so
+# the whole point of this dir is to be the volume mount the upstream
+# deployment/chart and the pocket-id-operator both use (/app/data, with
+# DB_CONNECTION_STRING pointing into it). melange cannot ship nonroot-owned
+# dirs (melange#1395), so apko paths: owns it — `permissions` is required or
+# the dir is created at mode 0. A mounted volume still needs fsGroup: 65532
+# (or chown) to be writable by the default user.
+paths:
+  - path: /app
+    type: directory
+    uid: 65532
+    gid: 65532
+    permissions: 0o755
+    recursive: true
+  - path: /app/data
+    type: directory
+    uid: 65532
+    gid: 65532
+    permissions: 0o755
+    recursive: true
