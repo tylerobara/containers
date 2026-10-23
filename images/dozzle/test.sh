@@ -22,6 +22,13 @@ docker run --rm --entrypoint /bin/sh "$IMAGE" -c '
   command -v apk  >/dev/null 2>&1 && exit 1
   exit 0' || fail "bash or apk-tools present in prod image"
 
+echo "Testing /data exists and is writable by the daemon user..."
+# dozzle's internal/profile init() mkdirs ./data (=/data) on EVERY run and
+# fatals on EACCES — a non-writable /data bricks even `--version`.
+docker run --rm --entrypoint /bin/sh "$IMAGE" -c \
+  'test -d /data && touch /data/.w && rm /data/.w' \
+  || fail "/data missing or not writable by uid 65532"
+
 echo "Testing the server comes up on :8080 (UI + healthcheck)..."
 # The server dies without a container runtime ("Could not connect to any
 # Docker Engine"), so mount the runner's own docker socket.

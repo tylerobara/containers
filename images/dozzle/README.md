@@ -24,9 +24,11 @@ The server needs a container runtime: mount `/var/run/docker.sock`
 targets). Kubernetes: `DOZZLE_MODE=k8s` with the pod watch RBAC, no socket
 needed.
 
-Everything runs as uid 65532 and the binary is read-only; nothing to mount
-unless you want the optional `./data` directory (user database, notification
-rules) to persist — set the working dir or bind a writable volume there.
+Everything runs as uid 65532. The package ships a writable `/data` (the
+binary mkdirs `./data` on every start and dies without it; the dir is 0777
+because melange packages carry root ownership only), holding the optional
+user database and notification rules — bind a volume at `/data` to persist
+it across restarts.
 
 ## Signing
 

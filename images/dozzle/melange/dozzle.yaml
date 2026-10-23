@@ -14,7 +14,7 @@
 package:
   name: dozzle
   version: 11.3.0
-  epoch: 100
+  epoch: 101
   description: "Dozzle container log UI built from upstream source"
   copyright:
     - license: MIT
@@ -92,7 +92,19 @@ pipeline:
           -X github.com/amir20/dozzle/internal/cli.Version=${{package.version}}" \
         -o dozzle
       install -Dm755 dozzle "${{targets.destdir}}/usr/bin/dozzle"
+      # internal/profile's init() runs os.Mkdir("./data") (CWD is /) on EVERY
+      # invocation — --version included — and log.Fatal()s on EACCES; the
+      # upstream scratch image only survives because it runs as root. Ship the
+      # dir pre-existing (then MkdirAll is a no-op) and writable for the
+      # apko run-as 65532: melange normalizes package ownership to root
+      # (melange#1395), so 0777 is the only way to hand it to the nonroot
+      # daemon user; mount a real volume at /data to persist its contents.
+      install -d -m 0777 "${{targets.destdir}}/data"
 
   - runs: |
       # Verify the build actually stamped this version
       "${{targets.destdir}}/usr/bin/dozzle" --version | grep -q "${{package.version}}"
+      # ...the data dir ships as nonroot can mkdir ./data
+      test -d "${{targets.destdir}}/data"
+      [ "$(stat -c %a "${{targets.destdir}}/data")" = "777" ] \
+        || { echo "/data must ship mode 777 for the nonroot daemon user"; exit 1; }
