@@ -1,0 +1,119 @@
+# Melange build for Kubernetes Reflector
+# (github.com/emberstack/kubernetes-reflector), from the release tarball with
+# upstream's build contract (src/ES.Kubernetes.Reflector/Dockerfile +
+# .github/workflows/pipeline.yaml): dotnet publish -c Release, plus the
+# /p:Version-style stamps upstream's release CI injects from GitVersion (the
+# tarball carries no .git for GitVersion itself, so we pass the pinned
+# version directly). Upstream copies the framework-dependent publish output
+# onto mcr.microsoft.com/dotnet/aspnet:10.0; here the tree ships
+# SELF-CONTAINED instead, because Wolfi's dotnet-10 package has no ASP.NET
+# Core shared framework — the publish tree bundles the .NET 10 + ASP.NET
+# runtime next to the app under /usr/lib/kubernetes-reflector/, and the
+# repo-standard /usr/bin/reflector entrypoint is a symlink to the apphost
+# (which resolves its dll + native deps from its own directory).
+#
+# Bump `version` + `vars.sha256` on each release
+# (https://github.com/emberstack/kubernetes-reflector/releases) — the
+# update-versions bot covers this row.
+
+package:
+  name: kubernetes-reflector
+  version: 10.0.65
+  epoch: 100
+  description: "Kubernetes Reflector built from upstream source"
+  copyright:
+    - license: Apache-2.0
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the GitHub release tarball
+  sha256: 0c8fd0292e1321448f751d83dd17e78a1054cc50f28f6989c437c02847e2574b
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      # .csproj targets net10.0 (upstream CI builds with dotnet 10.x).
+      # dotnet-10-sdk pulls Wolfi's icu, which the boot verify below needs
+      # too: the self-contained runtime probes the system libicuuc.
+      - dotnet-10-sdk
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/emberstack/kubernetes-reflector/archive/refs/tags/v${{package.version}}.tar.gz" \
+        -o /home/build/kr.tar.gz
+      echo "${{vars.sha256}}  /home/build/kr.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf kr.tar.gz && rm kr.tar.gz
+
+  - working-directory: /home/build/kubernetes-reflector-${{package.version}}
+    runs: |
+      # melange builds each arch on a native runner, so uname -m IS the
+      # target arch; the .NET RID is the only arch string the SDK needs.
+      case "$(uname -m)" in
+        x86_64) RID=linux-x64 ;;
+        aarch64) RID=linux-arm64 ;;
+        *) echo "unsupported arch $(uname -m)"; exit 1 ;;
+      esac
+      export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
+      dotnet publish src/ES.Kubernetes.Reflector/ES.Kubernetes.Reflector.csproj \
+        -c Release -o publish -r "$RID" --self-contained true \
+        /p:Version=${{package.version}} \
+        /p:AssemblyVersion=${{package.version}} \
+        /p:AssemblyFileVersion=${{package.version}} \
+        /p:InformationalVersion=${{package.version}}
+      install -d -m 0755 "${{targets.destdir}}/usr/lib/kubernetes-reflector"
+      cp -rp publish/. "${{targets.destdir}}/usr/lib/kubernetes-reflector/"
+      # Repo-standard entrypoint: the apphost is named after the assembly;
+      # it finds its dll + runtimeconfig + native libs next to itself via
+      # its resolved (symlink-followed) exe path, so it can be launched as
+      # /usr/bin/reflector.
+      install -d -m 0755 "${{targets.destdir}}/usr/bin"
+      ln -sfn /usr/lib/kubernetes-reflector/ES.Kubernetes.Reflector \
+        "${{targets.destdir}}/usr/bin/reflector"
+
+  - runs: |
+      # Assert what we ship. Upstream is ASP.NET: no --version flag and no
+      # startup banner (unlike the cert-manager/metallb Go binaries), and
+      # its watchers only log-and-retry without in-cluster config, so the
+      # version is asserted from the stamped assembly metadata and the
+      # boot is asserted against the helm chart's liveness path.
+      tree="${{targets.destdir}}/usr/lib/kubernetes-reflector"
+      # The /p:InformationalVersion= stamp must be embedded in the managed
+      # assembly (runtime assembly versions are 10.0.1xx, never this app's
+      # 10.0.65, so the match is unambiguous).
+      grep -q "${{package.version}}" "$tree/ES.Kubernetes.Reflector.dll"
+      # Real ELF apphost, and the entrypoint symlink points at it.
+      [ "$(od -An -tx1 -N4 "$tree/ES.Kubernetes.Reflector" | tr -d ' ')" = "7f454c46" ]
+      [ "$(readlink "${{targets.destdir}}/usr/bin/reflector")" = \
+        "/usr/lib/kubernetes-reflector/ES.Kubernetes.Reflector" ]
+      # Boot test with no cluster present (watchers log errors and keep
+      # retrying — same behaviour as the upstream image, verified against
+      # docker.io/emberstack/kubernetes-reflector:10.0.65): the web host
+      # must serve /health/live, the liveness path of the official reflector
+      # helm chart. ASPNETCORE_HTTP_PORTS mirrors the apko config (upstream's
+      # aspnet base image sets the same, which is why it binds :8080), and
+      # cd into the tree gives the content root that carries
+      # appsettings.json — like upstream's WORKDIR /app. Busybox here has no
+      # wget applet, hence curl (already in environment.contents).
+      cd "$tree"
+      export ASPNETCORE_HTTP_PORTS=8080
+      ./ES.Kubernetes.Reflector >/tmp/kr-boot.log 2>&1 &
+      pid=$!
+      i=0
+      until curl -fsS http://127.0.0.1:8080/health/live >/dev/null 2>&1; do
+        i=$((i + 1))
+        [ "$i" -gt 60 ] && { cat /tmp/kr-boot.log; kill "$pid" 2>/dev/null; exit 1; }
+        sleep 1
+      done
+      kill "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null || true

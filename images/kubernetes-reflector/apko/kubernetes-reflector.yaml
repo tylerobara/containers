@@ -1,0 +1,47 @@
+# Kubernetes Reflector image, assembled by apko (no Dockerfile). The .NET
+# app tree is built from the upstream release tarball by melange (see
+# ../melange/kubernetes-reflector.yaml); everything else is Wolfi.
+#
+# Reference: the upstream image contract
+# (github.com/emberstack/kubernetes-reflector src/ES.Kubernetes.Reflector/
+# Dockerfile: single web app on :8080, official helm chart probes
+# /health/live + /health/ready). Differences from upstream, on purpose:
+#   - busybox + ca-certificates Wolfi base instead of the Ubuntu aspnet
+#     base: the melange tree is self-contained (bundles the .NET 10 + ASP.NET
+#     runtime), so no dotnet runtime package is needed — only its system
+#     deps, the same set Wolfi's own dotnet-10 package declares (icu,
+#     libstdc++).
+#   - nonroot 65532 instead of upstream's `app` user; the official chart's
+#     securityContext (runAsNonRoot + runAsUser 1000) overrides this at
+#     deploy time either way.
+#   - /usr/bin/reflector entrypoint (symlink to the apphost) instead of
+#     `dotnet ES.Kubernetes.Reflector.dll`.
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    # Debug shell only. ca-certificates for API-server + Seq outbound TLS.
+    # icu + libstdc++ are the system libs the self-contained .NET runtime
+    # probes/links against (Wolfi's dotnet-10 depends on the same).
+    - busybox
+    - ca-certificates
+    - icu
+    - libstdc++
+    # Built by melange; supplied via --repository-append at build time.
+    - kubernetes-reflector
+
+accounts:
+  run-as: 65532
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+  # Upstream's aspnet base image sets ASPNETCORE_HTTP_PORTS=8080 (which is
+  # why it binds :8080 and the helm chart probes it); set the same here so
+  # the self-contained app binds identically.
+  ASPNETCORE_HTTP_PORTS: "8080"
+
+entrypoint:
+  command: /usr/bin/reflector
