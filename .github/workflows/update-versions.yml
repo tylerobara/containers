@@ -559,4 +559,19 @@ jobs:
             fi
           fi
 
+          # --- frr: latest GitHub release tag frr-<ver> (FRRouting suite;
+          # releases/latest is e.g. frr-10.7.1, so strip the frr- prefix) ---
+          if want frr; then
+            yaml=images/frr/melange/frr.yaml
+            latest=$(gh api repos/FRRouting/frr/releases/latest --jq '.tag_name | ltrimstr("frr-")')
+            if [ -z "$latest" ]; then
+              echo "::error::frr: no release found upstream"
+              FAILED=1
+            fi
+            bump_row frr "$yaml" "$latest" \
+              "https://github.com/FRRouting/frr/archive/refs/tags/frr-${latest}.tar.gz" \
+              frr images/frr/apko/frr.yaml
+          fi
+
+
           exit $FAILED

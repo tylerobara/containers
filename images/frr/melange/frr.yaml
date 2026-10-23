@@ -1,0 +1,181 @@
+# Melange build for FRRouting (github.com/FRRouting/frr) — the FRR routing
+# suite (zebra/bgpd/vtysh/...) built from the release tarball, packaged as
+# plain `frr` so grype/secdb name-match. Wolfi used to ship frr
+# (frr-10.4/10.5/10.6 in wolfi-dev/os); those configs moved to
+# enterprise-packages, so this build resurrects the proven configure flags,
+# build deps and runtime deps from the archived frr-10.4.yaml. The old
+# published apks `provides: frr=`, so epoch 100 + provider-priority 100 are
+# what keep OUR package winning resolution.
+#
+# Bump `version` + `vars.sha256` on each release
+# (https://github.com/FRRouting/frr/releases, tag frr-<ver>) — the
+# update-versions bot covers this row.
+
+package:
+  name: frr
+  version: 10.4.3
+  epoch: 100
+  description: "FRRouting Protocol Suite built from upstream source"
+  copyright:
+    - license: GPL-2.0-only
+  dependencies:
+    provider-priority: 100
+    # bash: docker-start/frrcommon.sh; iproute2: watchfrr/frr tooling;
+    # python-3.11: frr-reload.py shebang (same runtime set Wolfi shipped).
+    runtime:
+      - bash
+      - iproute2
+      - python-3.11
+
+vars:
+  # SHA256 of the GitHub release tarball (tag frr-<version>)
+  sha256: 4538af008f8a02454aa5ea8939fadfe6f104a29a58057668bc1fae5edc54840b
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - autoconf
+      - automake
+      - bash
+      - bison
+      - build-base
+      - busybox
+      - c-ares-dev
+      - ca-certificates-bundle
+      - curl
+      - elfutils-dev
+      - flex
+      - git
+      - json-c-dev
+      - libcap-dev
+      - libtool
+      # libyang3: FRR's northbound; the <4 guard is the archived wolfi pin.
+      - libyang-dev<4
+      - linenoise-dev
+      - lua5.3
+      - lua5.3-dev
+      - m4
+      - openssl-dev
+      - patch
+      - pcre2-dev
+      - protobuf-c-dev
+      - python-3.11-dev
+      - readline-dev
+      - rtrlib-dev
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/FRRouting/frr/archive/refs/tags/frr-${{package.version}}.tar.gz" \
+        -o /home/build/frr.tar.gz
+      echo "${{vars.sha256}}  /home/build/frr.tar.gz" | sha256sum -c -
+      cd /home/build
+      # tag frr-X extracts as frr-frr-X
+      tar xf frr.tar.gz
+      rm frr.tar.gz
+
+  - working-directory: /home/build/frr-frr-${{package.version}}
+    runs: |
+      # autotools artifacts are not committed upstream (upstream's own
+      # bootstrap.sh = autoreconf; the wolfi build did exactly this).
+      autoreconf -vif
+
+  - working-directory: /home/build/frr-frr-${{package.version}}
+    runs: |
+      # Flags = the archived wolfi frr-10.4 set, verbatim. --sbindir puts
+      # the daemons, watchfrr and frrcommon.sh under /usr/lib/frr exactly
+      # like the upstream container; --sysconfdir=/etc matches the path the
+      # Cilium/MetalLB frr sidecars mount.
+      ./configure \
+        --prefix=/usr \
+        --sbindir=/usr/lib/frr \
+        --localstatedir=/var \
+        --sysconfdir=/etc \
+        --mandir=/usr/share/man \
+        --infodir=/usr/share/info \
+        --enable-rpki \
+        --enable-vtysh \
+        --enable-multipath=64 \
+        --enable-vty-group=frrvty \
+        --enable-user=frr \
+        --enable-group=frr \
+        --enable-pcre2posix \
+        --enable-scripting \
+        --with-crypto=openssl
+      make -j"$(nproc)"
+
+  - working-directory: /home/build/frr-frr-${{package.version}}
+    runs: |
+      make install DESTDIR="${{targets.destdir}}"
+      # Build-time artifacts (same call as postgresql-18's .a prune): the
+      # daemons and dlopened modules are linked against the shared libs, so
+      # libtool archives / static libs only trip melange's libtool/la-files
+      # linter (upstream's -dev split package absorbed them in wolfi).
+      find "${{targets.destdir}}" -name '*.la' -delete
+      find "${{targets.destdir}}" -name '*.a' -delete
+      # Default config like upstream's deb: frrcommon.sh exits 1 without
+      # /etc/frr/daemons. bgpd is flipped on because this image exists for
+      # BGP (minilab: Cilium/MetalLB speakers); frrcommon.sh force-enables
+      # zebra/staticd/mgmtd regardless.
+      install -d -m755 "${{targets.destdir}}/etc/frr"
+      install -m 0644 tools/etc/frr/daemons "${{targets.destdir}}/etc/frr/daemons"
+      sed -i 's/^bgpd=no/bgpd=yes/' "${{targets.destdir}}/etc/frr/daemons"
+      install -m 0644 tools/etc/frr/frr.conf "${{targets.destdir}}/etc/frr/frr.conf"
+      # Upstream container startup: quay.io/frrouting/frr runs
+      # /usr/lib/frr/docker-start (repo docker/alpine/docker-start: source
+      # frrcommon.sh, run `watchfrr $(daemon_list)`). One addition: the
+      # /etc/frr + /var/run/frr ownership the upstream debian image set at
+      # build time, moved to startup — melange cannot ship frr-owned dirs
+      # (melange#1395) and the script runs as root under tini.
+      cat > "${{targets.destdir}}/usr/lib/frr/docker-start" <<'EOF'
+      #!/bin/bash
+      # FRR container startup: own the config/PID dirs, then supervise the
+      # enabled daemons with watchfrr (upstream docker-start contract).
+      set -e
+      mkdir -p /var/run/frr
+      chown frr:frr /var/run/frr
+      chown -R frr:frr /etc/frr
+      # frr must be a member of frrvty or privs_init refuses to start the
+      # daemons; distro packages did this in an install scriptlet and apko
+      # cannot declare supplementary groups, so do it at startup (root).
+      sed -i 's/^frrvty:\([^:]*\):\([0-9][0-9]*\):$/frrvty:\1:\2:frr/' /etc/group
+
+      if [ -r "/lib/lsb/init-functions" ]; then
+              . /lib/lsb/init-functions
+      else
+              log_success_msg() { echo "$@"; }
+              log_warning_msg() { echo "$@" >&2; }
+              log_failure_msg() { echo "$@" >&2; }
+      fi
+
+      source /usr/lib/frr/frrcommon.sh
+      exec /usr/lib/frr/watchfrr $(daemon_list)
+      EOF
+      chmod 755 "${{targets.destdir}}/usr/lib/frr/docker-start"
+
+  - runs: |
+      # Verify the build actually produced this version (libfrr lives in
+      # destdir only, so point the loader at it).
+      export LD_LIBRARY_PATH="${{targets.destdir}}/usr/lib"
+      "${{targets.destdir}}/usr/lib/frr/zebra" --version | grep -q "${{package.version}}"
+      "${{targets.destdir}}/usr/lib/frr/bgpd" --version | grep -q "${{package.version}}"
+      # vtysh has no --version (it is a client CLI); its real version check is
+      # `vtysh -c "show version"` once daemons run (see images/frr/test.sh).
+      test -x "${{targets.destdir}}/usr/bin/vtysh"
+      # The startup contract: watchfrr present, startup/common scripts
+      # parse, frrcommon.sh actually carries the configure substitutions
+      # (un-substituted @vars@ would break daemon startup at runtime), and
+      # the default daemons file enables bgpd.
+      test -x "${{targets.destdir}}/usr/lib/frr/watchfrr"
+      bash -n "${{targets.destdir}}/usr/lib/frr/docker-start"
+      bash -n "${{targets.destdir}}/usr/lib/frr/frrcommon.sh"
+      if grep -q '@e_sbindir@' "${{targets.destdir}}/usr/lib/frr/frrcommon.sh"; then
+        echo "frrcommon.sh shipped without configure substitution"; exit 1
+      fi
+      grep -q '^bgpd=yes' "${{targets.destdir}}/etc/frr/daemons"
+      grep -q 'zebra_options' "${{targets.destdir}}/etc/frr/daemons"
