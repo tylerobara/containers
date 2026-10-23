@@ -214,7 +214,7 @@ jobs:
             yaml=images/cilium/melange/cilium-envoy.yaml
             ct=$(gh api repos/cilium/cilium/releases/latest --jq '.tag_name')
             line=$(gh api "repos/cilium/cilium/contents/images/cilium/Dockerfile?ref=${ct}" --jq .content \
-              | base64 -d | grep -m1 '^ARG CILIUM_ENVOY_IMAGE=')
+              | base64 -d | grep -m1 '^ARG CILIUM_ENVOY_IMAGE=' || true)
             ref=${line#*=}
             etag=${ref#*:}; etag=${etag%@*}            # v<maj>.<min>.<pat>-<ts>-<proxy sha>
             edigest=${ref##*@sha256:}
