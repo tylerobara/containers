@@ -23,6 +23,12 @@ package:
   description: "PostgreSQL 17 built from PGDG source with the Bitnami OSS script layout"
   copyright:
     - license: PostgreSQL
+  # /usr/sbin/run-script is bitnami's fixed contract location (test.sh and
+  # the entrypoint chain expect exactly that path); usrmerge's "move it to
+  # /usr/bin" advice breaks the contract.
+  checks:
+    disabled:
+      - usrmerge
 
 vars:
   # SHA256 of the PGDG source tarball
@@ -50,6 +56,8 @@ environment:
       # shadow's usermod/groupadd are absent — under the build's errexit that
       # silently kills the pipeline; upstream's builder ships shadow-utils.
       - shadow
+      # getent (group_exists lookups) is split into posix-libc-utils on wolfi.
+      - posix-libc-utils
       # --with-* / -D feature flags need these dev packages:
       - openssl-dev
       - icu-dev
@@ -170,13 +178,18 @@ pipeline:
 
   - runs: |
       D="${{targets.destdir}}"
-      install -d -m 755 "$D/opt" "$D/usr/sbin" "$D/docker-entrypoint-preinitdb.d"
+      install -d -m 755 "$D/opt" "$D/usr/sbin" "$D/docker-entrypoint-initdb.d" \
+        "$D/docker-entrypoint-preinitdb.d"
       # melange writes the apk SBOM host-side, but the container's uid owns
       # everything the pipeline mkdirs; pre-create the leaf 0777 (dokuwiki
       # lesson) so the host melange can drop var/lib/db/sbom/*.spdx.json.
       install -d -m 755 "$D/var/lib/db/sbom"
       chmod 0777 "$D/var/lib/db/sbom"
       cp -a /opt/bitnami "$D/opt/"
+      # postunpack created the volume dir in the build root; ship it too so
+      # the image gets the /bitnami/postgresql mount point (empty dirs are
+      # what the check task below asserts).
+      cp -a /bitnami "$D/"
       cp -a /usr/sbin/run-script "$D/usr/sbin/run-script"
       # Bitnami's own final pass (Dockerfile: chmod g+rwX /opt/bitnami) so any
       # arbitrary uid can use the tree, OpenShift-style.
@@ -190,7 +203,7 @@ pipeline:
       /opt/bitnami/postgresql/bin/pg_isready --version | grep -q "${{package.version}}"
       test -x "$D/opt/bitnami/scripts/postgresql/entrypoint.sh"
       test -x "$D/opt/bitnami/scripts/postgresql/setup.sh"
-      test -x "$D/opt/bitnami/scripts/libpostgresql.sh"
+      test -f "$D/opt/bitnami/scripts/libpostgresql.sh"  # sourced, shipped 644
       test -x "$D/usr/sbin/run-script"
       test -x "$D/opt/bitnami/common/bin/hostname"
       test -L "$D/opt/bitnami/postgresql/logs/postgresql.log"
