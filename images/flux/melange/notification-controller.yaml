@@ -1,0 +1,87 @@
+# Melange build for the Flux notification-controller image
+# (github.com/fluxcd/notification-controller), from the release tarball with
+# upstream's exact build contract (its Dockerfile): CGO_ENABLED=0,
+# `go build -trimpath -a -o notification-controller main.go` — and no ldflags: flux
+# releases stamp NOTHING into the binary (`--version` is an unknown flag on
+# the upstream images; the version only ships as an OCI annotation), so the
+# version pin lives in the sha256-pinned tarball and the build-id check in
+# the verify step below. Upstream copies the static binary onto alpine with
+# ca-certificates; here that base is the apko config (busybox +
+# ca-certificates on Wolfi, the repo-wide one-debug-shell convention).
+#
+# The four flux configs are four SEPARATE upstream repos with independent
+# version lines — the update-versions bot bumps each one on its own.
+
+package:
+  name: notification-controller
+  version: 1.9.4
+  epoch: 100
+  description: "Flux notification-controller built from upstream source"
+  copyright:
+    - license: Apache-2.0
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the GitHub release tarball
+  sha256: 7b2713ad59527df739c4c4ceef99925db05a58ef4c19cb263e4b7193face2fb7
+  # Flag unique to this controller among the flux four; the verify step
+  # greps it out of the flag dump to prove the right main package was built.
+  ident_flag: rate-limit-interval
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      # go.mod wants go 1.26.0 (upstream builds with golang:1.26); Wolfi
+      # go-1.26 satisfies the directive.
+      - go-1.26
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/fluxcd/notification-controller/archive/refs/tags/v${{package.version}}.tar.gz" \
+        -o /home/build/nc.tar.gz
+      echo "${{vars.sha256}}  /home/build/nc.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf nc.tar.gz && rm nc.tar.gz
+
+  - working-directory: /home/build/notification-controller-${{package.version}}
+    runs: |
+      # api/ is a submodule whose contents ship inside the release tarball
+      # and which go.mod `replace`s to ./api; no vendor/, so modules resolve
+      # from the network (same as the cert-manager/metallb builds).
+      export CGO_ENABLED=0 GOTOOLCHAIN=local
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      # Upstream's Dockerfile line (xx-go == native go), with `.` instead of
+      # `main.go` — same single-file main package, but the package-form
+      # build stamps the module path into the build info grype reads.
+      #   CGO_ENABLED=0 xx-go build -trimpath -a -o notification-controller main.go
+      go build -trimpath -a -o notification-controller .
+      install -D -m 0755 notification-controller \
+        "${{targets.destdir}}/usr/bin/notification-controller"
+
+  - runs: |
+      # Upstream has no --version flag (verified against the release image:
+      # "unknown flag: --version"), so "prints its version" is asserted by
+      # what the build CAN prove: the binary boots to its in-cluster config
+      # step, its flag surface carries this controller's unique flag, and
+      # the embedded build info is this module built from the sha-pinned
+      # (== version-pinned) tarball.
+      out=$(timeout 60 "${{targets.destdir}}/usr/bin/notification-controller" 2>&1 || true)
+      echo "$out"
+      echo "$out" | grep -q "in-cluster"
+      flags=$("${{targets.destdir}}/usr/bin/notification-controller" --version 2>&1 || true)
+      echo "$flags" | grep -q -- "--${{vars.ident_flag}}"
+      # grype reads Go deps from the embedded build info — assert it is
+      # this module's binary.
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      go version -m "${{targets.destdir}}/usr/bin/notification-controller" \
+        | awk -F'\t' '$2=="github.com/fluxcd/notification-controller"{f=1} END{exit !f}'

@@ -620,4 +620,23 @@ jobs:
           fi
 
 
+          # --- flux controllers: four separate upstream repos
+          # (github.com/fluxcd/<name>), each with its own vX.Y.Z tag line and
+          # its own tarball, so every controller gets its own bump_row row
+          # (frr-k8s-style; releases/latest is a plain vX.Y.Z tag). No
+          # git_commit var: upstream stamps nothing (no ldflags; --version is
+          # an unknown flag on the release images). ---
+          for name in helm-controller kustomize-controller notification-controller source-controller; do
+            want "$name" || continue
+            latest=$(gh api "repos/fluxcd/$name/releases/latest" --jq '.tag_name | ltrimstr("v")')
+            if [ -z "$latest" ]; then
+              echo "::error::$name: no release found upstream"
+              FAILED=1
+              continue
+            fi
+            bump_row "$name" "images/flux/melange/$name.yaml" "$latest" \
+              "https://github.com/fluxcd/$name/archive/refs/tags/v${latest}.tar.gz" flux
+          done
+
+
           exit $FAILED

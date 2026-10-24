@@ -144,6 +144,54 @@
       "description": "frr-k8s, the FRR routing integration MetalLB's BGP backend runs on, built from upstream source by melange and assembled by apko on Wolfi."
     },
     {
+      "name": "helm-controller",
+      "display_name": "Flux helm-controller",
+      "dir": "flux",
+      "apko": "helm-controller.yaml",
+      "workflow": "flux.yml",
+      "category": "Kubernetes & Networking",
+      "primary_package": "helm-controller",
+      "upstream_url": "https://fluxcd.io",
+      "summary": "Flux helm-controller, built from upstream source.",
+      "description": "The Flux controller that reconciles HelmReleases, installing and upgrading Helm charts in Kubernetes, built from upstream source by melange and assembled by apko on Wolfi."
+    },
+    {
+      "name": "kustomize-controller",
+      "display_name": "Flux kustomize-controller",
+      "dir": "flux",
+      "apko": "kustomize-controller.yaml",
+      "workflow": "flux.yml",
+      "category": "Kubernetes & Networking",
+      "primary_package": "kustomize-controller",
+      "upstream_url": "https://fluxcd.io",
+      "summary": "Flux kustomize-controller, built from upstream source.",
+      "description": "The Flux controller that reconciles Kustomizations, rendering and applying Kustomize overlays to the cluster, built from upstream source by melange and assembled by apko on Wolfi."
+    },
+    {
+      "name": "notification-controller",
+      "display_name": "Flux notification-controller",
+      "dir": "flux",
+      "apko": "notification-controller.yaml",
+      "workflow": "flux.yml",
+      "category": "Kubernetes & Networking",
+      "primary_package": "notification-controller",
+      "upstream_url": "https://fluxcd.io",
+      "summary": "Flux notification-controller, built from upstream source.",
+      "description": "The Flux controller that turns reconcile events into alerts (Slack, GitHub, Gatekeeper webhooks), built from upstream source by melange and assembled by apko on Wolfi."
+    },
+    {
+      "name": "source-controller",
+      "display_name": "Flux source-controller",
+      "dir": "flux",
+      "apko": "source-controller.yaml",
+      "workflow": "flux.yml",
+      "category": "Kubernetes & Networking",
+      "primary_package": "source-controller",
+      "upstream_url": "https://fluxcd.io",
+      "summary": "Flux source-controller, built from upstream source.",
+      "description": "The Flux controller that produces artifacts from Git repositories, OCI registries and Helm repositories for the other controllers to consume, built from upstream source by melange and assembled by apko on Wolfi."
+    },
+    {
       "name": "local-path-provisioner",
       "display_name": "Local Path Provisioner",
       "dir": "local-path-provisioner",
