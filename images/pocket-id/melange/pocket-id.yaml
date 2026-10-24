@@ -48,6 +48,8 @@ environment:
       - npm
       # backend/go.mod wants go 1.27.1; Wolfi go-1.27 is 1.27.3.
       - go-1.27
+      # vite-plus' pnpm prepare hook (vp config) shells out to git
+      - git
 
 pipeline:
   - runs: |
