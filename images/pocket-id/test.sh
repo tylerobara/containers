@@ -28,6 +28,9 @@ pocket-id)
   [ "$uid" = "65532" ] || fail "run-as is '$uid', expected '65532'"
   docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$IMAGE" \
     | grep -qx 'APP_ENV=production' || fail "APP_ENV=production not set in the image"
+  docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$IMAGE" \
+    | grep -qx 'UPLOAD_PATH=/app/data/uploads' \
+    || fail "UPLOAD_PATH not pinned into the /app/data volume (apko has no WORKDIR)"
 
   echo "Testing /app/data exists + is nonroot-writable (SQLite volume dir)..."
   docker run --rm --entrypoint /bin/sh "$IMAGE" -ec \
@@ -47,14 +50,16 @@ pocket-id)
     "$IMAGE")
   # shellcheck disable=SC2064
   trap "docker stop $cid >/dev/null 2>&1 || true" EXIT
-  docker exec "$cid" /bin/sh -ec '
+  if ! docker exec "$cid" /bin/sh -ec '
     i=0
     until wget -qO- http://127.0.0.1:1411/healthz >/dev/null 2>&1; do
       i=$((i + 1)); [ "$i" -gt 60 ] && exit 7
       sleep 1
     done
-    wget -qO- http://127.0.0.1:1411/ | grep -q "_app/immutable" || exit 8' \
-    || fail "server never became healthy, or the embedded frontend is not served"
+    wget -qO- http://127.0.0.1:1411/ | grep -q "_app/immutable" || exit 8'; then
+    docker logs "$cid" 2>&1 | tail -30
+    fail "server never became healthy, or the embedded frontend is not served"
+  fi
 
   echo "Testing the upstream HEALTHCHECK command..."
   docker exec "$cid" /usr/bin/pocket-id healthcheck \

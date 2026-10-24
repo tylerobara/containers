@@ -41,6 +41,10 @@ environment:
   PATH: /usr/sbin:/sbin:/usr/bin:/bin
   # Upstream image ENV line (release.yml sets it in both Dockerfiles).
   APP_ENV: production
+  # Upstream's default is CWD-relative ("data/uploads", resolved against its
+  # WORKDIR /app); apko has no WORKDIR, so pin it into the /app/data volume —
+  # the same dir the chart/operator mount (upstream env name: UPLOAD_PATH).
+  UPLOAD_PATH: /app/data/uploads
 
 # No `cmd:` and no per-entrypoint args (apko has neither EXPOSE nor args): a
 # bare run starts the server, exactly like upstream's CMD ["/app/pocket-id"],
