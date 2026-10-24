@@ -70,6 +70,7 @@ trap 'docker rm -f bp-test >/dev/null 2>&1 || true; rm -rf "$initdir"' EXIT
 cid=$(docker run -d --name bp-test --user 1001 \
   --tmpfs /bitnami/postgresql:uid=1001,gid=1001,mode=0775 \
   -v "$initdir:/docker-entrypoint-initdb.d:ro" \
+  -e BITNAMI_DEBUG=true \
   -e POSTGRES_USER=appuser \
   -e POSTGRES_PASSWORD=Test-Apppass-1 \
   -e POSTGRES_DB=appdb \
@@ -121,6 +122,7 @@ echo "Testing ALLOW_EMPTY_PASSWORD boot (bitnami dev contract)..."
 docker rm -f bp-test-empty >/dev/null 2>&1 || true
 cid=$(docker run -d --name bp-test-empty --user 1001 \
   --tmpfs /bitnami/postgresql:uid=1001,gid=1001,mode=0775 \
+  -e BITNAMI_DEBUG=true \
   -e ALLOW_EMPTY_PASSWORD=yes \
   "$IMAGE")
 trap 'docker rm -f bp-test bp-test-empty >/dev/null 2>&1 || true; rm -rf "$initdir"' EXIT

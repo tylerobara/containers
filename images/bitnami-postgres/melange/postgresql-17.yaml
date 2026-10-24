@@ -157,6 +157,50 @@ pipeline:
       exec /usr/bin/busybox hostname "$@"
       SHIM
       chmod 755 /opt/bitnami/common/bin/hostname
+      # wolfi busybox ships every applet in /usr/sbin, ahead of /usr/bin in
+      # the image PATH, and its cp silently no-ops the GNU `SRC/.` content
+      # form the pinned entrypoint depends on to materialize conf/. Ship a
+      # shim next to the hostname one (PATH position 2) emulating that form.
+      cat > /opt/bitnami/common/bin/cp <<'SHIM'
+      #!/bin/sh
+      # busybox cp (every applet lives in /usr/sbin, which precedes /usr/bin in the
+      # image PATH) silently copies NOTHING for the GNU "cp -nr SRC/. DEST" content
+      # form the pinned Bitnami entrypoint relies on. Emulate it with tar; -n is
+      # emulated by excluding entries that already exist as regular files in DEST
+      # (dirs merge like GNU). Every other invocation passes through untouched.
+      # PATH is sanitized to the plain system dirs: the scripts prepend this
+      # shim's own dir (recursion guard), and the melange build root — where
+      # postunpack also runs these scripts — has no /usr/sbin applets at all.
+      # shortcut: assumes whitespace-free paths (only two callers: entrypoint
+      # conf.default copy, mounted-conf copy).
+      PATH=/usr/sbin:/usr/bin:/bin
+      export PATH
+      flags="" src="" dest=""
+      for a in "$@"; do
+        case "$a" in
+          -*) flags="$flags $a" ;;
+          */.)  src="${a%/.}" ;;
+          *)    dest="$a" ;;
+        esac
+      done
+      if [ -n "$src" ] && [ -d "$src" ] && [ -n "$dest" ]; then
+        cd "$src" || exit 1
+        ex=""
+        case " $flags " in
+          *[\ -]n*)
+            for f in $(find . -mindepth 1 | sed 's#^\./##'); do
+              [ -f "$dest/$f" ] && ex="$ex --exclude=$f"
+            done
+            ;;
+        esac
+        mkdir -p "$dest"
+      tar cf - $ex . | tar -xf - -C "$dest"
+        exit $?
+      fi
+      exec cp "$@"
+      SHIM
+      chmod 755 /opt/bitnami/common/bin/cp
+
 
       # postunpack's ensure_user_exists needs id/usermod/groupadd to end on a
       # true command (shadow ships them; see environment). Pre-seed the
@@ -214,6 +258,7 @@ pipeline:
       test -f "$D/opt/bitnami/scripts/libpostgresql.sh"  # sourced, shipped 644
       test -x "$D/usr/sbin/run-script"
       test -x "$D/opt/bitnami/common/bin/hostname"
+      test -x "$D/opt/bitnami/common/bin/cp"
       test -L "$D/opt/bitnami/postgresql/logs/postgresql.log"
       test -d "$D/bitnami/postgresql"
       test -d "$D/docker-entrypoint-initdb.d"
