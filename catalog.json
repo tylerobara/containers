@@ -204,6 +204,18 @@
       "description": "Homepage, the self-hosted application dashboard for your services wall. The Next.js app is built from the pinned release tarball by melange and served by Wolfi nodejs on :3000 as nonroot, with config at /app/config."
     },
     {
+      "name": "gatus",
+      "display_name": "Gatus",
+      "dir": "gatus",
+      "apko": "gatus.yaml",
+      "workflow": "gatus.yml",
+      "category": "Apps",
+      "primary_package": "gatus",
+      "upstream_url": "https://github.com/TwiN/gatus",
+      "summary": "Gatus health monitor and status page, built from upstream source.",
+      "description": "Gatus, a health monitor with a status page and prometheus metrics. The gatus binary is built from upstream source by melange; the image is assembled by apko on Wolfi."
+    },
+    {
       "name": "os-shell",
       "display_name": "os-shell",
       "dir": "os-shell",

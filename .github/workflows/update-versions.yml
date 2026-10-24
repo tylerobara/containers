@@ -3,15 +3,15 @@ name: update-versions
 # Version bump bot — the minimal repo's update-versions.yml pattern scaled to
 # this repo's image families. Checks upstream (PGDG ftp for each tracked
 # postgresql-<major>.yaml, GitHub releases for the operator, openbao, homepage,
-# dokuwiki, grafana-image-renderer, cilium, cert-manager, frr-k8s, k8s-sidecar
-# and local-path-provisioner;
+# dokuwiki, grafana-image-renderer, cilium, cert-manager, frr-k8s, k8s-sidecar,
+# local-path-provisioner and gatus;
 # cilium-envoy follows cilium's own images/cilium/Dockerfile pin and gets its
 # payload shas re-extracted; metallb's controller + speaker configs are bumped
 # together off the latest non-chart metallb tag) and
 # opens a PR bumping `version` + `vars.sha256` in the melange config. Nothing
 # is merged or published here: review the PR, validate it with that image's
 # own workflow (postgres / cloudnative-pg-operator / openbao / homepage / dokuwiki /
-# grafana-image-renderer / cert-manager / metallb / k8s-sidecar / local-path-provisioner) via
+# grafana-image-renderer / cert-manager / metallb / k8s-sidecar / local-path-provisioner / gatus) via
 # workflow_dispatch (ref = PR branch, validate_only = true),
 # then merge — the merge push rebuilds and publishes just that image.
 #
@@ -25,7 +25,7 @@ on:
   workflow_dispatch:
     inputs:
       only:
-        description: "Comma-separated rows to check, e.g. postgresql-16,operator,openbao,cilium,cilium-envoy,metallb,frr-k8s,k8s-sidecar,local-path-provisioner (blank = all)"
+        description: "Comma-separated rows to check, e.g. postgresql-16,operator,openbao,cilium,cilium-envoy,metallb,frr-k8s,k8s-sidecar,local-path-provisioner,gatus,homepage (blank = all)"
         required: false
         default: ""
 
@@ -471,6 +471,19 @@ jobs:
             bump_row local-path-provisioner "$yaml" "$latest" \
               "https://github.com/rancher/local-path-provisioner/archive/refs/tags/v${latest}.tar.gz" \
               local-path-provisioner
+          fi
+
+          # --- gatus: latest GitHub release ---
+          if want gatus; then
+            yaml=images/gatus/melange/gatus.yaml
+            latest=$(gh api repos/TwiN/gatus/releases/latest --jq '.tag_name | ltrimstr("v")')
+            if [ -z "$latest" ]; then
+              echo "::error::gatus: no release found upstream"
+              FAILED=1
+            fi
+            bump_row gatus "$yaml" "$latest" \
+              "https://github.com/TwiN/gatus/archive/refs/tags/v${latest}.tar.gz" \
+              gatus
           fi
 
           exit $FAILED
