@@ -25,6 +25,23 @@ docker run --rm --entrypoint /usr/bin/node "$IMAGE" --version | grep -q '^v24\.'
 docker run --rm --entrypoint /usr/bin/node "$IMAGE" --check /app/server.js \
   || fail "server.js does not parse"
 
+echo "Testing client build stamps (real BUILD_ID, ISO build time, stamped version)..."
+docker run --rm --entrypoint /bin/sh "$IMAGE" -c \
+  'grep -qE "^[A-Za-z0-9_-]{8,}$" /app/.next/BUILD_ID' \
+  || fail "/app/.next/BUILD_ID is missing or a placeholder"
+# shellcheck disable=SC2016
+docker run --rm --entrypoint /usr/bin/node -e "V=$VERSION" "$IMAGE" -e '
+  const fs = require("fs"), path = require("path");
+  const files = [];
+  (function walk(d) { for (const f of fs.readdirSync(d)) { const p = path.join(d, f); fs.statSync(p).isDirectory() ? walk(p) : files.push(p); } })("/app/.next/static/chunks");
+  const src = files.map((f) => fs.readFileSync(f, "utf8")).join("");
+  const m = src.match(/"(20[2-3]\d-\d{2}-\d{2}T[\d:.]+Z)"/); // year window skips a 2006 date fixture other chunks carry
+  if (!m) throw new Error("no ISO NEXT_PUBLIC_BUILDTIME baked into the client chunks");
+  new Intl.DateTimeFormat("en").format(new Date(m[1])); // the exact call the version footer makes
+  if (!src.includes(`"v${process.env.V}"`)) throw new Error("NEXT_PUBLIC_VERSION v" + process.env.V + " not baked into the client chunks");
+  if (/"1\d{9}"/.test(src)) throw new Error("epoch-seconds build time baked into the client chunks (crashes the version footer)");
+  ' || fail "client chunks lack baked build stamps (NEXT_PUBLIC_* env)"
+
 echo "Testing default wiring: nonroot 65532, /entrypoint.sh, prod restraint..."
 uid=$(docker inspect --format '{{.Config.User}}' "$IMAGE")
 [ "$uid" = "65532" ] || fail "run-as is '$uid', expected '65532'"
