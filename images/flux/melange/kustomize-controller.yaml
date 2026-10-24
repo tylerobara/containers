@@ -79,9 +79,10 @@ pipeline:
       echo "$out"
       echo "$out" | grep -q "in-cluster"
       flags=$("${{targets.destdir}}/usr/bin/kustomize-controller" --version 2>&1 || true)
+      echo "$flags"
       echo "$flags" | grep -q -- "--${{vars.ident_flag}}"
       # grype reads Go deps from the embedded build info — assert it is
       # this module's binary.
       export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
       go version -m "${{targets.destdir}}/usr/bin/kustomize-controller" \
-        | awk -F'\t' '$2=="github.com/fluxcd/kustomize-controller"{f=1} END{exit !f}'
+        | awk -F'\t' '$3=="github.com/fluxcd/kustomize-controller"{f=1} END{exit !f}'
