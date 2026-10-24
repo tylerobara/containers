@@ -6,6 +6,19 @@
 set -euo pipefail
 : "${IMAGE:?IMAGE env var required}"
 : "${PG_MAJOR:=18}"
+rc=0  # the EXIT traps assign rc=$? in their strings; shellcheck can't see that
+
+# Dump container state + log tail on any nonzero exit, before cleanup.
+# Without this, a set -e/pipefail abort inside the boot blocks leaves the CI
+# step with zero diagnostics (docker exec errors went to /dev/null).
+forensics() {
+  local c s
+  for c in bp-test bp-test-empty; do
+    s=$(docker inspect -f '{{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' "$c" 2>/dev/null) || continue
+    echo "== $c: $s =="
+    docker logs "$c" 2>&1 | tail -40
+  done
+}
 
 echo "Testing tag convention (must start with PG major $PG_MAJOR)..."
 tag=${IMAGE##*:}
@@ -17,8 +30,7 @@ docker run --rm --user 1001 --entrypoint /bin/sh "$IMAGE" -c '
   for d in /opt/bitnami/postgresql/bin /opt/bitnami/postgresql/lib \
            /opt/bitnami/postgresql/conf /opt/bitnami/postgresql/conf.default \
            /opt/bitnami/postgresql/logs /opt/bitnami/postgresql/tmp \
-           /opt/bitnami/scripts/postgresql /bitnami/postgresql \
-           /docker-entrypoint-initdb.d /docker-entrypoint-preinitdb.d; do
+           /bitnami/postgresql /docker-entrypoint-initdb.d /docker-entrypoint-preinitdb.d; do
     test -d "$d" || { echo "missing dir $d"; exit 1; }
   done
   for x in /opt/bitnami/scripts/postgresql/entrypoint.sh \
@@ -63,7 +75,7 @@ cat > "$initdir/002_marker.sh" <<'SH'
 touch /tmp/init-sh-ran
 SH
 chmod 755 "$initdir/002_marker.sh"
-trap 'docker rm -f bp-test >/dev/null 2>&1 || true; rm -rf "$initdir"' EXIT
+trap 'rc=$?; if [ "$rc" -ne 0 ]; then echo "test.sh aborted (rc=$rc); forensics:"; forensics; fi; docker rm -f bp-test >/dev/null 2>&1 || true; rm -rf "$initdir"' EXIT
 
 # Default ENTRYPOINT+CMD (entrypoint.sh → setup.sh → run.sh), non-root,
 # tmpfs volume owned by 1001 (what the chart's fsGroup achieves on a PVC).
@@ -77,41 +89,57 @@ cid=$(docker run -d --name bp-test --user 1001 \
   -e POSTGRES_POSTGRES_PASSWORD=Test-Superpass-1 \
   "$IMAGE")
 
-ready=0
-for _ in $(seq 1 90); do
-  if docker exec "$cid" pg_isready -q -U postgres >/dev/null 2>&1; then ready=1; break; fi
+# bitnami setup stops/starts the postmaster several times during first boot
+# (initdb, users+db creation, init scripts) — a single pg_isready=true can
+# catch a transient boot right before its pg_ctl stop, and asserts then die
+# with "connection to server went bad". Steady state = server ready AND the
+# postmaster pid unchanged across a 10s window (that is run.sh's final boot).
+ready=0; stable=0; prev=""
+for _ in $(seq 1 120); do
+  pid=$(docker exec "$cid" head -1 /bitnami/postgresql/data/postmaster.pid 2>/dev/null || true)
+  if docker exec "$cid" pg_isready -q -U postgres >/dev/null 2>&1 \
+    && [ -n "$pid" ] && [ "$pid" = "$prev" ]; then
+    stable=$((stable + 1))
+    if [ "$stable" -ge 5 ]; then ready=1; break; fi
+  else
+    stable=0
+  fi
+  prev="$pid"
   [ -z "$(docker ps -q --filter id="$cid")" ] && break
   sleep 2
 done
 [ "$ready" = 1 ] || { echo "FAIL: entrypoint boot did not reach ready"; docker logs "$cid" 2>&1 | tail -30; exit 1; }
 
-out=$(docker exec "$cid" psql -U postgres -tAc 'SELECT 1;' 2>/dev/null | tr -d '[:space:]')
+# `|| true` inside $( ): under pipefail a failing psql would abort the
+# assignment line itself, silently skipping the FAIL guard on the next line.
+# stderr stays visible (was 2>/dev/null) so psql/dexec client errors surface.
+out=$(docker exec -e PGPASSWORD=Test-Superpass-1 "$cid" psql -U postgres -tAc 'SELECT 1;' | tr -d '[:space:]' || true)
 [ "$out" = "1" ] || { echo "FAIL: SELECT 1 -> '${out:-<none>}'"; docker logs "$cid" 2>&1 | tail -30; exit 1; }
 
-out=$(docker exec "$cid" psql -U postgres -tAc \
-  "SELECT rolname FROM pg_roles WHERE rolname='appuser';" 2>/dev/null | tr -d '[:space:]')
+out=$(docker exec -e PGPASSWORD=Test-Superpass-1 "$cid" psql -U postgres -tAc \
+  "SELECT rolname FROM pg_roles WHERE rolname='appuser';" | tr -d '[:space:]' || true)
 [ "$out" = "appuser" ] || { echo "FAIL: POSTGRES_USER appuser not created ('$out')"; exit 1; }
-out=$(docker exec "$cid" psql -U postgres -tAc \
-  "SELECT datname FROM pg_database WHERE datname='appdb';" 2>/dev/null | tr -d '[:space:]')
+out=$(docker exec -e PGPASSWORD=Test-Superpass-1 "$cid" psql -U postgres -tAc \
+  "SELECT datname FROM pg_database WHERE datname='appdb';" | tr -d '[:space:]' || true)
 [ "$out" = "appdb" ] || { echo "FAIL: POSTGRES_DB appdb not created ('$out')"; exit 1; }
 
 # .sql ran via the initscripts user; .sh ran executable-bit path.
-out=$(docker exec "$cid" psql -U postgres -d appdb -tAc 'SELECT count(*) FROM smoke;' 2>/dev/null | tr -d '[:space:]')
+out=$(docker exec -e PGPASSWORD=Test-Superpass-1 "$cid" psql -U postgres -d appdb -tAc 'SELECT count(*) FROM smoke;' | tr -d '[:space:]' || true)
 [ "$out" = "1" ] || { echo "FAIL: 001_seed.sql did not run ('$out')"; exit 1; }
 docker exec "$cid" test -f /tmp/init-sh-ran \
   || { echo "FAIL: executable 002_marker.sh did not run"; exit 1; }
 
 # scripts default SHARED_PRELOAD_LIBRARIES=pgaudit + wal_level=replica (chart
 # replication relies on it) — proves the /opt-bundled pgaudit preloads.
-out=$(docker exec "$cid" psql -U postgres -tAc \
-  "SELECT setting FROM pg_settings WHERE name='shared_preload_libraries';" 2>/dev/null)
+out=$(docker exec -e PGPASSWORD=Test-Superpass-1 "$cid" psql -U postgres -tAc \
+  "SELECT setting FROM pg_settings WHERE name='shared_preload_libraries';" || true)
 echo "$out" | grep -q pgaudit || { echo "FAIL: shared_preload_libraries='$out' (want pgaudit)"; exit 1; }
-out=$(docker exec "$cid" psql -U postgres -tAc \
-  "SELECT setting FROM pg_settings WHERE name='wal_level';" 2>/dev/null | tr -d '[:space:]')
+out=$(docker exec -e PGPASSWORD=Test-Superpass-1 "$cid" psql -U postgres -tAc \
+  "SELECT setting FROM pg_settings WHERE name='wal_level';" | tr -d '[:space:]' || true)
 [ "$out" = "replica" ] || { echo "FAIL: wal_level='$out' (chart replication needs replica)"; exit 1; }
 
 # extension files landed in the /opt server's share/extension (repmgr package).
-docker exec "$cid" psql -U postgres -d appdb -qc 'CREATE EXTENSION repmgr;' \
+docker exec -e PGPASSWORD=Test-Superpass-1 "$cid" psql -U postgres -d appdb -qc 'CREATE EXTENSION repmgr;' \
   || { echo "FAIL: CREATE EXTENSION repmgr failed (extension files misplaced?)"; exit 1; }
 
 echo "Testing repmgr compatibility package..."
@@ -125,10 +153,18 @@ cid=$(docker run -d --name bp-test-empty --user 1001 \
   -e BITNAMI_DEBUG=true \
   -e ALLOW_EMPTY_PASSWORD=yes \
   "$IMAGE")
-trap 'docker rm -f bp-test bp-test-empty >/dev/null 2>&1 || true; rm -rf "$initdir"' EXIT
-ready=0
-for _ in $(seq 1 90); do
-  if docker exec "$cid" pg_isready -q -U postgres >/dev/null 2>&1; then ready=1; break; fi
+trap 'rc=$?; if [ "$rc" -ne 0 ]; then echo "test.sh aborted (rc=$rc); forensics:"; forensics; fi; docker rm -f bp-test bp-test-empty >/dev/null 2>&1 || true; rm -rf "$initdir"' EXIT
+ready=0; stable=0; prev=""
+for _ in $(seq 1 120); do
+  pid=$(docker exec "$cid" head -1 /bitnami/postgresql/data/postmaster.pid 2>/dev/null || true)
+  if docker exec "$cid" pg_isready -q -U postgres >/dev/null 2>&1 \
+    && [ -n "$pid" ] && [ "$pid" = "$prev" ]; then
+    stable=$((stable + 1))
+    if [ "$stable" -ge 5 ]; then ready=1; break; fi
+  else
+    stable=0
+  fi
+  prev="$pid"
   [ -z "$(docker ps -q --filter id="$cid")" ] && break
   sleep 2
 done
