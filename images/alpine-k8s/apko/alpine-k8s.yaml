@@ -1,5 +1,6 @@
-# alpine-k8s image, assembled by apko (no Dockerfile, nothing built from
-# source — the whole image is Wolfi packages). Wolfi counterpart to
+# alpine-k8s image, assembled by apko (no Dockerfile). The helm binary is
+# built from upstream source by melange (see ../melange/helm.yaml); every-
+# thing else is signed Wolfi packages. Wolfi counterpart to
 # alpine/k8s (github.com/alpine-docker/k8s): the kubectl/helm toolbox the
 # minilab pipelines run. Image version = kubectl's version = the reference
 # tag (alpine/k8s tags its images off the kubectl release, same here).
@@ -25,9 +26,13 @@ contents:
     # out of the image's version line; patches flow freely, as in the
     # reference's tag builds. -default brings /usr/bin/kubectl.
     - kubectl-1.37-default
-    # helm-3 is the 3.x line (what alpine/k8s:1.37.1 shipped); plain `helm`
-    # now resolves to Wolfi's helm 4 and would silently break pipelines.
-    - helm-3
+    # Built by melange; supplied via --repository-append at build time
+    # (../melange/helm.yaml). The 3.x line, what alpine/k8s:1.37.1 shipped:
+    # Wolfi's plain `helm` is now helm 4 and would silently break the minilab
+    # pipelines — so pin the exact version our own build ships (epoch 100),
+    # since apk would otherwise prefer Wolfi's higher 4.x. Keep this in sync
+    # with the melange config; the workflow's lock guard fails on drift.
+    - helm=3.22.1-r100
     - kustomize
     - jq
     - yq

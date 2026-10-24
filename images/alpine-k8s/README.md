@@ -2,10 +2,13 @@
 
 Wolfi counterpart to [alpine/k8s](https://github.com/alpine-docker/k8s): the
 kubectl/helm toolbox the minilab pipelines run. Assembled by apko on Wolfi —
-no Dockerfile, and nothing built from source: the entire image is signed
-Wolfi packages, so the daily rebuild picks up security updates without a
-commit. Like the reference, **the image version is the kubectl version**
-(`alpine/k8s:1.37.1` ↔ `alpine-k8s:1.37.1`).
+no Dockerfile. helm is the one piece built from upstream source by melange
+([`melange/helm.yaml`](melange/helm.yaml), 3.22.1 pinned to the 3.x line: its
+old Wolfi `helm-3` apk was the source of **every** grype finding this image
+ever had — 326 of them); everything else is signed Wolfi packages, so the
+daily rebuild picks up security updates without a commit. Like the reference,
+**the image version is the kubectl version** (`alpine/k8s:1.37.1` ↔
+`alpine-k8s:1.37.1`).
 
 ```
 docker run --rm ghcr.io/tylerobara/containers/alpine-k8s:latest version --client
@@ -18,7 +21,7 @@ docker run --rm ghcr.io/tylerobara/containers/alpine-k8s:latest version --client
 |------|------|
 | busybox | `sh` + coreutils |
 | kubectl | Wolfi `kubectl-1.37-default`, pinned to the minor series so the lock can't drift off the image's version line; patches float like the reference's tag builds |
-| helm | Wolfi `helm-3` — the 3.x line, matching what the reference tag shipped (plain `helm` now resolves to helm 4) |
+| helm | our melange build ([`melange/helm.yaml`](melange/helm.yaml)) from the sha-pinned upstream tarball, 3.x line only — Wolfi's plain `helm` is now helm 4, and its old `helm-3` apk is what this replaces |
 | kustomize | manifest overlay renderer |
 | jq / yq | JSON / YAML munging (the reference ships both too) |
 | gettext | `envsubst` for manifest templating, as in the reference |
@@ -42,7 +45,12 @@ tags) and mirrors kubectl's release, exactly like the reference tag. The
 update-versions bot tracks kubernetes/kubernetes releases within the pinned
 minor and bumps `VERSION`; **minor** bumps are manual — the apko config pins
 `kubectl-1.37`, so a minor bump means editing that line once Wolfi ships the
-new `kubectl-1.<minor>` package.
+new `kubectl-1.<minor>` package. The helm build is a separate bot row
+(**alpine-k8s-helm**): it tracks helm **3.x tags only** (upstream
+`releases/latest` is helm 4, which breaks the pipelines) and bumps
+`melange/helm.yaml` `version` + `vars.sha256`; a bump also needs the apko
+`helm=<ver>-r100` pin and `vars.git_commit` moved by hand — the workflow's
+lock guard and the melange assert step fail loudly on any drift.
 
 ## Verify
 
