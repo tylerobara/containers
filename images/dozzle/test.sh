@@ -31,11 +31,15 @@ docker run --rm --entrypoint /bin/sh "$IMAGE" -c \
 
 echo "Testing the server comes up on :8080 (UI + healthcheck)..."
 # The server dies without a container runtime ("Could not connect to any
-# Docker Engine"), so mount the runner's own docker socket.
-cid=$(docker run -d --rm -p 127.0.0.1::8080 \
-  -v /var/run/docker.sock:/var/run/docker.sock "$IMAGE")
+# Docker Engine" is fatal when TotalClients()==0), so mount the runner's own
+# docker socket — and hand the process the socket's group: the nonroot uid
+# 65532 cannot open the root:docker 0660 socket without it (what killed the
+# first CI run). No --rm: the fail path below needs `docker logs` post-mortem.
+cid=$(docker run -d -p 127.0.0.1::8080 -e DOZZLE_NO_ANALYTICS=1 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  --group-add "$(stat -c %g /var/run/docker.sock)" "$IMAGE")
 # shellcheck disable=SC2064
-trap "docker stop $cid >/dev/null 2>&1 || true" EXIT
+trap "docker rm -f $cid >/dev/null 2>&1 || true" EXIT
 port=$(docker port "$cid" 8080/tcp | head -1 | sed 's/.*://')
 i=0
 until curl -fsS "http://127.0.0.1:${port}/healthcheck" >/dev/null 2>&1; do
@@ -52,7 +56,7 @@ echo "Testing the in-image healthcheck subcommand..."
 docker exec "$cid" /usr/bin/dozzle healthcheck >/dev/null \
   || fail "dozzle healthcheck subcommand failed"
 
-docker stop "$cid" >/dev/null
+docker rm -f "$cid" >/dev/null
 trap - EXIT
 
 echo "All dozzle tests passed!"

@@ -11,6 +11,7 @@ and a busybox debug shell instead of bare scratch.
 ```
 docker run --rm -p 127.0.0.1:8080:8080 \
   -v /var/run/docker.sock:/var/run/docker.sock \
+  --group-add $(stat -c %g /var/run/docker.sock) \
   ghcr.io/tylerobara/containers/dozzle:latest
 ```
 
@@ -19,10 +20,12 @@ Then open <http://localhost:8080>.
 ## Running
 
 The server needs a container runtime: mount `/var/run/docker.sock`
-(read-only is fine), or point it at remote endpoints with
-`--remote-host` (ssh/docker hosts) or `--remote-agent` (dozzle agent
-targets). Kubernetes: `DOZZLE_MODE=k8s` with the pod watch RBAC, no socket
-needed.
+(read-only is fine) and pass the socket's group —
+`--group-add $(stat -c %g /var/run/docker.sock)` — since uid 65532 cannot
+open the root:docker socket without it (same trick `docker`'s own nonroot
+setups use), or point it at remote endpoints with `--remote-host`
+(ssh/docker hosts) or `--remote-agent` (dozzle agent targets). Kubernetes:
+`DOZZLE_MODE=k8s` with the pod watch RBAC, no socket needed.
 
 Everything runs as uid 65532. The package ships a writable `/data` (the
 binary mkdirs `./data` on every start and dies without it; the dir is 0777
