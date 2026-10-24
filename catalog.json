@@ -214,6 +214,8 @@
       "upstream_url": "https://github.com/TwiN/gatus",
       "summary": "Gatus health monitor and status page, built from upstream source.",
       "description": "Gatus, a health monitor with a status page and prometheus metrics. The gatus binary is built from upstream source by melange; the image is assembled by apko on Wolfi."
+    },
+    {
       "name": "dozzle",
       "display_name": "Dozzle",
       "dir": "dozzle",
