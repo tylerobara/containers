@@ -13,7 +13,7 @@
 
 package:
   name: cilium-operator-generic
-  version: 1.20.3
+  version: 1.20.4
   epoch: 100
   description: "Cilium operator (generic IPAM variant), built from upstream source"
   copyright:
@@ -23,7 +23,7 @@ package:
 
 vars:
   # SHA256 of the GitHub release tarball (same tarball as cilium.yaml)
-  sha256: 5ebbd251ed8890d809aee3a6dcaec4cb15cc00bd8e9e8c0be379d220e44aa743
+  sha256: 90e4f8796db57542eed10f34e0a70d47b2e03f2d3767785adb5fdd66621ca7ec
 
 environment:
   contents:
