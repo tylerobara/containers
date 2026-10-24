@@ -41,11 +41,14 @@ environment:
   PATH: /usr/sbin:/sbin:/usr/bin:/bin
   # Upstream image ENV line (release.yml sets it in both Dockerfiles).
   APP_ENV: production
-  # Upstream's default is CWD-relative ("data/uploads", resolved against its
-  # WORKDIR /app); apko has no WORKDIR, so pin it into the /app/data volume —
-  # the same dir the chart/operator mount (upstream env name: UPLOAD_PATH).
-  # Same story for GEOLITE_DB_PATH (upstream default "data/GeoLite2-City.mmdb"
-  # — nonfatal on a read-only root but noisy).
+  # Upstream's data paths are CWD-relative (defaultSqliteConnString
+  # "data/pocket-id.db", "data/uploads", "data/GeoLite2-City.mmdb", resolved
+  # against its WORKDIR /app); apko has no WORKDIR, so pin all three into the
+  # /app/data volume — the same dir the chart/operator mount (upstream env
+  # names: DB_CONNECTION_STRING, UPLOAD_PATH, GEOLITE_DB_PATH). Without the
+  # DB pin, a read-only rootfs kills the server at startup with
+  # "mkdir /data: read-only file system" (CWD is /, not /app).
+  DB_CONNECTION_STRING: /app/data/pocket-id.db
   UPLOAD_PATH: /app/data/uploads
   GEOLITE_DB_PATH: /app/data/GeoLite2-City.mmdb
 
@@ -56,10 +59,9 @@ environment:
 entrypoint:
   command: /usr/bin/pocket-id
 
-# The SQLite backend's default path is CWD-relative ("data/pocket-id.db"), so
-# the whole point of this dir is to be the volume mount the upstream
-# deployment/chart and the pocket-id-operator both use (/app/data, with
-# DB_CONNECTION_STRING pointing into it). melange cannot ship nonroot-owned
+# The baked env pins the SQLite db/uploads/GeoLite into /app/data, so the
+# whole point of this dir is to be the volume mount the upstream
+# deployment/chart and the pocket-id-operator both use. melange cannot ship nonroot-owned
 # dirs (melange#1395), so apko paths: owns it — `permissions` is required or
 # the dir is created at mode 0. A mounted volume still needs fsGroup: 65532
 # (or chown) to be writable by the default user.

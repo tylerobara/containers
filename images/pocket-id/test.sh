@@ -31,6 +31,9 @@ pocket-id)
   docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$IMAGE" \
     | grep -qx 'UPLOAD_PATH=/app/data/uploads' \
     || fail "UPLOAD_PATH not pinned into the /app/data volume (apko has no WORKDIR)"
+  docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$IMAGE" \
+    | grep -qx 'DB_CONNECTION_STRING=/app/data/pocket-id.db' \
+    || fail "DB_CONNECTION_STRING not pinned into the /app/data volume (apko has no WORKDIR)"
 
   echo "Testing /app/data exists + is nonroot-writable (SQLite volume dir)..."
   docker run --rm --entrypoint /bin/sh "$IMAGE" -ec \
@@ -47,7 +50,6 @@ pocket-id)
   cid=$(docker run -d --rm -p 127.0.0.1::1411 \
     -e ENCRYPTION_KEY=test-encryption-key-0123456789abcdef \
     -e APP_URL=http://localhost:1411 \
-    -e DB_CONNECTION_STRING=/app/data/pocket-id.db \
     -e VERSION_CHECK_DISABLED=true \
     -e ANALYTICS_DISABLED=true \
     "$IMAGE")
