@@ -14,7 +14,7 @@
 
 package:
   name: source-controller
-  version: 1.9.6
+  version: 1.10.0
   epoch: 100
   description: "Flux source-controller built from upstream source"
   copyright:
@@ -24,7 +24,7 @@ package:
 
 vars:
   # SHA256 of the GitHub release tarball
-  sha256: 8ff7734d07b51917970c845b194b7cfe9a8a504b12e570ef53013f9dd00f575e
+  sha256: f3b3cae4f218838f8dea6bcd73e79451c96ff1ada06db0729a4609841e93949d
   # Flag unique to this controller among the flux four; the verify step
   # greps it out of the flag dump to prove the right main package was built.
   ident_flag: helm-index-max-size
