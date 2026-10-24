@@ -186,6 +186,14 @@ pipeline:
       install -d -m 755 "$D/var/lib/db/sbom"
       chmod 0777 "$D/var/lib/db/sbom"
       cp -a /opt/bitnami "$D/opt/"
+      # setup.sh REWRITES conf/postgresql.conf + conf/pg_hba.conf at boot; if
+      # they ship in the apk they carry the build-user owner (apk tar keeps
+      # staging ownership) and runAsUser 1001 cannot truncate them. Bitnami's
+      # entrypoint recreates both via `cp -nr conf.default/. conf/`, so the
+      # package ships conf.default only — same net boot tree as upstream's
+      # chown-R'd conf/, but created by the runtime user and therefore
+      # writable. conf/ itself is apko's paths entry.
+      rm -rf "$D/opt/bitnami/postgresql/conf"
       # postunpack created the volume dir in the build root; ship it too so
       # the image gets the /bitnami/postgresql mount point (empty dirs are
       # what the check task below asserts).
