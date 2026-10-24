@@ -39,9 +39,9 @@ environment:
       - busybox
       - ca-certificates-bundle
       - curl
-      # go.mod wants go 1.26.0 (upstream builds with golang:1.26); Wolfi
-      # go-1.26 satisfies the directive.
-      - go-1.26
+      # go.mod wants go >= 1.27.0 (the 1.7.x/1.10.x line); Wolfi
+      # go-1.27 satisfies the directive.
+      - go-1.27
 
 pipeline:
   - runs: |
@@ -59,7 +59,7 @@ pipeline:
       # and which go.mod `replace`s to ./api; no vendor/, so modules resolve
       # from the network (same as the cert-manager/metallb builds).
       export CGO_ENABLED=0 GOTOOLCHAIN=local
-      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.27/bin"
       # Upstream's Dockerfile line (xx-go == native go), with `.` instead of
       # `main.go` — same single-file main package, but the package-form
       # build stamps the module path into the build info grype reads.
@@ -83,6 +83,6 @@ pipeline:
       echo "$flags" | grep -q -- "--${{vars.ident_flag}}"
       # grype reads Go deps from the embedded build info — assert it is
       # this module's binary.
-      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.27/bin"
       go version -m "${{targets.destdir}}/usr/bin/kustomize-controller" \
         | awk -F'\t' '$3=="github.com/fluxcd/kustomize-controller"{f=1} END{exit !f}'
