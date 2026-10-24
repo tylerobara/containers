@@ -59,8 +59,10 @@ The **update-versions** workflow checks upstream daily (PGDG ftp for each
 tracked `postgresql-<major>`, GitHub releases for the operator, openbao,
 homepage, dokuwiki, grafana-image-renderer, cilium, cert-manager, frr-k8s,
 k8s-sidecar, local-path-provisioner, gatus, dozzle, kubernetes-reflector,
-alpine-k8s (whose row bumps the image VERSION on new kubectl patches), frr,
-traefik, pocket-id and pocket-id-operator — cilium-envoy follows the pin in
+alpine-k8s (whose row bumps the image VERSION on new kubectl patches),
+alpine-k8s helm (the helm binary the alpine-k8s image builds from source,
+3.x line only — releases/latest is helm 4, so the row filters the tag list),
+frr, traefik, pocket-id and pocket-id-operator — cilium-envoy follows the pin in
 cilium's own `images/cilium/Dockerfile`, cert-manager's three configs share
 one tarball so they bump together in a single PR, and so do metallb's
 controller + speaker (frr-k8s is its own upstream repo with its own version

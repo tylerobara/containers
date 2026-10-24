@@ -1,0 +1,109 @@
+# Melange build for Helm (github.com/helm/helm) — the helm binary the
+# alpine-k8s toolbox ships, built from the sha-pinned release tarball to kill
+# the 326 grype findings that traced to Wolfi's helm-3 apk (267 on the apk
+# itself + 59 Go-module findings from its bundled binary). Same Go pattern as
+# traefik/gatus: CGO_ENABLED=0 static binary, -trimpath, -buildvcs=false.
+#
+# The tarball ships no vendor/ dir, so modules resolve from the network.
+# Upstream's build contract (Makefile): `go build -trimpath -ldflags "-w -s
+# -X helm.sh/helm/v3/internal/version.<v>=…" ./cmd/helm`, where the Makefile
+# derives the stamps from git (rev-parse/describe). The tarball has no .git,
+# so we pass every stamp explicitly — version/metadata/gitCommit/gitTreeState
+# are this release's internal/version package variables — and the build needs
+# no git binary at all. An un-stamped build would self-report the source
+# default ("v3.22", "unreleased"), which the assert step below rejects.
+#
+# STAY ON THE 3.x LINE. releases/latest is helm 4 (v4.3.1 upstream, and
+# Wolfi's plain `helm` apk follows it), and helm 4 breaks the minilab
+# pipelines; the tag-list filter in update-versions.yml and the assert step
+# below are the guards. helm 3.22.1 already vendors the patched Go-module
+# floors this repo `go get`-bumps elsewhere (x/net 0.60.0, grpc 1.83.2,
+# x/crypto 0.57.0, oras-go 2.6.2, no containerd), so no dep-bump vars.
+#
+# Wolfi's `helm` apk is 4.x, so the apko config must version-pin this package
+# (`helm=3.22.1-r100`) — provider-priority/epoch alone cannot win resolution
+# against a strictly higher Wolfi version. The workflow's lock guard fails if
+# the pin ever resolves to anything but version-r${{package.version}}-r${epoch}.
+#
+# Bump `version` + `vars.sha256` on each 3.x release
+# (https://github.com/helm/helm/tags) — the update-versions bot covers this
+# row; `vars.git_commit` (the tag ref sha, for the version stamp) and the
+# apko version pin move with it by hand — both are asserted loudly if they
+# drift.
+
+package:
+  name: helm
+  version: 3.22.1
+  epoch: 100
+  description: "Helm 3 Kubernetes package manager built from upstream source"
+  copyright:
+    - license: Apache-2.0
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the GitHub release tarball
+  sha256: f0e596af707e2e5c0411d1dd314264450fd68fa484c87fb9fdf1c3beed4323b9
+  # git rev-parse of the v<version> tag (helm.sh/helm/v3/internal/version
+  # .gitCommit stamp), from `gh api repos/helm/helm/git/ref/tags/v<version>`
+  git_commit: 82d667cb4ce9257fa33faf43d9510cd595a62230
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      # go.mod wants go 1.26.0; Wolfi go-1.26 is 1.26.x.
+      - go-1.26
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/helm/helm/archive/refs/tags/v${{package.version}}.tar.gz" \
+        -o /home/build/helm.tar.gz
+      echo "${{vars.sha256}}  /home/build/helm.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf helm.tar.gz && rm helm.tar.gz
+
+  - working-directory: /home/build/helm-${{package.version}}
+    runs: |
+      export CGO_ENABLED=0 GOTOOLCHAIN=local
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      # Upstream release stamps (Makefile): version=v<ver> (the source default
+      # is the bare "v3.22" series), metadata empty (upstream clears the
+      # "unreleased" default for tag builds), real tag sha for gitCommit and
+      # clean tree. -s -w are the Makefile's own LDFLAGS.
+      go build -trimpath -buildvcs=false \
+        -ldflags "-s -w \
+          -X helm.sh/helm/v3/internal/version.version=v${{package.version}} \
+          -X helm.sh/helm/v3/internal/version.metadata= \
+          -X helm.sh/helm/v3/internal/version.gitCommit=${{vars.git_commit}} \
+          -X helm.sh/helm/v3/internal/version.gitTreeState=clean" \
+        -o helm ./cmd/helm
+      install -Dm755 helm "${{targets.destdir}}/usr/bin/helm"
+
+  - runs: |
+      # Assert what we ship: the ldflag stamp, not the "v3.22"/"unreleased"
+      # source defaults — `helm version --short` prints <version>+g<commit7>
+      # only when both stamps landed. The 3.x pin is the whole point of this
+      # build, so anything but v<version> here (or an "unknown") fails hard.
+      out=$("${{targets.destdir}}/usr/bin/helm" version --short)
+      echo "$out"
+      echo "$out" | grep -q "^v${{package.version}}+g" \
+        || { echo "helm version --short is '$out', want v${{package.version}}+g<sha>"; exit 1; }
+      # grype reads Go deps from the embedded build info — assert module
+      # identity so the scanner attributes findings to helm and not noise.
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      go version -m "${{targets.destdir}}/usr/bin/helm" \
+        | awk -F'\t' '$2=="mod" && $3=="helm.sh/helm/v3"{f=1} END{exit !f}' \
+        || { echo "binary does not embed module helm.sh/helm/v3"; exit 1; }
+      # Functional probes for the toolbox contract: the two commands pipelines
+      # run must exist and run (helm talks to no cluster for these).
+      "${{targets.destdir}}/usr/bin/helm" ls --help >/dev/null
+      "${{targets.destdir}}/usr/bin/helm" plugin list >/dev/null

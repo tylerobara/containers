@@ -334,7 +334,7 @@
       "primary_package": null,
       "upstream_url": "https://github.com/alpine-docker/k8s",
       "summary": "kubectl/helm pipeline toolbox \u2014 an alpine/k8s counterpart on Wolfi.",
-      "description": "The kubectl + helm + kustomize toolbox the minilab pipelines run, assembled by apko from Wolfi packages only. Image version = kubectl version, mirroring the reference tag."
+      "description": "The kubectl + helm + kustomize toolbox the minilab pipelines run, assembled by apko on Wolfi: helm built from upstream source by melange (pinned to the 3.x line — Wolfi's plain helm is helm 4), everything else signed Wolfi packages. Image version = kubectl version, mirroring the reference tag."
     },
     {
       "name": "frr",

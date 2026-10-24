@@ -1,10 +1,13 @@
 name: alpine-k8s
 
 # Builds + publishes the alpine-k8s image (alpine/k8s counterpart: the
-# kubectl/helm pipeline toolbox, pure Wolfi packages assembled by apko — no
-# melange, no Dockerfile, so there is no keygen/melange stage and no per-arch
-# build leg; apko publishes both arches in one shot). One workflow per image
-# family; routing is the native on.push.paths filter.
+# kubectl/helm pipeline toolbox). helm is built from the sha-pinned upstream
+# release tarball by melange (images/alpine-k8s/melange/helm.yaml — pinned to
+# the 3.x line; Wolfi's plain helm is helm 4 and would break pipelines, and
+# its old helm-3 apk carried every finding this image ever had); everything
+# else is signed Wolfi packages, assembled by apko. No Dockerfile — same
+# keygen → melange per-arch → apko lock/publish pattern as gatus.yml.
+# One workflow per image family; routing is the native on.push.paths filter.
 # cosign identity = THIS file:
 #   cosign verify \
 #     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
@@ -27,6 +30,7 @@ on:
   schedule:
     - cron: '40 7 * * *' # daily; the real security cadence — apko lock floats
                          # to current Wolfi, so patches flow without a commit
+                         # (helm only moves via a melange version bump)
   workflow_dispatch:
     inputs:
       ref:
@@ -42,15 +46,82 @@ concurrency:
   group: alpine-k8s-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.run_id || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
 
+env:
+  MELANGE_VERSION: v0.63.0
+
 permissions:
   contents: read
   packages: write
 
 jobs:
-  # No detect job and no melange/keygen legs: the on.push.paths trigger is the
-  # routing, and there is nothing to compile — one apko build job does it all.
+  # No detect job: the on.push.paths trigger above IS the routing — if this
+  # workflow ran at all, alpine-k8s (or this file) changed.
+
+  keygen:
+    runs-on: ubuntu-latest
+    outputs:
+      pub: ${{ steps.k.outputs.pub }}
+      priv: ${{ steps.k.outputs.priv }}
+    steps:
+      - name: Install melange
+        run: go install "chainguard.dev/melange@$MELANGE_VERSION"
+
+      - name: Generate key
+        id: k
+        run: |
+          ~/go/bin/melange keygen
+          { echo "pub=$(base64 -w0 melange.rsa.pub)"; echo "priv=$(base64 -w0 melange.rsa)"; } >> "$GITHUB_OUTPUT"
+
+  melange:
+    needs: keygen
+    if: ${{ !cancelled() && needs.keygen.result == 'success' }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    env:
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Install melange
+        run: go install "chainguard.dev/melange@$MELANGE_VERSION"
+
+      - name: Restore signing key
+        env:
+          PRIV: ${{ needs.keygen.outputs.priv }}
+          PUB: ${{ needs.keygen.outputs.pub }}
+        run: |
+          printf '%s' "$PRIV" | base64 -d > melange.rsa && chmod 600 melange.rsa
+          printf '%s' "$PUB" | base64 -d > melange.rsa.pub
+
+      - name: Build helm (${{ matrix.arch }})
+        run: |
+          ~/go/bin/melange build images/alpine-k8s/melange/helm.yaml \
+            --arch "$ARCH" \
+            --signing-key melange.rsa \
+            --out-dir ./packages \
+            --runner docker
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packages-helm-${{ matrix.arch }}
+          path: |
+            packages/
+            melange.rsa.pub
 
   build:
+    needs: [keygen, melange]
+    if: ${{ !cancelled() && needs.keygen.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -65,18 +136,36 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.ref }}
 
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: packages-helm-*
+          path: .
+          merge-multiple: true
+
       - name: Resolve pinned version + version guard
         run: |
           VER=$(tr -d '[:space:]' < images/alpine-k8s/VERSION)
           case "$VER" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "bad version '$VER'"; exit 1 ;; esac
           echo "K8STB_VER=$VER" >> "$GITHUB_ENV"
           echo "K8STB_MINOR=$(echo "$VER" | cut -d. -f1,2)" >> "$GITHUB_ENV"
+          HELM_VER=$(awk '/^  version:/{print $2; exit}' images/alpine-k8s/melange/helm.yaml)
+          HELM_EPOCH=$(awk '/^  epoch:/{print $2; exit}' images/alpine-k8s/melange/helm.yaml)
+          case "$HELM_VER" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "bad helm version '$HELM_VER'"; exit 1 ;; esac
+          echo "HELM_VER=$HELM_VER" >> "$GITHUB_ENV"
           # Lock once and publish from that lock (same as the sibling images).
+          # The local melange repo carries helm; Wolfi carries the rest.
           docker run --rm --user root \
             -v "$PWD:/work" \
             cgr.dev/chainguard/apko lock /work/images/alpine-k8s/apko/alpine-k8s.yaml \
               --arch x86_64 --arch aarch64 \
+              --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
               --output /work/alpine-k8s.lock.json
+          RESOLVED=$(jq -r '.contents.packages[] | select(.name=="helm") | .version' alpine-k8s.lock.json | head -1)
+          # exact pkgver match or our melange helm lost resolution to Wolfi's
+          # helm 4 (the apko =pin should make that impossible; guard anyway)
+          if [ "$RESOLVED" != "${HELM_VER}-r${HELM_EPOCH}" ]; then
+            echo "apko resolved helm as '$RESOLVED', expected '${HELM_VER}-r${HELM_EPOCH}'"; exit 1
+          fi
 
       - name: Log in to ghcr
         if: env.PUBLISH == 'true'
@@ -96,6 +185,7 @@ jobs:
               cgr.dev/chainguard/apko publish /work/images/alpine-k8s/apko/alpine-k8s.yaml \
                 "$K8STB_IMAGE:$K8STB_VER" "$K8STB_IMAGE:$K8STB_MINOR" "$K8STB_IMAGE:latest" \
                 --arch x86_64,aarch64 \
+                --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
                 --lockfile /work/alpine-k8s.lock.json; then
               break
             fi
@@ -114,14 +204,15 @@ jobs:
             cgr.dev/chainguard/apko publish /work/images/alpine-k8s/apko/alpine-k8s.yaml \
               "alpine-k8s:validate" \
               --arch x86_64 \
-              --local
+              --local \
+              --repository-append /work/packages --keyring-append /work/melange.rsa.pub
           echo "K8STB_REF=alpine-k8s:validate" >> "$GITHUB_ENV"
           echo "GRYPE_SRC=docker:alpine-k8s:validate" >> "$GITHUB_ENV"
 
       - name: Smoke test image
         run: |
           [ "$PUBLISH" = true ] && docker pull --platform linux/amd64 "$K8STB_REF"
-          IMAGE="$K8STB_REF" VERSION="$K8STB_VER" ./images/alpine-k8s/test.sh
+          IMAGE="$K8STB_REF" VERSION="$K8STB_VER" HELM_VER="$HELM_VER" ./images/alpine-k8s/test.sh
 
       - name: Scan image with grype
         id: scan
@@ -161,7 +252,7 @@ jobs:
             --arg image "$K8STB_IMAGE" --arg version "$K8STB_VER" \
             --arg digest "$DIGEST" --arg built "$(date -u +%FT%TZ)" \
             --arg tags "$K8STB_VER $K8STB_MINOR latest" \
-            --arg built_with apko --argjson signed "${SIGNED:-false}" \
+            --arg built_with melange --argjson signed "${SIGNED:-false}" \
             --arg signed_by alpine-k8s.yml \
             --slurpfile scan scans/alpine-k8s.json \
             '{image: $image, major: null, version: $version,

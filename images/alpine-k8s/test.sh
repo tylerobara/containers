@@ -1,9 +1,10 @@
 #!/bin/sh
 # Smoke test for the alpine-k8s image.
-# Usage: IMAGE=ghcr.io/.../alpine-k8s:1.37.1 VERSION=1.37.1 ./test.sh
+# Usage: IMAGE=ghcr.io/.../alpine-k8s:1.37.1 VERSION=1.37.1 HELM_VER=3.22.1 ./test.sh
 set -eu
 : "${IMAGE:?set IMAGE}"
 : "${VERSION:?set VERSION}"
+: "${HELM_VER:?set HELM_VER}"
 
 fail() { echo "FAIL: $1"; exit 1; }
 
@@ -24,18 +25,21 @@ docker run --rm --entrypoint kubectl "$IMAGE" version --client \
   | grep -q "Client Version: v${series}\." \
   || fail "kubectl --client does not print v${series}.x"
 docker run --rm --entrypoint helm "$IMAGE" version --short \
-  | grep -q '^v3\.' \
-  || fail "helm does not print a v3.x version (helm-3 pin leaked?)"
+  | grep -q "^v${HELM_VER}" \
+  || fail "helm does not print v${HELM_VER} (our melange helm pin leaked?)"
 
 echo "Testing the rest of the advertised toolset actually runs..."
 # Functional probes, not `command -v`: jq/yq evaluate; kustomize prints a
-# version; envsubst is the gettext probe. Codes: 1=kustomize 2=jq 3=yq 4=envsubst
+# version; envsubst is the gettext probe; helm's two pipeline commands must
+# run without a cluster. Codes: 1=kustomize 2=jq 3=yq 4=envsubst 5=helm-ls 6=helm-plugin
 docker run --rm --entrypoint /bin/sh "$IMAGE" -c '
   kustomize help 2>&1 | grep -qi usage || exit 1
   echo "{\"a\":42}" | jq -e ".a == 42" >/dev/null || exit 2
   printf "a: 42\n" | yq -e ".a == 42" >/dev/null || exit 3
   printf "%s" "\$PATH" | envsubst | grep -q /usr/bin || exit 4
-  exit 0' || fail "toolset probe failed (codes: 1=kustomize 2=jq 3=yq 4=envsubst)"
+  helm ls --help >/dev/null || exit 5
+  helm plugin list >/dev/null || exit 6
+  exit 0' || fail "toolset probe failed (codes: 1=kustomize 2=jq 3=yq 4=envsubst 5=helm-ls 6=helm-plugin)"
 
 echo "Testing no package manager at runtime (Wolfi minimal)..."
 docker run --rm --entrypoint /bin/sh "$IMAGE" -c \

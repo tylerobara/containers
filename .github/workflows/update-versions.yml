@@ -536,8 +536,9 @@ jobs:
           # --- alpine-k8s: tracks upstream Kubernetes releases within the minor
           # pinned in images/alpine-k8s/apko/alpine-k8s.yaml (kubectl-1.37) and
           # bumps VERSION — image version == kubectl version, like the alpine/k8s
-          # tag it mirrors. Pure apko image: no melange config to bump, and the
-          # kubectl/helm/kustomize pins float inside their series via the lock.
+          # tag it mirrors. The kubectl/kustomize pins float inside their
+          # series via the lock; the helm binary is our own melange build with
+          # its own row below (alpine-k8s-helm), not bumped here.
           # Minor bumps stay manual: Wolfi must ship kubectl-1.<newminor> first,
           # then the apko package line moves with VERSION. ---
           vf=images/alpine-k8s/VERSION
@@ -656,5 +657,27 @@ jobs:
               "https://github.com/fluxcd/$name/archive/refs/tags/v${latest}.tar.gz" flux
           done
 
+
+          # --- alpine-k8s helm: the helm binary the alpine-k8s image ships,
+          # built from the release tarball by images/alpine-k8s/melange/helm.yaml.
+          # Tracks the 3.x line ONLY, so use the traefik tag-list strategy —
+          # releases/latest is helm 4 (v4.3.1), which would silently break the
+          # minilab pipelines; the ^v3\.[0-9]+\.[0-9]+$ grep drops helm 4 and
+          # any rc/beta tags. ---
+          if want alpine-k8s-helm; then
+            yaml=images/alpine-k8s/melange/helm.yaml
+            latest=$(gh api --paginate repos/helm/helm/tags --jq '.[].name' \
+              | grep -E '^v3\.[0-9]+\.[0-9]+$' | sort -V | tail -1 | sed 's/^v//')
+            if [ -z "$latest" ]; then
+              echo "::error::alpine-k8s-helm: no 3.x release tag found upstream"
+              FAILED=1
+            else
+              # apko =pin (helm=<ver>-r100) + vars.git_commit move with the
+              # bump by hand — the workflow's lock guard + melange assert step
+              # fail loudly if they drift from this config's version.
+              bump_row alpine-k8s-helm "$yaml" "$latest" \
+                "https://github.com/helm/helm/archive/refs/tags/v${latest}.tar.gz" alpine-k8s
+            fi
+          fi
 
           exit $FAILED
