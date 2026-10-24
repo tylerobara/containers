@@ -177,14 +177,11 @@ jobs:
 
       - name: Restore signing key
         run: |
+          # melange signs the packages + the APKINDEX host-side with this key;
+          # the build job mounts the .pub onto /work/melange.rsa.pub for apko,
+          # which must verify with the SAME key (hence one keygen per run).
           echo '${{ needs.keygen.outputs.priv }}' | base64 -d > melange.rsa && chmod 600 melange.rsa
           echo '${{ needs.keygen.outputs.pub }}' | base64 -d > melange.rsa.pub
-          # apko's --keyring-append /work/melange.rsa.pub must read the SAME
-          # key that signed these packages: the yaml's COPY line ships the key
-          # file in the build-container image (openbao keeps a committed copy
-          # at this path; our keygen is per-run, so stage it here and ship it
-          # in the artifact below).
-          mkdir -p .github/workflows/scripts && cp melange.rsa.pub .github/workflows/scripts/melange.rsa.pub
 
       - name: Build postgresql/repmgr/pgaudit-${{ matrix.major }} (${{ matrix.arch }})
         run: |
