@@ -44,7 +44,10 @@ environment:
   # Upstream's default is CWD-relative ("data/uploads", resolved against its
   # WORKDIR /app); apko has no WORKDIR, so pin it into the /app/data volume —
   # the same dir the chart/operator mount (upstream env name: UPLOAD_PATH).
+  # Same story for GEOLITE_DB_PATH (upstream default "data/GeoLite2-City.mmdb"
+  # — nonfatal on a read-only root but noisy).
   UPLOAD_PATH: /app/data/uploads
+  GEOLITE_DB_PATH: /app/data/GeoLite2-City.mmdb
 
 # No `cmd:` and no per-entrypoint args (apko has neither EXPOSE nor args): a
 # bare run starts the server, exactly like upstream's CMD ["/app/pocket-id"],

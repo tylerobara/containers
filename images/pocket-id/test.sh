@@ -38,10 +38,13 @@ pocket-id)
     || fail "/app/data missing or not writable by the default user"
 
   echo "Testing the server boots and serves the embedded SvelteKit bundle..."
-  # Absolute DB path = what the chart/operator does (DB_CONNECTION_STRING into
-  # the /app/data volume). All HTTP checks run inside the container, so this
-  # is independent of the host port mapping and of the HOST bind address.
-  cid=$(docker run -d --rm \
+  # The image has NO HTTP client (Wolfi busybox is built without the wget
+  # applet), so the page fetch runs from the host against a published port —
+  # valid because the server binds 0.0.0.0:1411 — while the health probe
+  # stays in-container via the upstream healthcheck subcommand below. The
+  # absolute UPLOAD_PATH/DB paths come from the baked image env, exactly as
+  # the chart/operator deployments get them.
+  cid=$(docker run -d --rm -p 127.0.0.1::1411 \
     -e ENCRYPTION_KEY=test-encryption-key-0123456789abcdef \
     -e APP_URL=http://localhost:1411 \
     -e DB_CONNECTION_STRING=/app/data/pocket-id.db \
@@ -50,16 +53,16 @@ pocket-id)
     "$IMAGE")
   # shellcheck disable=SC2064
   trap "docker stop $cid >/dev/null 2>&1 || true" EXIT
-  if ! docker exec "$cid" /bin/sh -ec '
-    i=0
-    until wget -qO- http://127.0.0.1:1411/healthz >/dev/null 2>&1; do
-      i=$((i + 1)); [ "$i" -gt 60 ] && exit 7
-      sleep 1
-    done
-    wget -qO- http://127.0.0.1:1411/ | grep -q "_app/immutable" || exit 8'; then
-    docker logs "$cid" 2>&1 | tail -30
-    fail "server never became healthy, or the embedded frontend is not served"
-  fi
+  port=$(docker port "$cid" 1411/tcp | head -1 | awk -F: '{print $NF}')
+  i=0
+  until curl -sf "http://127.0.0.1:${port}/" | grep -q "_app/immutable"; do
+    i=$((i + 1))
+    if [ "$i" -gt 60 ]; then
+      docker logs "$cid" 2>&1 | tail -30
+      fail "server never served the embedded frontend"
+    fi
+    sleep 1
+  done
 
   echo "Testing the upstream HEALTHCHECK command..."
   docker exec "$cid" /usr/bin/pocket-id healthcheck \

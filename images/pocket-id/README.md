@@ -75,10 +75,11 @@ pocket-id-operator both do — it mounts its PVC at `/app/data`) or run with
   `/app/data` and re-exec as `PUID`/`PGID` (needs root + `su-exec`). The
   nonroot 65532 default makes it dead weight, so PUID/PGID are not supported —
   run the container as the uid you want (`--user`) and chown your volume.
-- **Baked-in absolute `UPLOAD_PATH=/app/data/uploads`**: upstream's default
-  (`data/uploads`) resolves against its `WORKDIR /app`; apko has no WORKDIR,
-  so a bare run would hit the read-only root fs. The image env pins it into
-  the same volume as the SQLite DB.
+- **Baked-in absolute `UPLOAD_PATH` / `GEOLITE_DB_PATH`**: upstream's defaults
+  (`data/uploads`, `data/GeoLite2-City.mmdb`) resolve against its
+  `WORKDIR /app`; apko has no WORKDIR, so a bare run would mkdir on the
+  read-only root. The image env pins both into the same volume as the SQLite
+  DB (uploads land in `/app/data/uploads`).
 - **`healthcheck` still works** (it is the upstream `HEALTHCHECK` command and
   is covered by `test.sh`).
 
