@@ -31,16 +31,10 @@ build/scan data at `data/index.json`. See [`site/README.md`](site/README.md).
 
 ## CI
 
-One workflow per image family — `postgres.yml`, `cloudnative-pg-operator.yml`,
-`openbao.yml`, `os-shell.yml`, `dokuwiki.yml`, `grafana-image-renderer.yml`, `homepage.yml`, `cilium.yml`, `cert-manager.yml`, `metallb.yml`, `k8s-sidecar.yml`, `local-path-provisioner.yml`, `gatus.yml` — so a change to one image can never rebuild or cancel another.
-`openbao.yml`, `os-shell.yml`, `dokuwiki.yml`, `grafana-image-renderer.yml`, `homepage.yml`, `cilium.yml`, `cert-manager.yml`, `metallb.yml`, `k8s-sidecar.yml`, `local-path-provisioner.yml`, `alpine-k8s.yml` — so a change to one image can never rebuild or cancel another.
+One workflow per image family — `alpine-k8s.yml`, `cert-manager.yml`, `cilium.yml`, `cloudnative-pg-operator.yml`, `dokuwiki.yml`, `dozzle.yml`, `gatus.yml`, `grafana-image-renderer.yml`, `homepage.yml`, `k8s-sidecar.yml`, `local-path-provisioner.yml`, `metallb.yml`, `openbao.yml`, `os-shell.yml`, `postgres.yml`, `update-versions.yml` — so a change to one image can never rebuild or cancel another.
 Routing is the native `on.push.paths` filter: a bump PR/push rebuilds **only
 the image whose directory moved**; each workflow's daily schedule rebuilds just
-its own image (fresh Wolfi CVE patches), staggered 06:00/06:05/06:10/06:15/06:20/06:25/06:30/06:35/06:40/06:45/07:10/07:15/07:25 UTC.
-`openbao.yml`, `os-shell.yml`, `dokuwiki.yml`, `grafana-image-renderer.yml`, `homepage.yml`, `cilium.yml`, `cert-manager.yml`, `metallb.yml`, `k8s-sidecar.yml`, `local-path-provisioner.yml`, `dozzle.yml` — so a change to one image can never rebuild or cancel another.
-Routing is the native `on.push.paths` filter: a bump PR/push rebuilds **only
-the image whose directory moved**; each workflow's daily schedule rebuilds just
-its own image (fresh Wolfi CVE patches), staggered 06:00/06:05/06:10/06:15/06:20/06:25/06:30/06:35/06:40/06:45/06:50/07:25 UTC.
+its own image (fresh Wolfi CVE patches), staggered 06:00/06:05/06:10/06:15/06:20/06:25/06:30/06:35/06:40/06:45/06:50/07:10/07:15/07:25/07:40 UTC.
 Postgres additionally keeps a `detect-changes` job that turns the diff into its
 per-major matrix. Publish → smoke test → grype → cosign keyless sign **only
 when the scan has 0 findings Low or above**. The cosign cert identity is each
@@ -58,7 +52,7 @@ build).
 The **update-versions** workflow checks upstream daily (PGDG ftp for each
 tracked `postgresql-<major>`, GitHub releases for the operator, openbao,
 homepage, dokuwiki, grafana-image-renderer, cilium, cert-manager, frr-k8s,
-k8s-sidecar, local-path-provisioner and gatus — cilium-envoy
+k8s-sidecar, local-path-provisioner and gatus, alpine-k8s — cilium-envoy
 k8s-sidecar, local-path-provisioner and dozzle — cilium-envoy
 k8s-sidecar, local-path-provisioner and alpine-k8s (whose bot row bumps the image VERSION on new kubectl patches) — cilium-envoy
 follows the pin in cilium's own `images/cilium/Dockerfile`, cert-manager's
