@@ -1,0 +1,62 @@
+# FRR image, assembled by apko (no Dockerfile). The FRR binaries are built
+# from upstream source by melange (see ../melange/frr.yaml); everything
+# else is Wolfi.
+#
+# Reference contract: quay.io/frrouting/frr — [tini, --] entrypoint + CMD
+# /usr/lib/frr/docker-start, which sources frrcommon.sh and supervises the
+# daemons enabled in /etc/frr/daemons (bgpd on by default here) with
+# watchfrr. Deliberate differences from the upstream deb/container:
+#   - uid/gid 92 frr + 85 frrvty match upstream's debian packaging (apko
+#     accounts); apko cannot declare supplementary groups, so docker-start
+#     adds frr to frrvty at startup (privs_init requires the membership).
+#   - start as root, like upstream: watchfrr runs as root and each daemon
+#     setuid-drops to frr after taking its sockets; route programming
+#     needs NET_ADMIN/NET_RAW/SYS_ADMIN (Cilium/MetalLB run the speaker
+#     privileged).
+#   - no snmp: the wolfi-proven build set ships the core + BGP daemons.
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    # busybox: shell + chown/pgrep helpers; bash: docker-start/frrcommon.sh;
+    # iproute2 + python-3.11: the runtime deps of the melange package;
+    # ca-certificates for RPKI TLS; tini: PID-1 init, like upstream.
+    - busybox
+    - ca-certificates
+    - bash
+    - iproute2
+    - python-3.11
+    - tini
+    # Built by melange; supplied via --repository-append at build time.
+    # Exact-version world pin, not bare "frr": Wolfi's retired frr-10.4/10.5/
+    # 10.6 packages still publish "provides: frr=" at newer versions, and
+    # apko's resolver ranks version above provider-priority, so a bare "frr"
+    # resolves to wolfi frr-10.6 despite our k:100. Keep in sync with the
+    # melange version+epoch (the update-versions bot rewrites this line).
+    - frr=10.4.3-r100
+
+accounts:
+  groups:
+    - groupname: frr
+      gid: 92
+    - groupname: frrvty
+      gid: 85
+  users:
+    - username: frr
+      uid: 92
+      gid: 92
+      shell: /bin/bash
+  # No run-as on purpose: root like quay.io/frrouting/frr (see above).
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+
+entrypoint:
+  command: /sbin/tini
+# apko has no per-entrypoint args: the top-level `cmd` becomes the OCI Cmd,
+# so this renders tini's `--` separator plus the upstream startup script —
+# the exact [tini, --] + CMD contract of quay.io/frrouting/frr.
+cmd: "-- /usr/lib/frr/docker-start"
