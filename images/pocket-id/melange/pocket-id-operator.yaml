@@ -14,7 +14,7 @@
 
 package:
   name: pocket-id-operator
-  version: 0.15.0
+  version: 0.16.1
   epoch: 100
   description: "Pocket ID Kubernetes operator built from upstream source"
   copyright:
@@ -24,7 +24,7 @@ package:
 
 vars:
   # SHA256 of the GitHub release tarball
-  sha256: 731000bc9fb6ce790323a940b4e38da3f2489ee9b8e5380523312538171ba83b
+  sha256: 7c069a38cfbbae121537eb24f3d80dedb5c1b9667d1b9c915afad73aa179c415
 
 environment:
   contents:
