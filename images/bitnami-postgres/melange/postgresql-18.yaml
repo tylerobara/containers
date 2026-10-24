@@ -49,6 +49,10 @@ environment:
       - ninja-build
       - pkgconf
       - bash
+      # postunpack's ensure_user_exists ends on a false [[ -n ]] test when
+      # shadow's usermod/groupadd are absent — under the build's errexit that
+      # silently kills the pipeline; upstream's builder ships shadow-utils.
+      - shadow
       # --with-* / -D feature flags need these dev packages:
       - openssl-dev
       - icu-dev
@@ -150,10 +154,10 @@ pipeline:
       SHIM
       chmod 755 /opt/bitnami/common/bin/hostname
 
-      # postunpack's trailing `ensure_user_exists postgres --uid 26 --system`
-      # must no-op without an adduser in the build container: pre-seed the
-      # account (this /etc/passwd is the build rootfs's own; the image gets
-      # its passwd entries from apko accounts instead).
+      # postunpack's ensure_user_exists needs id/usermod/groupadd to end on a
+      # true command (shadow ships them; see environment). Pre-seed the
+      # account anyway (this /etc/passwd is the build rootfs's own; the image
+      # gets its passwd entries from apko accounts instead).
       grep -q '^postgres:' /etc/passwd || echo 'postgres:x:26:26:PostgreSQL:/bitnami/postgresql:/bin/false' >> /etc/passwd
       grep -q '^postgres:' /etc/group  || echo 'postgres:x:26:' >> /etc/group
 
@@ -161,7 +165,9 @@ pipeline:
       # conf.default/logs/tmp/volume dirs, generates postgresql.conf from the
       # $(datadir) sample with include_dir, writes the trust pg_hba.conf,
       # chmods g+rwX, symlinks the log files to /dev/stdout.
-      bash -x /opt/bitnami/scripts/postgresql/postunpack.sh
+      rc=0; bash /opt/bitnami/scripts/postgresql/postunpack.sh || rc=$?
+      echo "postunpack rc=$rc"
+      [ "$rc" -eq 0 ]
       test -f /opt/bitnami/postgresql/conf.default/postgresql.conf
       test -f /opt/bitnami/postgresql/conf.default/pg_hba.conf
       grep -q include_dir /opt/bitnami/postgresql/conf.default/postgresql.conf

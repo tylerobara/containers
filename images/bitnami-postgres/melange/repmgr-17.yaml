@@ -35,7 +35,10 @@ environment:
       - busybox
       - build-base
       - ca-certificates-bundle
+      - curl
       - curl-dev
+      - flex
+      - bison
       - json-c-dev
       - postgresql-17
       - postgresql-17-dev
@@ -44,7 +47,7 @@ pipeline:
   - runs: |
       mkdir -p /home/build
       curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
-        "https://github.com/EnterpriseDB/repmgr/archive/refs/tags/v${{package.version}}.tar.gz" \
+        "https://github.com/EnterpriseDB/repmgr/releases/download/v${{package.version}}/repmgr-${{package.version}}.tar.gz" \
         -o /home/build/repmgr.tar.gz
       echo "${{vars.sha256}}  /home/build/repmgr.tar.gz" | sha256sum -c -
       cd /home/build
@@ -57,8 +60,14 @@ pipeline:
       # headers come from postgresql-17-dev. The extension .so loads from
       # the SERVER's $libdir at runtime (our /opt tree), so a wolfi-headers
       # build is fine.
-      make USE_PGXS=1 PG_CONFIG=/usr/bin/pg_config -j"$(nproc)"
-      make install USE_PGXS=1 PG_CONFIG=/usr/bin/pg_config
+      # GitHub ARCHIVES of repmgr lack the generated configure/Makefile
+      # (autoconf project) — build the release ASSET tarball, which ships
+      # them (identical tree, identical sha256, just autoreconf'ed).
+      ./configure --prefix=/usr   # prefix: binaries to /usr/bin (pg_config's
+                                  # bindir) so the re-home below finds them;
+                                  # extension dirs come from pg_config itself
+      make -j"$(nproc)"
+      make install
       # Re-home the PGXS install (root container) into the bitnami layout:
       # binaries to /opt/bitnami/repmgr/bin (where bitnami kept them), the
       # extension bits into the /opt server's dirs (shared with the
@@ -69,7 +78,10 @@ pipeline:
                         "$D/opt/bitnami/postgresql/share/extension"
       install -d -m 755 "$D/var/lib/db/sbom"
       chmod 0777 "$D/var/lib/db/sbom"
-      mv /usr/bin/repmgr* "$D/opt/bitnami/repmgr/bin/"
+      # repmgr's Makefile builds repmgr/repmgrd but its "hacky" install rule
+      # never ships them — install straight from the build dir (PGXS already
+      # put repmgr.so + sql/control in place above).
+      install -m 755 repmgr repmgrd "$D/opt/bitnami/repmgr/bin/"
       find /usr/lib/postgresql* -name 'repmgr.so' -exec mv {} "$D/opt/bitnami/postgresql/lib/postgresql/" \;
       find /usr/share/postgresql* \( -name 'repmgr--*.sql' -o -name 'repmgr.control' \) \
         -exec mv {} "$D/opt/bitnami/postgresql/share/extension/" \;

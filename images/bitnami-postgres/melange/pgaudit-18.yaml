@@ -32,6 +32,7 @@ environment:
       - busybox
       - build-base
       - ca-certificates-bundle
+      - curl
       - postgresql-18
       - postgresql-18-dev
 

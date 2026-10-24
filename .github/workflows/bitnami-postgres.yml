@@ -179,6 +179,12 @@ jobs:
         run: |
           echo '${{ needs.keygen.outputs.priv }}' | base64 -d > melange.rsa && chmod 600 melange.rsa
           echo '${{ needs.keygen.outputs.pub }}' | base64 -d > melange.rsa.pub
+          # apko's --keyring-append /work/melange.rsa.pub must read the SAME
+          # key that signed these packages: the yaml's COPY line ships the key
+          # file in the build-container image (openbao keeps a committed copy
+          # at this path; our keygen is per-run, so stage it here and ship it
+          # in the artifact below).
+          mkdir -p .github/workflows/scripts && cp melange.rsa.pub .github/workflows/scripts/melange.rsa.pub
 
       - name: Build postgresql/repmgr/pgaudit-${{ matrix.major }} (${{ matrix.arch }})
         run: |
@@ -247,6 +253,7 @@ jobs:
         run: |
           docker run --rm --user root \
             -v "$PWD:/work" \
+            -v "$PWD/melange.rsa.pub:/work/melange.rsa.pub:ro" \
             cgr.dev/chainguard/apko lock "/work/build/postgresql-$PG_MAJOR.yaml" \
               --arch x86_64 --arch aarch64 \
               --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
