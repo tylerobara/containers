@@ -24,6 +24,8 @@ base. **No Dockerfiles anywhere.**
 | Dozzle | `ghcr.io/tylerobara/containers/dozzle` | [`images/dozzle/`](images/dozzle/) |
 | alpine-k8s (alpine/k8s counterpart) | `ghcr.io/tylerobara/containers/alpine-k8s` | [`images/alpine-k8s/`](images/alpine-k8s/) |
 | FRRouting (BGP suite for Cilium/MetalLB) | `ghcr.io/tylerobara/containers/frr` | [`images/frr/`](images/frr/) |
+| Traefik (reverse proxy / ingress) | `ghcr.io/tylerobara/containers/traefik` | [`images/traefik/`](images/traefik/) |
+| Pocket ID (pocket-id, pocket-id-operator) | `ghcr.io/tylerobara/containers/pocket-id` (+ `-operator`) | [`images/pocket-id/`](images/pocket-id/) |
 
 Catalog + grype scan results: <https://tylerobara.github.io/containers/> — an
 Astro site (`site/`) with a page per image (specs, tags, advisories, cosign
@@ -52,24 +54,31 @@ build).
 ## Version updates
 
 The **update-versions** workflow checks upstream daily (PGDG ftp for each
- cilium-envoy) | `ghcr.io/tylerobara/containers/cilium` (+ `-operator-generic`, `-envoy`) | [`images/cilium/`](images/cilium/) |
-| cert-manager (controller, cainjector, webhook) | `ghcr.io/tylerobara/containers/cert-manager-controller` (+ `-cainjector`, `-webhook`) | [`images/cert-manager/`](images/cert-manager/) |
-| MetalLB (controller, speaker, frr-k8s) | `ghcr.io/tylerobara/containers/metallb-controller` (+ `-speaker`, `-frr-k8s`) | [`images/metallb/`](images/metallb/) |
-| k8s-sidecar (Grafana dashboards sidecar) | `ghcr.io/tylerobara/containers/k8s-sidecar` | [`images/k8s-sidecar/`](images/k8s-sidecar/) |
-| Homepage | `ghcr.io/tylerobara/containers/homepage` | [`images/homepage/`](images/homepage/) |
-| Local Path Provisioner | `ghcr.io/tylerobara/containers/local-path-provisioner` | [`images/local-path-provisioner/`](images/local-path-provisioner/) |
-| Gatus | `ghcr.io/tylerobara/containers/gatus` | [`images/gatus/`](images/gatus/) |
-| Kubernetes Reflector | `ghcr.io/tylerobara/containers/kubernetes-reflector` | [`images/kubernetes-reflector/`](images/kubernetes-reflector/) |
-| Dozzle | `ghcr.io/tylerobara/containers/dozzle` | [`images/dozzle/`](images/dozzle/) |
-| alpine-k8s (alpine/k8s counterpart) | `ghcr.io/tylerobara/containers/alpine-k8s` | [`images/alpine-k8s/`](images/alpine-k8s/) |
-| FRRouting (BGP suite for Cilium/MetalLB) | `ghcr.io/tylerobara/containers/frr` | [`images/frr/`](images/frr/) |
-| Traefik (reverse proxy / ingress) | `ghcr.io/tylerobara/containers/traefik` | [`images/traefik/`](images/traefik/) |
-| Traefik (reverse proxy / ingress) | `ghcr.io/tylerobara/containers/traefik` | [`images/traefik/`](images/traefik/) |
+tracked `postgresql-<major>`, GitHub releases for the operator, openbao,
+homepage, dokuwiki, grafana-image-renderer, cilium, cert-manager, frr-k8s,
+k8s-sidecar, local-path-provisioner, gatus, dozzle, kubernetes-reflector,
+alpine-k8s (whose row bumps the image VERSION on new kubectl patches), frr,
+traefik, pocket-id and pocket-id-operator — cilium-envoy follows the pin in
+cilium's own `images/cilium/Dockerfile`, cert-manager's three configs share
+one tarball so they bump together in a single PR, and so do metallb's
+controller + speaker (frr-k8s is its own upstream repo with its own version
+line)) and opens a PR bumping `version` + `vars.sha256` in the melange
+config. Review the PR, then:
 
-Catalog + grype scan results: <https://tylerobara.github.io/containers/> — an
-Astro site (`site/`) with a page per image (specs, tags, advisories, cosign
-verify commands), a sha-pinned `ClusterImageCatalog` for CNPG, and the raw
-build/scan data at `data/index.json`. See [`site/README.md`](site/README.md).
+1. *(optional pre-merge check)* Run **that image's workflow** (`postgres.yml`
+   / `cloudnative-pg-operator.yml` / `openbao.yml` / `dokuwiki.yml` /
+   `grafana-image-renderer.yml` / `cilium.yml` / `cert-manager.yml` /
+   `metallb.yml` / `k8s-sidecar.yml` / `local-path-provisioner.yml` /
+   `gatus.yml` / `homepage.yml` / `dozzle.yml` / `kubernetes-reflector.yml` /
+   `alpine-k8s.yml` / `frr.yml` / `traefik.yml` / `pocket-id.yml`) manually
+   with `ref = <bump branch>` and **validate_only** checked — builds + scans
+   the branch without publishing anything. (Needed because
+   GITHUB_TOKEN-authored PRs don't run checks automatically; a GitHub App
+   fixes that if it gets annoying.)
+2. Merge. The push to main rebuilds and republishes just that image, rescans,
+   resigns if clean, and updates the catalog entry in place.
+
+Manual bumps work the same way — just edit `version` + `vars.sha256` yourself.
 
 ## Adding an image
 
