@@ -39,14 +39,14 @@ pipeline:
   - runs: |
       mkdir -p /home/build
       curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
-        "https://github.com/pgaudit/pgaudit/archive/refs/tags/${package.version}.tar.gz" \
+        "https://github.com/pgaudit/pgaudit/archive/refs/tags/${{package.version}}.tar.gz" \
         -o /home/build/pgaudit.tar.gz
-      echo "${vars.sha256}  /home/build/pgaudit.tar.gz" | sha256sum -c -
+      echo "${{vars.sha256}}  /home/build/pgaudit.tar.gz" | sha256sum -c -
       cd /home/build
       tar xf pgaudit.tar.gz
       rm pgaudit.tar.gz
 
-  - working-directory: /home/build/pgaudit-${package.version}
+  - working-directory: /home/build/pgaudit-${{package.version}}
     runs: |
       # PGXS against wolfi's 18 headers (pg_config ships in
       # postgresql-18); install is root here, then the PGXS layout is
@@ -54,7 +54,7 @@ pipeline:
       # reason: /usr/lib/postgresql18/ is unloadable for this image).
       make USE_PGXS=1 PG_CONFIG=/usr/bin/pg_config -j"$(nproc)"
       make install USE_PGXS=1 PG_CONFIG=/usr/bin/pg_config
-      D="${targets.destdir}"
+      D="${{targets.destdir}}"
       install -d -m 755 "$D/opt/bitnami/postgresql/lib/postgresql" \
                         "$D/opt/bitnami/postgresql/share/extension"
       install -d -m 755 "$D/var/lib/db/sbom"

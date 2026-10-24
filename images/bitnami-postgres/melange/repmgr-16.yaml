@@ -44,14 +44,14 @@ pipeline:
   - runs: |
       mkdir -p /home/build
       curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
-        "https://github.com/EnterpriseDB/repmgr/archive/refs/tags/v${package.version}.tar.gz" \
+        "https://github.com/EnterpriseDB/repmgr/archive/refs/tags/v${{package.version}}.tar.gz" \
         -o /home/build/repmgr.tar.gz
-      echo "${vars.sha256}  /home/build/repmgr.tar.gz" | sha256sum -c -
+      echo "${{vars.sha256}}  /home/build/repmgr.tar.gz" | sha256sum -c -
       cd /home/build
       tar xf repmgr.tar.gz
       rm repmgr.tar.gz
 
-  - working-directory: /home/build/repmgr-${package.version}
+  - working-directory: /home/build/repmgr-${{package.version}}
     runs: |
       # PG_CONFIG: /usr/bin/pg_config ships with wolfi's postgresql-16;
       # headers come from postgresql-16-dev. The extension .so loads from
@@ -63,7 +63,7 @@ pipeline:
       # binaries to /opt/bitnami/repmgr/bin (where bitnami kept them), the
       # extension bits into the /opt server's dirs (shared with the
       # postgresql-16 package — apk allows that, like contrib modules).
-      D="${targets.destdir}"
+      D="${{targets.destdir}}"
       install -d -m 755 "$D/opt/bitnami/repmgr/bin" \
                         "$D/opt/bitnami/postgresql/lib/postgresql" \
                         "$D/opt/bitnami/postgresql/share/extension"
@@ -79,4 +79,4 @@ pipeline:
       test -f "$D/opt/bitnami/postgresql/share/extension/repmgr.control"
       # runtime sanity against the build container's wolfi libpq
       LD_LIBRARY_PATH=/usr/lib "$D/opt/bitnami/repmgr/bin/repmgr" --version \
-        | grep -q "${package.version}"
+        | grep -q "${{package.version}}"

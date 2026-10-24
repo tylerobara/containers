@@ -85,7 +85,7 @@ pipeline:
         -o /home/build/bitnami/containers.tar.gz
       echo "${{vars.bitnami_sha256}}  /home/build/bitnami/containers.tar.gz" | sha256sum -c -
 
-  - working-directory: /home/build/postgresql-${package.version}
+  - working-directory: /home/build/postgresql-${{package.version}}
     runs: |
       meson setup build \
         -Dprefix=/opt/bitnami/postgresql \
@@ -107,7 +107,7 @@ pipeline:
         -Dsystem_tzdata=/usr/share/zoneinfo
       meson compile -C build
 
-  - working-directory: /home/build/postgresql-${package.version}
+  - working-directory: /home/build/postgresql-${{package.version}}
     runs: |
       # Pipelines run as root: install into the container's REAL /opt (no
       # DESTDIR) so the bitnami scripts' absolute paths work unmodified; the

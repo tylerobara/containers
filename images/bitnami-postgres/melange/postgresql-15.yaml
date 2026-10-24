@@ -82,7 +82,7 @@ pipeline:
         -o /home/build/bitnami/containers.tar.gz
       echo "${{vars.bitnami_sha256}}  /home/build/bitnami/containers.tar.gz" | sha256sum -c -
 
-  - working-directory: /home/build/postgresql-${package.version}
+  - working-directory: /home/build/postgresql-${{package.version}}
     runs: |
       ./configure \
         --prefix=/opt/bitnami/postgresql \
@@ -103,7 +103,7 @@ pipeline:
         --with-system-tzdata=/usr/share/zoneinfo
       make -j"$(nproc)"
 
-  - working-directory: /home/build/postgresql-${package.version}
+  - working-directory: /home/build/postgresql-${{package.version}}
     runs: |
       # Pipelines run as root: install into the container's REAL /opt (no
       # DESTDIR) so the bitnami scripts' absolute paths work unmodified; the
