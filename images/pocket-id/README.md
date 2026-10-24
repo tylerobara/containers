@@ -8,7 +8,7 @@ tarballs by **melange** with upstream's own build contract, assembled by
 | Image | Upstream | Built | Contents |
 |---|---|---|---|
 | `ghcr.io/tylerobara/containers/pocket-id` | `ghcr.io/pocket-id/pocket-id:<v>-distroless` | melange: pnpm + vite-plus SvelteKit build, then `CGO_ENABLED=0 go build ./cmd` embedding it | `/usr/bin/pocket-id` (frontend embedded), `/app/data` for SQLite/uploads |
-| `ghcr.io/tylerobara/containers/pocket-id-operator` | `ghcr.io/aclerici38/pocket-id-operator` | melange: `CGO_ENABLED=0 go build -o manager ./cmd/main.go` (kubebuilder / controller-runtime) | `/manager` |
+| `ghcr.io/tylerobara/containers/pocket-id-operator` | `ghcr.io/aclerici38/pocket-id-operator` | melange: `CGO_ENABLED=0 go build -o manager ./cmd` (kubebuilder / controller-runtime) | `/manager` |
 
 The two images come from **different upstream repos with independent version
 lines** (`pocket-id/pocket-id` and `aclerici38/pocket-id-operator`), so they

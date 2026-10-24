@@ -1,9 +1,10 @@
 # Melange build for the Pocket ID operator
 # (github.com/aclerici38/pocket-id-operator), from the release tarball with
-# upstream's exact build contract (its Dockerfile builder stage):
-# CGO_ENABLED=0 go build -o manager cmd/main.go — a standard kubebuilder /
-# controller-runtime manager, no ldflag stamps (upstream passes none, so there
-# is no version banner to reproduce). Upstream COPYs the static binary onto
+# upstream's exact build contract (its Dockerfile builder stage, as the ./cmd
+# package dir): CGO_ENABLED=0 go build -o manager ./cmd — a standard
+# kubebuilder / controller-runtime manager, no ldflag stamps (upstream passes
+# none, so there is no version banner to reproduce). Upstream COPYs the static
+# binary onto
 # distroless/static as /manager with USER 65532 and ENTRYPOINT ["/manager"];
 # /manager is not cosmetic — the upstream helm chart hardcodes
 # `command: [/manager]`, so the path stays for chart drop-in compatibility.
@@ -55,12 +56,16 @@ pipeline:
       # as the metallb / cert-manager legs). Upstream adds `-a` (force
       # rebuild) for its Docker layer-cache; meaningless on a cold melange
       # build, so it is dropped. -trimpath + reproducible-build flags follow
-      # the repo-wide Go contract instead.
+      # the repo-wide Go contract instead. Built as the ./cmd package dir
+      # rather than upstream's ./cmd/main.go file argument: identical
+      # artifact, but Go records the module in the binary's build info
+      # (file-argument builds embed path=command-line-arguments instead,
+      # which would hide the app from grype).
       export CGO_ENABLED=0 GOTOOLCHAIN=local
       export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.27/bin"
       go build -trimpath -buildvcs=false \
         -ldflags "-s -w" \
-        -o manager ./cmd/main.go
+        -o manager ./cmd
       install -D -m 0755 manager "${{targets.destdir}}/manager"
 
   - runs: |
