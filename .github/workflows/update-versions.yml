@@ -49,9 +49,11 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Check upstream and open bump PRs
+        env:
+          ONLY_INPUT: ${{ inputs.only }}
         run: |
           set -uo pipefail
-          ONLY="${{ inputs.only }}"
+          ONLY="${ONLY_INPUT:-}"
           FAILED=0
 
           want() { # want <name> — honour the `only:` filter
