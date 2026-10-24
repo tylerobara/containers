@@ -26,6 +26,7 @@ base. **No Dockerfiles anywhere.**
 | FRRouting (BGP suite for Cilium/MetalLB) | `ghcr.io/tylerobara/containers/frr` | [`images/frr/`](images/frr/) |
 | Traefik (reverse proxy / ingress) | `ghcr.io/tylerobara/containers/traefik` | [`images/traefik/`](images/traefik/) |
 | Pocket ID (pocket-id, pocket-id-operator) | `ghcr.io/tylerobara/containers/pocket-id` (+ `-operator`) | [`images/pocket-id/`](images/pocket-id/) |
+| Flux (helm, kustomize, notification, source controllers) | `ghcr.io/tylerobara/containers/helm-controller` (+ `kustomize-controller`, `notification-controller`, `source-controller`) | [`images/flux/`](images/flux/) |
 
 Catalog + grype scan results: <https://tylerobara.github.io/containers/> — an
 Astro site (`site/`) with a page per image (specs, tags, advisories, cosign
@@ -34,7 +35,7 @@ build/scan data at `data/index.json`. See [`site/README.md`](site/README.md).
 
 ## CI
 
-One workflow per image family — `alpine-k8s.yml`, `cert-manager.yml`, `cilium.yml`, `cloudnative-pg-operator.yml`, `dokuwiki.yml`, `dozzle.yml`, `frr.yml`, `gatus.yml`, `grafana-image-renderer.yml`, `homepage.yml`, `k8s-sidecar.yml`, `kubernetes-reflector.yml`, `local-path-provisioner.yml`, `metallb.yml`, `openbao.yml`, `os-shell.yml`, `pocket-id.yml`, `postgres.yml`, `traefik.yml` — so a change to one image can never rebuild or cancel another.
+One workflow per image family — `alpine-k8s.yml`, `cert-manager.yml`, `cilium.yml`, `cloudnative-pg-operator.yml`, `dokuwiki.yml`, `dozzle.yml`, `frr.yml`, `gatus.yml`, `grafana-image-renderer.yml`, `homepage.yml`, `k8s-sidecar.yml`, `kubernetes-reflector.yml`, `local-path-provisioner.yml`, `metallb.yml`, `openbao.yml`, `os-shell.yml`, `pocket-id.yml`, `postgres.yml`, `traefik.yml`, `flux.yml` — so a change to one image can never rebuild or cancel another.
 Routing is the native `on.push.paths` filter: a bump PR/push rebuilds **only
 the image whose directory moved**; each workflow's daily schedule rebuilds just
 its own image (fresh Wolfi CVE patches), staggered 06:00/06:05/06:10/06:15/06:20/06:25/06:30/06:35/06:40/06:45/06:50/06:55/07:00/07:05/07:10/07:15/07:20/07:25/07:40 UTC.
