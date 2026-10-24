@@ -513,4 +513,50 @@ jobs:
             fi
           fi
 
+          # --- alpine-k8s: tracks upstream Kubernetes releases within the minor
+          # pinned in images/alpine-k8s/apko/alpine-k8s.yaml (kubectl-1.37) and
+          # bumps VERSION — image version == kubectl version, like the alpine/k8s
+          # tag it mirrors. Pure apko image: no melange config to bump, and the
+          # kubectl/helm/kustomize pins float inside their series via the lock.
+          # Minor bumps stay manual: Wolfi must ship kubectl-1.<newminor> first,
+          # then the apko package line moves with VERSION. ---
+          vf=images/alpine-k8s/VERSION
+          cur=$(tr -d '[:space:]' < "$vf")
+          series=${cur%.*}
+          latest=$(gh api "repos/kubernetes/kubernetes/git/matching-refs/tags/v${series}." \
+            --jq '.[].ref' | sed 's|refs/tags/||' \
+            | grep -E "^v${series}\.[0-9]+$" | sort -V | tail -1 | sed 's/^v//')
+          if [ -z "$latest" ]; then
+            echo "::error::alpine-k8s: no $series release found upstream"
+            FAILED=1
+          elif [ "$(printf '%s\n%s\n' "$cur" "$latest" | sort -V | tail -1)" != "$latest" ] || [ "$cur" = "$latest" ]; then
+            echo "alpine-k8s: already at or ahead of $latest, skip"
+          else
+            echo "$latest" > "$vf"
+            if [ "$(tr -d '[:space:]' < "$vf")" != "$latest" ]; then
+              echo "::error::alpine-k8s: VERSION edit did not land"
+              FAILED=1
+              git checkout -- "$vf"
+            else
+              branch="bump/alpine-k8s-$latest"
+              git switch -c "$branch"
+              git add "$vf"
+              git commit -m "chore(alpine-k8s): bump $cur -> $latest"
+              git push -f origin "$branch"
+              if [ -n "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+                echo "alpine-k8s: pushed update to existing PR for $branch"
+              else
+                gh pr create --head "$branch" --base main \
+                  --title "chore(alpine-k8s): bump $cur -> $latest" \
+                  --body "**alpine-k8s** \`$cur\` -> \`$latest\` (new kubernetes/kubernetes $series patch, detected by the update-versions bot).
+
+          - only file moved: \`images/alpine-k8s/VERSION\` (pure apko image — \`kubectl-1.37\`/\`helm-3\`/\`kustomize\` float inside their Wolfi series via the lock)
+
+          Bot PRs don't get automatic CI checks. To validate before merging, run **alpine-k8s.yml → Run workflow** with \`ref=$branch\` and **validate_only** checked: it builds, assembles and grype-scans this branch without publishing or signing anything. The merge push to main then republishes just this image."
+              fi
+              echo "alpine-k8s: opened/updated bump PR $cur -> $latest" >> "$GITHUB_STEP_SUMMARY"
+              git switch -C scratch-"$branch" origin/main >/dev/null 2>&1
+            fi
+          fi
+
           exit $FAILED
