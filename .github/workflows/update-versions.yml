@@ -484,6 +484,9 @@ jobs:
             bump_row gatus "$yaml" "$latest" \
               "https://github.com/TwiN/gatus/archive/refs/tags/v${latest}.tar.gz" \
               gatus
+          fi
+
+
           # --- kubernetes-reflector: releases/latest is a vX.Y.Z GitVersion tag ---
           if want kubernetes-reflector; then
             latest=$(gh api repos/emberstack/kubernetes-reflector/releases/latest --jq '.tag_name | ltrimstr("v")')
