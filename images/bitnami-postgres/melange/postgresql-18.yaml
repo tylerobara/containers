@@ -1,0 +1,193 @@
+# Melange build for PostgreSQL 18 with the Bitnami OSS layout: PGDG source
+# compiled --prefix=/opt/bitnami/postgresql + the sha-pinned legacy
+# bitnami/containers script tree (bitnami/postgresql/18/debian-12 rootfs +
+# prebuildfs), so the image reproduces the Bitnami chart contract —
+# /opt/bitnami/postgresql/{bin,lib,share,conf,conf.default,logs,tmp},
+# /opt/bitnami/scripts/**, /bitnami/postgresql volume, /docker-entrypoint-initdb.d.
+# PG18 dropped the autotools build system, so this major uses meson.
+#
+# melange pipelines run as root (no environment.accounts.runAs), so the
+# pipeline installs into the container's REAL /opt and runs Bitnami's own
+# postunpack.sh UNMODIFIED (conf.default, log symlinks, g+rwX) — the scripts
+# are byte-identical to upstream's, sha256-pinned tarball rather than vendored
+# copy (repo convention; melange v0.63 has no local-file 'copier' pipeline).
+#
+# Bump `version` + `vars.sha256` on each PGDG minor (the update-versions bot
+# does this); vars.bitnami_* only change on an intentional script-tree move —
+# see ../README.md for the provenance table.
+
+package:
+  name: postgresql-18
+  version: 18.6
+  epoch: 100
+  description: "PostgreSQL 18 built from PGDG source with the Bitnami OSS script layout"
+  copyright:
+    - license: PostgreSQL
+
+vars:
+  # SHA256 of the PGDG source tarball
+  sha256: 555610c24d53e4316da5b7d3fc25c279d96856d5e0e23ee308c328c5fa881d9f
+  # bitnami/containers commit + tarball SHA256 of the pinned script tree
+  bitnami_commit: 172ef0946b1520af18db2fdf215a2f95d0ddd758
+  bitnami_sha256: be62b7a933ce18d2f8525ad4c78130e8d4c4d1bb3b150b317ea1335625ead6bd
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - build-base
+      - curl
+      - bison
+      - flex
+      - perl
+      - meson
+      - ninja-build
+      - pkgconf
+      - bash
+      # --with-* / -D feature flags need these dev packages:
+      - openssl-dev
+      - icu-dev
+      - libxml2-dev
+      - libxslt-dev
+      - zstd-dev
+      - zlib-dev
+      - lz4-dev
+      - krb5-dev
+      - openldap-2.6-dev
+      - readline-dev
+      - ncurses-dev
+      - util-linux-dev
+      - linux-pam-dev
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      # PGDG mirrors occasionally 403 bursts; retry like the minimal repo does.
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://ftp.postgresql.org/pub/source/v${{package.version}}/postgresql-${{package.version}}.tar.bz2" \
+        -o /home/build/postgresql.tar.gz
+      echo "${{vars.sha256}}  /home/build/postgresql.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf postgresql.tar.gz
+      rm postgresql.tar.gz
+
+  - runs: |
+      # Bitnami legacy script tree, sha-pinned (codeload per-commit archive;
+      # same URL class every other config here uses for GitHub tarballs).
+      mkdir -p /home/build/bitnami
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://codeload.github.com/bitnami/containers/tar.gz/${{vars.bitnami_commit}}" \
+        -o /home/build/bitnami/containers.tar.gz
+      echo "${{vars.bitnami_sha256}}  /home/build/bitnami/containers.tar.gz" | sha256sum -c -
+
+  - working-directory: /home/build/postgresql-${package.version}
+    runs: |
+      meson setup build \
+        -Dprefix=/opt/bitnami/postgresql \
+        -Dsysconfdir=/opt/bitnami/postgresql/conf \
+        -Dbindir=/opt/bitnami/postgresql/bin \
+        -Dlibdir=/opt/bitnami/postgresql/lib \
+        -Dicu=enabled \
+        -Dssl=openssl \
+        -Dlibxml=enabled \
+        -Dlibxslt=enabled \
+        -Dlz4=enabled \
+        -Dzstd=enabled \
+        -Dldap=enabled \
+        -Dgssapi=enabled \
+        -Dpam=enabled \
+        -Duuid=e2fs \
+        -Dreadline=enabled \
+        -Ddocs=disabled \
+        -Dsystem_tzdata=/usr/share/zoneinfo
+      meson compile -C build
+
+  - working-directory: /home/build/postgresql-${package.version}
+    runs: |
+      # Pipelines run as root: install into the container's REAL /opt (no
+      # DESTDIR) so the bitnami scripts' absolute paths work unmodified; the
+      # package tree is assembled from /opt below.
+      meson install -C build
+      # Drop pure-build artifacts (CNPG rationale): server-side PGXS, static
+      # libs, headers, pkgconfig. lib/postgresql/*.so stay — loadable modules.
+      rm -rf /opt/bitnami/postgresql/include \
+             /opt/bitnami/postgresql/lib/postgresql/pgxs \
+             /opt/bitnami/postgresql/lib/pkgconfig
+      find /opt/bitnami/postgresql/lib -name '*.a' -delete
+      rm -f /opt/bitnami/postgresql/lib/libpq.so
+      # postgresql_create_config + initdb read the sample from $(datadir).
+      test -f /opt/bitnami/postgresql/share/postgresql.conf.sample
+
+  - runs: |
+      # Bitnami script tree from the sha-pinned legacy (pre-BSI) container
+      # definition in bitnami/containers. Full extract + cp (not tar patterns):
+      # the build container's busybox tar cannot be trusted on glob patterns.
+      mkdir -p /home/build/bitnami/x
+      tar xzf /home/build/bitnami/containers.tar.gz -C /home/build/bitnami/x
+      B=/home/build/bitnami/x/containers-${{vars.bitnami_commit}}/bitnami/postgresql/18/debian-12
+      cp -a "$B/prebuildfs/." /   # libs (libbitnami/libos/...) + /usr/sbin/run-script
+      cp -a "$B/rootfs/." /       # app scripts (postgresql/*, libpostgresql.sh)
+
+      # busybox hostname has no --fqdn (only -f) but postgresql-env.sh calls
+      # `hostname --fqdn` on every source; the scripts prepend common/bin to
+      # PATH, so shim it there — build-side and runtime-side, one copy ships.
+      mkdir -p /opt/bitnami/common/bin
+      cat > /opt/bitnami/common/bin/hostname <<'SHIM'
+      #!/bin/sh
+      for a in "$@"; do
+        [ "$a" = "--fqdn" ] && exec /usr/bin/busybox hostname -f
+      done
+      exec /usr/bin/busybox hostname "$@"
+      SHIM
+      chmod 755 /opt/bitnami/common/bin/hostname
+
+      # postunpack's trailing `ensure_user_exists postgres --uid 26 --system`
+      # must no-op without an adduser in the build container: pre-seed the
+      # account (this /etc/passwd is the build rootfs's own; the image gets
+      # its passwd entries from apko accounts instead).
+      grep -q '^postgres:' /etc/passwd || echo 'postgres:x:26:26:PostgreSQL:/bitnami/postgresql:/bin/false' >> /etc/passwd
+      grep -q '^postgres:' /etc/group  || echo 'postgres:x:26:' >> /etc/group
+
+      # Run Bitnami's OWN postunpack as root: creates conf(+conf.d)/
+      # conf.default/logs/tmp/volume dirs, generates postgresql.conf from the
+      # $(datadir) sample with include_dir, writes the trust pg_hba.conf,
+      # chmods g+rwX, symlinks the log files to /dev/stdout.
+      /opt/bitnami/scripts/postgresql/postunpack.sh
+      test -f /opt/bitnami/postgresql/conf.default/postgresql.conf
+      test -f /opt/bitnami/postgresql/conf.default/pg_hba.conf
+      grep -q include_dir /opt/bitnami/postgresql/conf.default/postgresql.conf
+
+  - runs: |
+      D="${{targets.destdir}}"
+      install -d -m 755 "$D/opt" "$D/usr/sbin" "$D/docker-entrypoint-preinitdb.d"
+      # melange writes the apk SBOM host-side, but the container's uid owns
+      # everything the pipeline mkdirs; pre-create the leaf 0777 (dokuwiki
+      # lesson) so the host melange can drop var/lib/db/sbom/*.spdx.json.
+      install -d -m 755 "$D/var/lib/db/sbom"
+      chmod 0777 "$D/var/lib/db/sbom"
+      cp -a /opt/bitnami "$D/opt/"
+      cp -a /usr/sbin/run-script "$D/usr/sbin/run-script"
+      # Bitnami's own final pass (Dockerfile: chmod g+rwX /opt/bitnami) so any
+      # arbitrary uid can use the tree, OpenShift-style.
+      chmod -R g+rwX "$D/opt/bitnami"
+
+  - runs: |
+      D="${{targets.destdir}}"
+      export LD_LIBRARY_PATH=/opt/bitnami/postgresql/lib
+      /opt/bitnami/postgresql/bin/postgres --version | grep -q "${{package.version}}"
+      /opt/bitnami/postgresql/bin/psql --version | grep -q "${{package.version}}"
+      /opt/bitnami/postgresql/bin/pg_isready --version | grep -q "${{package.version}}"
+      test -x "$D/opt/bitnami/scripts/postgresql/entrypoint.sh"
+      test -x "$D/opt/bitnami/scripts/postgresql/setup.sh"
+      test -x "$D/opt/bitnami/scripts/libpostgresql.sh"
+      test -x "$D/usr/sbin/run-script"
+      test -x "$D/opt/bitnami/common/bin/hostname"
+      test -L "$D/opt/bitnami/postgresql/logs/postgresql.log"
+      test -d "$D/bitnami/postgresql"
+      test -d "$D/docker-entrypoint-initdb.d"
+      test -d "$D/docker-entrypoint-preinitdb.d"

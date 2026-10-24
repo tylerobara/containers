@@ -1,0 +1,82 @@
+# repmgr 18 for the bitnami-postgres images, built from EnterpriseDB
+# source via PGXS against Wolfi's postgresql-18 server headers.
+#
+# Why not Wolfi's repmgr-18 (where it exists at all): it installs into
+# /usr/lib/postgresql18/, a layout the /opt-prefixed server here cannot
+# load. Same reason as pgaudit — see ../README.md. repmgr ships as the Bitnami
+# compatibility package (the pinned script tree itself uses NATIVE streaming
+# replication and never runs repmgr); the extension files land in the /opt
+# server's $libdir/$sharedir so CREATE EXTENSION repmgr works.
+#
+# Bump manually: https://github.com/EnterpriseDB/repmgr/tags (5.5.0 is the
+# current release; the update-versions bot only bumps the postgresql configs).
+
+package:
+  name: repmgr-18
+  version: 5.5.0
+  epoch: 100
+  description: "repmgr for PostgreSQL 18, bitnami /opt layout"
+  copyright:
+    - license: GPL-3.0-only
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the GitHub source tarball
+  sha256: 73504f5281e2918151ac906d4ae29479e343b28003270a7eddc282800f1b3f84
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - build-base
+      - ca-certificates-bundle
+      - curl-dev
+      - json-c-dev
+      - postgresql-18
+      - postgresql-18-dev
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/EnterpriseDB/repmgr/archive/refs/tags/v${package.version}.tar.gz" \
+        -o /home/build/repmgr.tar.gz
+      echo "${vars.sha256}  /home/build/repmgr.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf repmgr.tar.gz
+      rm repmgr.tar.gz
+
+  - working-directory: /home/build/repmgr-${package.version}
+    runs: |
+      # PG_CONFIG: /usr/bin/pg_config ships with wolfi's postgresql-18;
+      # headers come from postgresql-18-dev. The extension .so loads from
+      # the SERVER's $libdir at runtime (our /opt tree), so a wolfi-headers
+      # build is fine.
+      make USE_PGXS=1 PG_CONFIG=/usr/bin/pg_config -j"$(nproc)"
+      make install USE_PGXS=1 PG_CONFIG=/usr/bin/pg_config
+      # Re-home the PGXS install (root container) into the bitnami layout:
+      # binaries to /opt/bitnami/repmgr/bin (where bitnami kept them), the
+      # extension bits into the /opt server's dirs (shared with the
+      # postgresql-18 package — apk allows that, like contrib modules).
+      D="${targets.destdir}"
+      install -d -m 755 "$D/opt/bitnami/repmgr/bin" \
+                        "$D/opt/bitnami/postgresql/lib/postgresql" \
+                        "$D/opt/bitnami/postgresql/share/extension"
+      install -d -m 755 "$D/var/lib/db/sbom"
+      chmod 0777 "$D/var/lib/db/sbom"
+      mv /usr/bin/repmgr* "$D/opt/bitnami/repmgr/bin/"
+      find /usr/lib/postgresql* -name 'repmgr.so' -exec mv {} "$D/opt/bitnami/postgresql/lib/postgresql/" \;
+      find /usr/share/postgresql* \( -name 'repmgr--*.sql' -o -name 'repmgr.control' \) \
+        -exec mv {} "$D/opt/bitnami/postgresql/share/extension/" \;
+      test -x "$D/opt/bitnami/repmgr/bin/repmgr"
+      test -x "$D/opt/bitnami/repmgr/bin/repmgrd"
+      test -f "$D/opt/bitnami/postgresql/lib/postgresql/repmgr.so"
+      test -f "$D/opt/bitnami/postgresql/share/extension/repmgr.control"
+      # runtime sanity against the build container's wolfi libpq
+      LD_LIBRARY_PATH=/usr/lib "$D/opt/bitnami/repmgr/bin/repmgr" --version \
+        | grep -q "${package.version}"
