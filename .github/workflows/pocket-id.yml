@@ -1,0 +1,292 @@
+name: pocket-id
+
+# Builds + publishes the pocket-id family (pocket-id, pocket-id-operator):
+# each binary built from its own upstream release tarball by melange with
+# upstream's exact build contract (pocket-id: pnpm/vite-plus frontend build +
+# the embedded-Frontend Go build; operator: CGO_ENABLED=0 go build ./cmd),
+# assembled by apko on Wolfi (no Dockerfile). One workflow per image family;
+# routing is the native on.push.paths filter. Unlike cert-manager's trio, the
+# two images have separate upstream repos + version lines, so they bump (and
+# can drift) independently — the version guard only sanity-checks the format.
+# cosign identity = THIS file:
+#   cosign verify \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#     --certificate-identity-regexp '^https://github.com/tylerobara/containers/\.github/workflows/pocket-id\.yml@refs/heads/main$' \
+#     ghcr.io/tylerobara/containers/pocket-id:<tag>
+# PRs run everything except publish/sign/pages; validate a bot bump PR via
+# workflow_dispatch (ref = bump branch, validate_only checked).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - images/pocket-id/**
+      - .github/workflows/pocket-id.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - images/pocket-id/**
+      - .github/workflows/pocket-id.yml
+  schedule:
+    - cron: '5 7 * * *' # daily, staggered after k8s-sidecar (06:45)
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Ref to build (defaults to the branch dispatched from). Use a bump-PR branch to validate it."
+        required: false
+        default: ""
+      validate_only:
+        description: "Build + scan without publishing/signing/deploying pages"
+        type: boolean
+        default: false
+
+concurrency:
+  group: pocketid-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+
+env:
+  MELANGE_VERSION: v0.63.0
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  keygen:
+    runs-on: ubuntu-latest
+    outputs:
+      pub: ${{ steps.k.outputs.pub }}
+      priv: ${{ steps.k.outputs.priv }}
+    steps:
+      - name: Install melange
+        run: go install chainguard.dev/melange@${{ env.MELANGE_VERSION }}
+
+      - name: Generate key
+        id: k
+        run: |
+          ~/go/bin/melange keygen
+          { echo "pub=$(base64 -w0 melange.rsa.pub)"; echo "priv=$(base64 -w0 melange.rsa)"; } >> "$GITHUB_OUTPUT"
+
+  melange:
+    needs: keygen
+    if: ${{ !cancelled() && needs.keygen.result == 'success' }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90 # pnpm install + SvelteKit build + two cold `go build`s
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Install melange
+        run: go install chainguard.dev/melange@${{ env.MELANGE_VERSION }}
+
+      - name: Restore signing key
+        run: |
+          echo '${{ needs.keygen.outputs.priv }}' | base64 -d > melange.rsa && chmod 600 melange.rsa
+          echo '${{ needs.keygen.outputs.pub }}' | base64 -d > melange.rsa.pub
+
+      - name: Build pocket-id packages (${{ matrix.arch }})
+        run: |
+          for cfg in pocket-id pocket-id-operator; do
+            ~/go/bin/melange build "images/pocket-id/melange/$cfg.yaml" \
+              --arch ${{ matrix.arch }} \
+              --signing-key melange.rsa \
+              --out-dir ./packages \
+              --runner docker
+          done
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packages-pocketid-${{ matrix.arch }}
+          path: |
+            packages/
+            melange.rsa.pub
+
+  build:
+    needs: [keygen, melange]
+    if: ${{ !cancelled() && needs.keygen.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # only for cosign keyless below
+    strategy:
+      fail-fast: false
+      matrix:
+        img: [pocket-id, pocket-id-operator]
+    env:
+      IMG: ${{ matrix.img }}
+      IMAGE: ghcr.io/${{ github.repository }}/${{ matrix.img }}
+      PUBLISH: ${{ github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.validate_only != true) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: packages-pocketid-*
+          path: .
+          merge-multiple: true
+
+      - name: Resolve pinned versions + version guard
+        run: |
+          set -eu
+          pkgver() { awk -v k=version '/^  version:/{print $2; exit}' "$1"; }
+          pkgepoch() { awk -v k=epoch '/^  epoch:/{print $2; exit}' "$1"; }
+          PV=$(pkgver images/pocket-id/melange/pocket-id.yaml);          PE=$(pkgepoch images/pocket-id/melange/pocket-id.yaml)
+          OV=$(pkgver images/pocket-id/melange/pocket-id-operator.yaml); OE=$(pkgepoch images/pocket-id/melange/pocket-id-operator.yaml)
+          for v in "$PV" "$OV"; do
+            case "$v" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "bad version '$v'"; exit 1 ;; esac
+          done
+          # Separate upstream repos (pocket-id/pocket-id vs
+          # aclerici38/pocket-id-operator) with independent version lines, so
+          # there is no cross-image lockstep guard — only the format check.
+
+          case "$IMG" in
+            pocket-id)          VER=$PV; LOCK=images/pocket-id/apko/pocket-id.yaml
+                                GUARD="pocket-id=$PV-r$PE" ;;
+            pocket-id-operator) VER=$OV; LOCK=images/pocket-id/apko/pocket-id-operator.yaml
+                                GUARD="pocket-id-operator=$OV-r$OE" ;;
+          esac
+          { echo "VER=$VER"
+            echo "MINOR=$(echo "$VER" | cut -d. -f1,2)"; } >> "$GITHUB_ENV"
+
+          docker run --rm --user root \
+            -v "$PWD:/work" \
+            cgr.dev/chainguard/apko lock "/work/$LOCK" \
+              --arch x86_64 --arch aarch64 \
+              --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
+              --output /work/img.lock.json
+          for g in $GUARD; do
+            name=${g%%=*}; want=${g#*=}
+            RESOLVED=$(jq -r --arg n "$name" '.contents.packages[] | select(.name==$n) | .version' img.lock.json | head -1)
+            # exact pkgver match or our melange package lost resolution to Wolfi
+            if [ "$RESOLVED" != "$want" ]; then
+              echo "apko resolved $name as '$RESOLVED', expected '$want'"; exit 1
+            fi
+          done
+
+      - name: Log in to ghcr
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Publish multi-arch ${{ matrix.img }} image to ghcr
+        if: env.PUBLISH == 'true'
+        run: |
+          cfg="images/pocket-id/apko/$IMG.yaml"
+          for i in 1 2 3; do
+            if docker run --rm --user root \
+              -v "$PWD:/work:ro" \
+              -v "$HOME/.docker:/root/.docker:ro" \
+              cgr.dev/chainguard/apko publish "/work/$cfg" \
+                "$IMAGE:$VER" "$IMAGE:$MINOR" "$IMAGE:latest" \
+                --arch x86_64,aarch64 \
+                --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
+                --lockfile /work/img.lock.json; then
+              break
+            fi
+            [ "$i" = 3 ] && { echo "apko publish failed after 3 attempts"; exit 1; }
+            echo "publish attempt $i failed; retrying in 15s"; sleep 15
+          done
+          echo "IMG_REF=$IMAGE:$VER" >> "$GITHUB_ENV"
+          echo "GRYPE_SRC=registry:$IMAGE:$VER" >> "$GITHUB_ENV"
+
+      - name: Build image locally (validate-only, no registry)
+        if: env.PUBLISH != 'true'
+        run: |
+          docker run --rm --user root \
+            -v "$PWD:/work" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            cgr.dev/chainguard/apko publish "/work/images/pocket-id/apko/$IMG.yaml" \
+              "img:validate" \
+              --arch x86_64 \
+              --local \
+              --repository-append /work/packages --keyring-append /work/melange.rsa.pub
+          echo "IMG_REF=img:validate" >> "$GITHUB_ENV"
+          echo "GRYPE_SRC=docker:img:validate" >> "$GITHUB_ENV"
+
+      - name: Smoke test image
+        run: |
+          [ "$PUBLISH" = true ] && docker pull --platform linux/amd64 "$IMG_REF"
+          IMAGE="$IMG_REF" VERSION="$VER" ./images/pocket-id/test.sh "$IMG"
+
+      - name: Scan image with grype
+        id: scan
+        run: |
+          mkdir -p scans
+          docker run --rm --user 0:0 \
+            -v "$PWD/scans:/out" \
+            -v "$HOME/.docker:/root/.docker:ro" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            ghcr.io/anchore/grype:latest "$GRYPE_SRC" \
+              --output json --file "/out/$IMG.json" || true
+          # Same signing gate as every other image here: any Low+ finding blocks.
+          LOWPLUS=$(jq '[.matches[] | select(.vulnerability.severity
+                     | IN("Low","Medium","High","Critical"))] | length' "scans/$IMG.json")
+          echo "lowplus=$LOWPLUS" >> "$GITHUB_OUTPUT"
+          echo "$IMG Low+ findings: $LOWPLUS" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Sign with cosign (only when scan has 0 Low+ findings)
+        if: env.PUBLISH == 'true' && steps.scan.outputs.lowplus == '0'
+        run: |
+          DIGEST=$(docker buildx imagetools inspect "$IMG_REF" \
+            --format '{{json .Manifest}}' | jq -r .digest)
+          docker run --rm --user 0:0 \
+            -v "$HOME/.docker:/root/.docker:ro" \
+            -e DOCKER_CONFIG=/root/.docker \
+            -e GITHUB_ACTIONS \
+            -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+            ghcr.io/sigstore/cosign/cosign:latest sign --yes "$IMG_REF@$DIGEST"
+          echo "SIGNED=true" >> "$GITHUB_ENV"
+
+      - name: Build pages data
+        if: env.PUBLISH == 'true'
+        run: |
+          DIGEST=$(docker buildx imagetools inspect "$IMG_REF" \
+            --format '{{json .Manifest}}' | jq -r .digest)
+          jq -n \
+            --arg image "$IMAGE" --arg version "$VER" \
+            --arg digest "$DIGEST" --arg built "$(date -u +%FT%TZ)" \
+            --arg tags "$VER $MINOR latest" \
+            --arg built_with melange --argjson signed "${SIGNED:-false}" \
+            --arg signed_by pocket-id.yml \
+            --slurpfile scan "scans/$IMG.json" \
+            '{image: $image, major: null, version: $version,
+              tags: ($tags | split(" ")), digest: $digest, built: $built, built_with: $built_with,
+              signed: $signed, signed_by: $signed_by,
+              scan: $scan[0]}' > "scans/$IMG.json.tmp"
+          mv "scans/$IMG.json.tmp" "scans/$IMG.json"
+
+      - uses: actions/upload-artifact@v7
+        if: env.PUBLISH == 'true'
+        with:
+          name: pages-data-pocketid-${{ matrix.img }}
+          path: scans/*.json
+
+  pages:
+    # Merge this run's fresh entries over the live index (sibling entries are
+    # preserved, keyed on image+major with fresh entries winning), rebuild the
+    # Astro site and deploy — see site.yml.
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    needs: [build]
+    permissions:
+      contents: write # push the generated gh-pages branch
+    uses: ./.github/workflows/site.yml
+    with:
+      artifact-pattern: pages-data-pocketid-*
+      ref: ${{ inputs.ref || github.ref }}

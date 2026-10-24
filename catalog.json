@@ -236,7 +236,7 @@
       "category": "Base & Utilities",
       "primary_package": null,
       "upstream_url": "https://github.com/bitnami/containers/tree/main/bitnami/os-shell",
-      "summary": "Nonroot helper shell for init containers — a bitnami os-shell counterpart.",
+      "summary": "Nonroot helper shell for init containers \u2014 a bitnami os-shell counterpart.",
       "description": "A tiny nonroot helper image with bash, curl, jq and yq for Kubernetes init containers, sidecars and one-off shell tasks, assembled by apko from Wolfi packages only."
     },
     {
@@ -248,7 +248,7 @@
       "category": "Apps",
       "primary_package": "k8s-sidecar",
       "upstream_url": "https://github.com/kiwigrid/k8s-sidecar",
-      "summary": "kiwigrid/k8s-sidecar (Grafana dashboards sidecar) built from source; Wolfi’s package is stale.",
+      "summary": "kiwigrid/k8s-sidecar (Grafana dashboards sidecar) built from source; Wolfi\u2019s package is stale.",
       "description": "The Grafana dashboard sidecar that syncs ConfigMaps/Secrets to files, built from the upstream release tarball into a self-contained venv and assembled by apko on Wolfi. Drop-in for ghcr.io/kiwigrid/k8s-sidecar: USER 65534, same entrypoint and CLI contract."
     },
     {
@@ -298,6 +298,30 @@
       "upstream_url": "https://traefik.io",
       "summary": "Traefik reverse proxy / ingress controller, built from upstream source.",
       "description": "The Traefik reverse proxy and Kubernetes ingress controller, compiled from the upstream release tarball by melange (static Go binary, upstream release ldflags) and assembled by apko on Wolfi. Dashboard UI assets not embedded; API and ping endpoints unaffected."
+    },
+    {
+      "name": "pocket-id",
+      "display_name": "Pocket ID",
+      "dir": "pocket-id",
+      "apko": "pocket-id.yaml",
+      "workflow": "pocket-id.yml",
+      "category": "Security & Secrets",
+      "primary_package": "pocket-id",
+      "upstream_url": "https://github.com/pocket-id/pocket-id",
+      "summary": "Pocket ID passkey OIDC provider, built from upstream source.",
+      "description": "Pocket ID, the simple OIDC provider that authenticates users with their passkeys. The Go binary \u2014 with the SvelteKit frontend embedded \u2014 is built from the upstream release tarball by melange; the image is assembled by apko on Wolfi."
+    },
+    {
+      "name": "pocket-id-operator",
+      "display_name": "Pocket ID operator",
+      "dir": "pocket-id",
+      "apko": "pocket-id-operator.yaml",
+      "workflow": "pocket-id.yml",
+      "category": "Security & Secrets",
+      "primary_package": "pocket-id-operator",
+      "upstream_url": "https://github.com/aclerici38/pocket-id-operator",
+      "summary": "Pocket ID Kubernetes operator, built from upstream source.",
+      "description": "The Pocket ID operator that reconciles instances, users, groups and OIDC clients from CRDs, compiled from the upstream release tarball by melange and assembled by apko on Wolfi. Same /manager entrypoint and nonroot uid as upstream's image."
     }
   ]
 }

@@ -1,0 +1,90 @@
+# Melange build for the Pocket ID operator
+# (github.com/aclerici38/pocket-id-operator), from the release tarball with
+# upstream's exact build contract (its Dockerfile builder stage, as the ./cmd
+# package dir): CGO_ENABLED=0 go build -o manager ./cmd — a standard
+# kubebuilder / controller-runtime manager, no ldflag stamps (upstream passes
+# none, so there is no version banner to reproduce). Upstream COPYs the static
+# binary onto
+# distroless/static as /manager with USER 65532 and ENTRYPOINT ["/manager"];
+# /manager is not cosmetic — the upstream helm chart hardcodes
+# `command: [/manager]`, so the path stays for chart drop-in compatibility.
+#
+# Separate upstream repo + version line from pocket-id itself, so this config
+# bumps independently (the update-versions bot gives it its own row).
+
+package:
+  name: pocket-id-operator
+  version: 0.15.0
+  epoch: 100
+  description: "Pocket ID Kubernetes operator built from upstream source"
+  copyright:
+    - license: Apache-2.0
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the GitHub release tarball
+  sha256: 731000bc9fb6ce790323a940b4e38da3f2489ee9b8e5380523312538171ba83b
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      # go.mod wants go 1.27.1 (upstream builds with golang:1.27.1);
+      # Wolfi go-1.27 is 1.27.3.
+      - go-1.27
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/aclerici38/pocket-id-operator/archive/refs/tags/v${{package.version}}.tar.gz" \
+        -o /home/build/pio.tar.gz
+      echo "${{vars.sha256}}  /home/build/pio.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf pio.tar.gz && rm pio.tar.gz
+
+  - working-directory: /home/build/pocket-id-operator-${{package.version}}
+    runs: |
+      # No vendor/ in the tarball, so modules resolve from the network (same
+      # as the metallb / cert-manager legs). Upstream adds `-a` (force
+      # rebuild) for its Docker layer-cache; meaningless on a cold melange
+      # build, so it is dropped. -trimpath + reproducible-build flags follow
+      # the repo-wide Go contract instead. Built as the ./cmd package dir
+      # rather than upstream's ./cmd/main.go file argument: identical
+      # artifact, but Go records the module in the binary's build info
+      # (file-argument builds embed path=command-line-arguments instead,
+      # which would hide the app from grype).
+      export CGO_ENABLED=0 GOTOOLCHAIN=local
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.27/bin"
+      go build -trimpath -buildvcs=false \
+        -ldflags "-s -w" \
+        -o manager ./cmd
+      install -D -m 0755 manager "${{targets.destdir}}/manager"
+
+  - runs: |
+      # No --version flag and no version ldflags upstream, so assert identity
+      # two ways: the flag surface is this repo's main.go (probe/metrics
+      # addresses + the controller-runtime zap flags), and the manager gets
+      # past flag parsing to the API-server step before dying on the missing
+      # in-cluster config.
+      # stdlib flag usage prints single-dash names (-health-probe-bind-address)
+      out=$("${{targets.destdir}}/manager" --help 2>&1 || true)
+      echo "$out" | grep -q "health-probe-bind-address" \
+        || { echo "/manager does not expose the expected flag surface"; exit 1; }
+      out=$(timeout 60 "${{targets.destdir}}/manager" --metrics-bind-address=0 2>&1 || true)
+      echo "$out"
+      echo "$out" | grep -qiE "in-cluster|no configuration has been provided|unable to start manager" \
+        || { echo "/manager never reached its API-server step"; exit 1; }
+      # grype reads Go deps from the embedded build info — assert the build
+      # really is this module (and not a stale/foreign binary).
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.27/bin"
+      go version -m "${{targets.destdir}}/manager" \
+        | awk -F'\t' '$2=="mod" && $3=="github.com/aclerici38/pocket-id-operator"{f=1} END{exit !f}' \
+        || { echo "binary build info lacks the pocket-id-operator module"; exit 1; }

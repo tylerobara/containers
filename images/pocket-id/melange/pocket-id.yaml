@@ -1,0 +1,99 @@
+# Melange build for Pocket ID (github.com/pocket-id/pocket-id), from the
+# release tarball with upstream's own two-stage build contract
+# (docker/Dockerfile): pnpm + vite-plus compile the SvelteKit frontend into
+# backend/frontend/dist, which the Go binary embeds
+# (backend/frontend/frontend_included.go: //go:embed all:dist/*), then
+# CGO_ENABLED=0 go build with -trimpath, -w -s, -buildid=<version> and the
+# -X internal/common.Version stamp (see .goreleaser.yaml). Upstream ships that
+# static binary on distroless/static (docker/Dockerfile-distroless,
+# ghcr.io/pocket-id/pocket-id:v<X>-distroless); here that base is the apko
+# config (busybox + ca-certificates on Wolfi).
+#
+# Bump `version` + `vars.sha256` on each release
+# (https://github.com/pocket-id/pocket-id/releases) — the update-versions bot
+# covers this row. pocket-id-operator is a separate upstream repo
+# (github.com/aclerici38/pocket-id-operator) with its own version line, so the
+# two configs do NOT move together.
+
+package:
+  name: pocket-id
+  version: 2.18.0
+  epoch: 100
+  description: "Pocket ID passkey OIDC provider built from upstream source"
+  copyright:
+    - license: BSD-2-Clause
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the GitHub release tarball
+  sha256: a5a3c6c1fa81151073f3c3876fd591e13879a2479c665dc747d1765946bef657
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      # Frontend toolchain, same pattern as Wolfi's own dkron recipe: upstream
+      # .node-version is 24 and packageManager pins pnpm@11.28.3, which
+      # corepack fetches from the npm registry. npm is needed for the npx the
+      # workspaces' `npx only-allow pnpm` preinstall hook runs.
+      - corepack
+      - nodejs-24
+      - npm
+      # backend/go.mod wants go 1.27.1; Wolfi go-1.27 is 1.27.3.
+      - go-1.27
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/pocket-id/pocket-id/archive/refs/tags/v${{package.version}}.tar.gz" \
+        -o /home/build/pi.tar.gz
+      echo "${{vars.sha256}}  /home/build/pi.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf pi.tar.gz && rm pi.tar.gz
+
+  - working-directory: /home/build/pocket-id-${{package.version}}
+    runs: |
+      # Stage 1 (upstream frontend-builder): frozen-lockfile install of the
+      # pnpm workspace, then `vp build` (vite-plus, a frontend devDependency)
+      # with the adapter-static default pages dir — vite.config.ts uses
+      # `process.env.BUILD_OUTPUT_PATH ?? '../backend/frontend/dist'`, i.e.
+      # exactly the tree //go:embed reads, so BUILD_OUTPUT_PATH stays unset.
+      export HOME=/home/build COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+      corepack enable pnpm
+      pnpm install --frozen-lockfile
+      pnpm -C frontend run build
+      # go:embed would fail the build on an empty tree anyway; fail here too,
+      # with a message that points at the frontend stage and not at Go.
+      test -f backend/frontend/dist/index.html
+      [ "$(find backend/frontend/dist/_app/immutable -type f | wc -l)" -ge 10 ] \
+        || { echo "frontend bundle looks incomplete"; exit 1; }
+
+  - working-directory: /home/build/pocket-id-${{package.version}}/backend/cmd
+    runs: |
+      # Stage 2 (upstream backend-builder / goreleaser): plain `go build` of
+      # ./cmd from the backend module. No vendor/ in the tarball, so modules
+      # resolve from the network (same as the cilium/metallb loops). SQLite is
+      # pure Go (modernc.org via gorm), so CGO_ENABLED=0 needs nothing extra.
+      export CGO_ENABLED=0 GOTOOLCHAIN=local
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.27/bin"
+      go build -trimpath -buildvcs=false \
+        -ldflags "-w -s -buildid=${{package.version}} \
+          -X github.com/pocket-id/pocket-id/backend/internal/common.Version=${{package.version}}" \
+        -o pocket-id .
+      install -D -m 0755 pocket-id "${{targets.destdir}}/usr/bin/pocket-id"
+
+  - runs: |
+      # Assert what we ship: the ldflag stamp, not the "unknown" default. The
+      # version subcommand is on common.shouldSkipEnvValidation's allow list,
+      # so this needs no ENCRYPTION_KEY / DB.
+      "${{targets.destdir}}/usr/bin/pocket-id" version \
+        | grep -qx "pocket-id ${{package.version}}" \
+        || { echo "pocket-id version does not report ${{package.version}}"; exit 1; }
