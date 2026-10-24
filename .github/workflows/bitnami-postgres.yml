@@ -277,7 +277,7 @@ jobs:
       - name: Publish multi-arch image to ghcr
         if: env.PUBLISH == 'true'
         run: |
-          M=$PG_MAJOR V=$PG_FULL
+          M=$PG_MAJOR
           TAG_ARGS=()
           for t in $TAGS; do TAG_ARGS+=("$IMAGE:$t"); done
           # ghcr intermittently 500s on publish (nested-package creation race) —

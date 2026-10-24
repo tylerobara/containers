@@ -8,6 +8,7 @@ base. **No Dockerfiles anywhere.**
 | Image | Registry | Source |
 |---|---|---|
 | PostgreSQL 15–18 (PGDG source) | `ghcr.io/tylerobara/containers/cnpg-postgres` | [`images/cloudnative-pg/`](images/cloudnative-pg/) |
+| Bitnami-compatible PostgreSQL 15–18 (PGDG source + pinned Bitnami scripts) | `ghcr.io/tylerobara/containers/bitnami-postgres` | [`images/bitnami-postgres/`](images/bitnami-postgres/) |
 | CloudNativePG operator | `ghcr.io/tylerobara/containers/cloudnative-pg` | [`images/cloudnative-pg-operator/`](images/cloudnative-pg-operator/) |
 | OpenBao | `ghcr.io/tylerobara/containers/openbao` | [`images/openbao/`](images/openbao/) |
 | os-shell (bitnami os-shell counterpart) | `ghcr.io/tylerobara/containers/os-shell` | [`images/os-shell/`](images/os-shell/) |
@@ -35,10 +36,10 @@ build/scan data at `data/index.json`. See [`site/README.md`](site/README.md).
 
 ## CI
 
-One workflow per image family — `alpine-k8s.yml`, `cert-manager.yml`, `cilium.yml`, `cloudnative-pg-operator.yml`, `dokuwiki.yml`, `dozzle.yml`, `frr.yml`, `gatus.yml`, `grafana-image-renderer.yml`, `homepage.yml`, `k8s-sidecar.yml`, `kubernetes-reflector.yml`, `local-path-provisioner.yml`, `metallb.yml`, `openbao.yml`, `os-shell.yml`, `pocket-id.yml`, `postgres.yml`, `traefik.yml`, `flux.yml` — so a change to one image can never rebuild or cancel another.
+One workflow per image family — `alpine-k8s.yml`, `bitnami-postgres.yml`, `cert-manager.yml`, `cilium.yml`, `cloudnative-pg-operator.yml`, `dokuwiki.yml`, `dozzle.yml`, `frr.yml`, `gatus.yml`, `grafana-image-renderer.yml`, `homepage.yml`, `k8s-sidecar.yml`, `kubernetes-reflector.yml`, `local-path-provisioner.yml`, `metallb.yml`, `openbao.yml`, `os-shell.yml`, `pocket-id.yml`, `postgres.yml`, `traefik.yml`, `flux.yml` — so a change to one image can never rebuild or cancel another.
 Routing is the native `on.push.paths` filter: a bump PR/push rebuilds **only
 the image whose directory moved**; each workflow's daily schedule rebuilds just
-its own image (fresh Wolfi CVE patches), staggered 06:00/06:05/06:10/06:15/06:20/06:25/06:30/06:35/06:40/06:45/06:50/06:55/07:00/07:05/07:10/07:15/07:20/07:25/07:40 UTC.
+its own image (fresh Wolfi CVE patches), staggered 06:00/06:05/06:10/06:15/06:20/06:25/06:30/06:35/06:40/06:45/06:50/06:55/07:00/07:05/07:10/07:15/07:20/07:25/07:40/07:45 UTC.
 
 Postgres additionally keeps a `detect-changes` job that turns the diff into its
 per-major matrix. Publish → smoke test → grype → cosign keyless sign **only
