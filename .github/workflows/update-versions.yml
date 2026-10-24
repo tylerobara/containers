@@ -487,6 +487,20 @@ jobs:
           fi
 
 
+          # --- dozzle: latest GitHub release ---
+          if want dozzle; then
+            yaml=images/dozzle/melange/dozzle.yaml
+            latest=$(gh api repos/amir20/dozzle/releases/latest --jq '.tag_name | ltrimstr("v")')
+            if [ -z "$latest" ]; then
+              echo "::error::dozzle: no release found upstream"
+              FAILED=1
+            fi
+            bump_row dozzle "$yaml" "$latest" \
+              "https://github.com/amir20/dozzle/archive/refs/tags/v${latest}.tar.gz" \
+              dozzle
+          fi
+
+
           # --- kubernetes-reflector: releases/latest is a vX.Y.Z GitVersion tag ---
           if want kubernetes-reflector; then
             latest=$(gh api repos/emberstack/kubernetes-reflector/releases/latest --jq '.tag_name | ltrimstr("v")')

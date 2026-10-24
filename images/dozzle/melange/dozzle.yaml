@@ -1,0 +1,110 @@
+# Melange build for Dozzle (github.com/amir20/dozzle) — the real-time
+# container log UI. Go binary with the web UI embedded: reproduces upstream's
+# Dockerfile build stages (bun install + `bun run build` for dist/, the
+# Makefile's openssl-generated embedded agent cert pair, CGO_ENABLED=0 go
+# build stamping internal/cli.Version via ldflags the way upstream's release
+# TAG build-arg does), packaged as `dozzle` so grype/secdb name-match. Wolfi
+# has no dozzle package today, so provider-priority/epoch are
+# belt-and-suspenders in case one ever appears with the same name.
+#
+# Bump `version` + `vars.sha256` on each release
+# (https://github.com/amir20/dozzle/releases) — the update-versions bot
+# covers this row.
+
+package:
+  name: dozzle
+  version: 11.3.0
+  epoch: 101
+  description: "Dozzle container log UI built from upstream source"
+  copyright:
+    - license: MIT
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the GitHub release tarball
+  sha256: 4c0c770fcadcf1314181fdff6e048469e52e8d5e42eef6ae9a88d08ea0641d2c
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      # go.mod wants 1.27.1; Wolfi go-1.27 is 1.27.3.
+      - go-1.27
+      # Frontend toolchain: upstream's Dockerfile pins oven/bun:1.4.2 and
+      # runs vite + compress-dist on the bun runtime (no node); Wolfi bun is
+      # 1.4.2 — the same release.
+      - bun
+      # The Makefile's shared_key.pem/shared_cert.pem targets (the pair the
+      # binary embeds for agent connections; upstream's own release CI
+      # injects its hub pair via secrets, downstream generates its own).
+      - openssl
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/amir20/dozzle/archive/refs/tags/v${{package.version}}.tar.gz" \
+        -o /home/build/dozzle.tar.gz
+      echo "${{vars.sha256}}  /home/build/dozzle.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf dozzle.tar.gz
+      rm dozzle.tar.gz
+
+  - working-directory: /home/build/dozzle-${{package.version}}
+    runs: |
+      # Upstream's assets stage verbatim: bun install from the lockfile, then
+      # `bun run build` (fetch-duckdb-extensions + vite build + compress-dist).
+      # The tarball ships no dist/, and main.go embeds all:dist — a fake or
+      # missing dist would ship a broken UI, so assert it is real (the
+      # Makefile's fake_assets placeholder writes this exact marker).
+      export HOME=/home/build
+      bun install --frozen-lockfile --ignore-scripts
+      bun run build
+      test -f dist/index.html
+      ! grep -q "assets build was skipped" dist/index.html
+
+      # Upstream embeds an agent cert pair that is gitignored; the Makefile
+      # contract is an openssl self-signed Ed25519 pair (upstream's release
+      # CI swaps in its hub's pair, irrelevant for direct/UI use).
+      openssl genpkey -algorithm Ed25519 -out shared_key.pem
+      openssl req -new -key shared_key.pem -out shared_request.csr \
+        -subj "/C=US/ST=California/L=San Francisco/O=Dozzle"
+      openssl x509 -req -in shared_request.csr -signkey shared_key.pem \
+        -out shared_cert.pem -days 1825
+      rm shared_request.csr
+
+      # Upstream's build contract (Dockerfile): CGO_ENABLED=0 go build -s -w
+      # with internal/cli.Version stamped — releases pass TAG as the plain
+      # semver (docker/metadata-action {{version}}, no leading v), which is
+      # what `dozzle --version` prints via go-arg. No vendor/ in the tarball,
+      # so modules resolve from the network.
+      export CGO_ENABLED=0 GOTOOLCHAIN=local
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.27/bin"
+      go build -trimpath -buildvcs=false \
+        -ldflags "-s -w \
+          -X github.com/amir20/dozzle/internal/cli.Version=${{package.version}}" \
+        -o dozzle
+      install -Dm755 dozzle "${{targets.destdir}}/usr/bin/dozzle"
+      # internal/profile's init() runs os.Mkdir("./data") (CWD is /) on EVERY
+      # invocation — --version included — and log.Fatal()s on EACCES; the
+      # upstream scratch image only survives because it runs as root. Ship the
+      # dir pre-existing (then MkdirAll is a no-op) and writable for the
+      # apko run-as 65532: melange normalizes package ownership to root
+      # (melange#1395), so 0777 is the only way to hand it to the nonroot
+      # daemon user; mount a real volume at /data to persist its contents.
+      install -d -m 0777 "${{targets.destdir}}/data"
+
+  - runs: |
+      # Verify the build actually stamped this version
+      "${{targets.destdir}}/usr/bin/dozzle" --version | grep -q "${{package.version}}"
+      # ...the data dir ships as nonroot can mkdir ./data
+      test -d "${{targets.destdir}}/data"
+      [ "$(stat -c %a "${{targets.destdir}}/data")" = "777" ] \
+        || { echo "/data must ship mode 777 for the nonroot daemon user"; exit 1; }
