@@ -56,12 +56,12 @@ pipeline:
       make USE_PGXS=1 PG_CONFIG=/usr/bin/pg_config with_llvm=no -j"$(nproc)"
       make install USE_PGXS=1 PG_CONFIG=/usr/bin/pg_config with_llvm=no
       D="${{targets.destdir}}"
-      install -d -m 755 "$D/opt/bitnami/postgresql/lib/postgresql" \
+      install -d -m 755 "$D/opt/bitnami/postgresql/lib" \
                         "$D/opt/bitnami/postgresql/share/extension"
       install -d -m 755 "$D/var/lib/db/sbom"
       chmod 0777 "$D/var/lib/db/sbom"
-      find /usr/lib/postgresql* -name 'pgaudit.so' -exec mv {} "$D/opt/bitnami/postgresql/lib/postgresql/" \;
+      find /usr/lib/postgresql* -name 'pgaudit.so' -exec mv {} "$D/opt/bitnami/postgresql/lib/" \;
       find /usr/share/postgresql* \( -name 'pgaudit--*.sql' -o -name 'pgaudit.control' \) \
         -exec mv {} "$D/opt/bitnami/postgresql/share/extension/" \;
-      test -f "$D/opt/bitnami/postgresql/lib/postgresql/pgaudit.so"
+      test -f "$D/opt/bitnami/postgresql/lib/pgaudit.so"
       test -f "$D/opt/bitnami/postgresql/share/extension/pgaudit.control"

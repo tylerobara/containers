@@ -74,7 +74,7 @@ pipeline:
       # postgresql-15 package — apk allows that, like contrib modules).
       D="${{targets.destdir}}"
       install -d -m 755 "$D/opt/bitnami/repmgr/bin" \
-                        "$D/opt/bitnami/postgresql/lib/postgresql" \
+                        "$D/opt/bitnami/postgresql/lib" \
                         "$D/opt/bitnami/postgresql/share/extension"
       install -d -m 755 "$D/var/lib/db/sbom"
       chmod 0777 "$D/var/lib/db/sbom"
@@ -82,12 +82,12 @@ pipeline:
       # never ships them — install straight from the build dir (PGXS already
       # put repmgr.so + sql/control in place above).
       install -m 755 repmgr repmgrd "$D/opt/bitnami/repmgr/bin/"
-      find /usr/lib/postgresql* -name 'repmgr.so' -exec mv {} "$D/opt/bitnami/postgresql/lib/postgresql/" \;
+      find /usr/lib/postgresql* -name 'repmgr.so' -exec mv {} "$D/opt/bitnami/postgresql/lib/" \;
       find /usr/share/postgresql* \( -name 'repmgr--*.sql' -o -name 'repmgr.control' \) \
         -exec mv {} "$D/opt/bitnami/postgresql/share/extension/" \;
       test -x "$D/opt/bitnami/repmgr/bin/repmgr"
       test -x "$D/opt/bitnami/repmgr/bin/repmgrd"
-      test -f "$D/opt/bitnami/postgresql/lib/postgresql/repmgr.so"
+      test -f "$D/opt/bitnami/postgresql/lib/repmgr.so"
       test -f "$D/opt/bitnami/postgresql/share/extension/repmgr.control"
       # runtime sanity against the build container's wolfi libpq
       LD_LIBRARY_PATH=/usr/lib "$D/opt/bitnami/repmgr/bin/repmgr" --version \
