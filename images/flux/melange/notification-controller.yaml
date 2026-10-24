@@ -14,7 +14,7 @@
 
 package:
   name: notification-controller
-  version: 1.9.4
+  version: 1.10.0
   epoch: 100
   description: "Flux notification-controller built from upstream source"
   copyright:
@@ -24,7 +24,7 @@ package:
 
 vars:
   # SHA256 of the GitHub release tarball
-  sha256: 7b2713ad59527df739c4c4ceef99925db05a58ef4c19cb263e4b7193face2fb7
+  sha256: 68be0aae59e157b169955d7003126f6ac056b50b1b4b4b8a2f79d4c6d62a2ee1
   # Flag unique to this controller among the flux four; the verify step
   # greps it out of the flag dump to prove the right main package was built.
   ident_flag: rate-limit-interval
