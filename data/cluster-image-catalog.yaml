@@ -1,0 +1,28 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: ClusterImageCatalog
+metadata:
+  name: cnpg-postgres-wolfi
+  labels:
+    images.cnpg.io/family: postgresql
+    images.cnpg.io/type: minimal
+    images.cnpg.io/os: wolfi
+    images.cnpg.io/date: "20261024"
+    images.cnpg.io/publisher: tylerobara.github.io
+spec:
+  images:
+  - major: 15
+    image: ghcr.io/tylerobara/containers/bitnami-postgres:15.19@sha256:f5bdd9a3372ca7daad4bf5ebbc6112fdf1a419e822cd29e15acb7babb38ae8c5
+  - major: 15
+    image: ghcr.io/tylerobara/containers/cnpg-postgres:15.19@sha256:441101f24e2b37c4c5f9144cb332bf50cdfe439b8c996d7492033e631ad32e48
+  - major: 16
+    image: ghcr.io/tylerobara/containers/bitnami-postgres:16.15@sha256:cb98c33a92eecf236443e1c606db4711ee9bc58a695ea57bbd5d8c0279cecb9e
+  - major: 16
+    image: ghcr.io/tylerobara/containers/cnpg-postgres:16.15@sha256:a1e502893181cc6425e0568f4a6c7117175df8c0572965ec94a506cb80aef9eb
+  - major: 17
+    image: ghcr.io/tylerobara/containers/bitnami-postgres:17.11@sha256:069197df2285df8a19b3a4db1be77a4890ef639032aeb54053ec2f6ac375e0f5
+  - major: 17
+    image: ghcr.io/tylerobara/containers/cnpg-postgres:17.11@sha256:3d3ce7184b0d53e5d543af9150d43a5870efffba174eb5c279626062faaad6cc
+  - major: 18
+    image: ghcr.io/tylerobara/containers/bitnami-postgres:18.6@sha256:a0459ac33aaf8792f6b88a5d2c5c6a32eaa8dbef7c0b35d027e2530aa10fa402
+  - major: 18
+    image: ghcr.io/tylerobara/containers/cnpg-postgres:18.6@sha256:7a46cfcd43066a1c86ef3491a1c79e8ad03d1a18bddd1f6646a29eec644f2683
