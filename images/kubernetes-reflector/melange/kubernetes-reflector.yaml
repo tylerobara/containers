@@ -74,6 +74,12 @@ pipeline:
         /p:AssemblyVersion=${{package.version}} \
         /p:AssemblyFileVersion=${{package.version}} \
         /p:InformationalVersion=${{package.version}}
+      # The bundled libcoreclrtraceptprovider.so has a hard DT_NEEDED on
+      # so:liblttng-ust.so.0, which current Wolfi does not provide
+      # (lttng-ust ships .so.1); coreclr only dlopens it for LTTng tracing,
+      # so strip it — otherwise the melange package records an apk dep no
+      # repo satisfies and every apko solve fails.
+      rm -f publish/libcoreclrtraceptprovider.so
       install -d -m 0755 "${{targets.destdir}}/usr/lib/kubernetes-reflector"
       cp -rp publish/. "${{targets.destdir}}/usr/lib/kubernetes-reflector/"
       # Repo-standard entrypoint: the apphost is named after the assembly;

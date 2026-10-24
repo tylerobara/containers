@@ -30,6 +30,10 @@ contents:
     - ca-certificates
     - icu
     - libstdc++
+    # .NET's crypto shim (libSystem.Security.Cryptography.Native.OpenSsl)
+    # dlopens the system libssl.so.3/libcrypto.so.3 for TLS — reflector's
+    # every API-server call needs it; upstream's aspnet base ships libssl3.
+    - libssl3
     # Built by melange; supplied via --repository-append at build time.
     - kubernetes-reflector
 
