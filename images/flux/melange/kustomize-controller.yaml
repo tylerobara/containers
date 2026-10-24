@@ -14,7 +14,7 @@
 
 package:
   name: kustomize-controller
-  version: 1.9.6
+  version: 1.10.0
   epoch: 100
   description: "Flux kustomize-controller built from upstream source"
   copyright:
@@ -24,7 +24,7 @@ package:
 
 vars:
   # SHA256 of the GitHub release tarball
-  sha256: 3deb159a89da249d70a4dee5de1d78e2ce739b00b8332b93df648c2fa77f67c2
+  sha256: 789e0c859ca3a30151ce23e8d1cebaf1c44fc490ff37f471d2ad666d12e11017
   # Flag unique to this controller among the flux four; the verify step
   # greps it out of the flag dump to prove the right main package was built.
   ident_flag: concurrent-ssa
