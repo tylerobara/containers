@@ -69,8 +69,9 @@ pipeline:
       # addresses + the controller-runtime zap flags), and the manager gets
       # past flag parsing to the API-server step before dying on the missing
       # in-cluster config.
+      # stdlib flag usage prints single-dash names (-health-probe-bind-address)
       out=$("${{targets.destdir}}/manager" --help 2>&1 || true)
-      echo "$out" | grep -q -- "--health-probe-bind-address" \
+      echo "$out" | grep -q "health-probe-bind-address" \
         || { echo "/manager does not expose the expected flag surface"; exit 1; }
       out=$(timeout 60 "${{targets.destdir}}/manager" --metrics-bind-address=0 2>&1 || true)
       echo "$out"

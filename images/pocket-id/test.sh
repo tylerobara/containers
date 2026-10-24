@@ -68,7 +68,7 @@ pocket-id)
 pocket-id-operator)
   echo "Testing the manager exposes this repo's flag surface..."
   docker run --rm --entrypoint /manager "$IMAGE" --help 2>&1 \
-    | grep -q -- "--health-probe-bind-address" \
+    | grep -q "health-probe-bind-address" \
     || fail "/manager does not expose the expected flags"
 
   echo "Testing the manager starts and reaches its API-server step..."
