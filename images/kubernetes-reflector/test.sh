@@ -33,7 +33,7 @@ echo "Testing web host comes up without a cluster (helm liveness /health/live on
 # as the upstream image — while the web host must bind :8080
 # (ASPNETCORE_HTTP_PORTS) and serve the liveness path of the official
 # reflector helm chart as nonroot uid 65532.
-cid=$(docker run -d --rm "$IMAGE")
+cid=$(docker run -d --rm -p 127.0.0.1::8080 "$IMAGE")
 # shellcheck disable=SC2064
 trap "docker stop $cid >/dev/null 2>&1 || true" EXIT
 port=$(docker port "$cid" 8080/tcp | head -1 | sed 's/.*://')
