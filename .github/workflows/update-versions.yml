@@ -7,6 +7,7 @@ name: update-versions
 # local-path-provisioner and gatus;
 # dokuwiki, grafana-image-renderer, cilium, cert-manager, frr-k8s, k8s-sidecar
 # , local-path-provisioner and dozzle;
+# local-path-provisioner and dozzle;
 # cilium-envoy follows cilium's own images/cilium/Dockerfile pin and gets its
 # payload shas re-extracted; metallb's controller + speaker configs are bumped
 # together off the latest non-chart metallb tag) and
@@ -486,6 +487,17 @@ jobs:
             bump_row gatus "$yaml" "$latest" \
               "https://github.com/TwiN/gatus/archive/refs/tags/v${latest}.tar.gz" \
               gatus
+          # --- dozzle: latest GitHub release ---
+          if want dozzle; then
+            yaml=images/dozzle/melange/dozzle.yaml
+            latest=$(gh api repos/amir20/dozzle/releases/latest --jq '.tag_name | ltrimstr("v")')
+            if [ -z "$latest" ]; then
+              echo "::error::dozzle: no release found upstream"
+              FAILED=1
+            fi
+            bump_row dozzle "$yaml" "$latest" \
+              "https://github.com/amir20/dozzle/archive/refs/tags/v${latest}.tar.gz" \
+              dozzle
           fi
 
 

@@ -38,7 +38,7 @@ its own image (fresh Wolfi CVE patches), staggered 06:00/06:05/06:10/06:15/06:20
 `openbao.yml`, `os-shell.yml`, `dokuwiki.yml`, `grafana-image-renderer.yml`, `homepage.yml`, `cilium.yml`, `cert-manager.yml`, `metallb.yml`, `k8s-sidecar.yml`, `local-path-provisioner.yml`, `dozzle.yml` — so a change to one image can never rebuild or cancel another.
 Routing is the native `on.push.paths` filter: a bump PR/push rebuilds **only
 the image whose directory moved**; each workflow's daily schedule rebuilds just
-its own image (fresh Wolfi CVE patches), staggered 06:00/06:05/06:10/06:15/06:20/06:25/06:30/06:35/06:40/06:45/07:25/06:50 UTC.
+its own image (fresh Wolfi CVE patches), staggered 06:00/06:05/06:10/06:15/06:20/06:25/06:30/06:35/06:40/06:45/06:50/07:25 UTC.
 Postgres additionally keeps a `detect-changes` job that turns the diff into its
 per-major matrix. Publish → smoke test → grype → cosign keyless sign **only
 when the scan has 0 findings Low or above**. The cosign cert identity is each
