@@ -1,0 +1,102 @@
+# repmgr 17 for the bitnami-postgres images, built from EnterpriseDB
+# source via PGXS against Wolfi's postgresql-17 server headers.
+#
+# Why not Wolfi's repmgr-17 (where it exists at all): it installs into
+# /usr/lib/postgresql17/, a layout the /opt-prefixed server here cannot
+# load. Same reason as pgaudit — see ../README.md. repmgr ships as the Bitnami
+# compatibility package (the pinned script tree itself uses NATIVE streaming
+# replication and never runs repmgr); the extension files land in the /opt
+# server's $libdir/$sharedir so CREATE EXTENSION repmgr works.
+#
+# Bump manually: https://github.com/EnterpriseDB/repmgr/tags (5.5.0 is the
+# current release; the update-versions bot only bumps the postgresql configs).
+
+package:
+  name: repmgr-17
+  version: 5.5.0
+  epoch: 100
+  description: "repmgr for PostgreSQL 17, bitnami /opt layout"
+  copyright:
+    - license: GPL-3.0-only
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the GitHub source tarball
+  sha256: 73504f5281e2918151ac906d4ae29479e343b28003270a7eddc282800f1b3f84
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - build-base
+      - ca-certificates-bundle
+      - curl
+      - curl-dev
+      - flex
+      - bison
+      - json-c-dev
+      - postgresql-17
+      - postgresql-17-dev
+      # PGXS drags the server's own LIBS into the link line (Makefile.global
+      # from wolfi's postgresql-17); 16+ there gained zstd/lz4/xml2/xslt/pam.
+      - krb5-dev
+      - zstd-dev
+      - lz4-dev
+      - libxml2-dev
+      - libxslt-dev
+      - linux-pam-dev
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/EnterpriseDB/repmgr/releases/download/v${{package.version}}/repmgr-${{package.version}}.tar.gz" \
+        -o /home/build/repmgr.tar.gz
+      echo "${{vars.sha256}}  /home/build/repmgr.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf repmgr.tar.gz
+      rm repmgr.tar.gz
+
+  - working-directory: /home/build/repmgr-${{package.version}}
+    runs: |
+      # PG_CONFIG: /usr/bin/pg_config ships with wolfi's postgresql-17;
+      # headers come from postgresql-17-dev. The extension .so loads from
+      # the SERVER's $libdir at runtime (our /opt tree), so a wolfi-headers
+      # build is fine.
+      # GitHub ARCHIVES of repmgr lack the generated configure/Makefile
+      # (autoconf project) — build the release ASSET tarball, which ships
+      # them (identical tree, identical sha256, just autoreconf'ed).
+      ./configure --prefix=/usr   # prefix: binaries to /usr/bin (pg_config's
+                                  # bindir) so the re-home below finds them;
+                                  # extension dirs come from pg_config itself
+      make -j"$(nproc)" with_llvm=no
+      make install with_llvm=no
+      # Re-home the PGXS install (root container) into the bitnami layout:
+      # binaries to /opt/bitnami/repmgr/bin (where bitnami kept them), the
+      # extension bits into the /opt server's dirs (shared with the
+      # postgresql-17 package — apk allows that, like contrib modules).
+      D="${{targets.destdir}}"
+      install -d -m 755 "$D/opt/bitnami/repmgr/bin" \
+                        "$D/opt/bitnami/postgresql/lib" \
+                        "$D/opt/bitnami/postgresql/share/extension"
+      install -d -m 755 "$D/var/lib/db/sbom"
+      chmod 0777 "$D/var/lib/db/sbom"
+      # repmgr's Makefile builds repmgr/repmgrd but its "hacky" install rule
+      # never ships them — install straight from the build dir (PGXS already
+      # put repmgr.so + sql/control in place above).
+      install -m 755 repmgr repmgrd "$D/opt/bitnami/repmgr/bin/"
+      find /usr/lib/postgresql* -name 'repmgr.so' -exec mv {} "$D/opt/bitnami/postgresql/lib/" \;
+      find /usr/share/postgresql* \( -name 'repmgr--*.sql' -o -name 'repmgr.control' \) \
+        -exec mv {} "$D/opt/bitnami/postgresql/share/extension/" \;
+      test -x "$D/opt/bitnami/repmgr/bin/repmgr"
+      test -x "$D/opt/bitnami/repmgr/bin/repmgrd"
+      test -f "$D/opt/bitnami/postgresql/lib/repmgr.so"
+      test -f "$D/opt/bitnami/postgresql/share/extension/repmgr.control"
+      # runtime sanity against the build container's wolfi libpq
+      LD_LIBRARY_PATH=/usr/lib "$D/opt/bitnami/repmgr/bin/repmgr" --version \
+        | grep -q "${{package.version}}"

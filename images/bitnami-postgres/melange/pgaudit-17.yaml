@@ -1,0 +1,75 @@
+# pgaudit 17.1 for the bitnami-postgres images, built from pgaudit/pgaudit
+# source via PGXS against Wolfi's postgresql-17 server headers.
+#
+# Why not wolfi's prebuilt (only pgaudit-18 exists anyway): it installs into
+# /usr/lib/postgresql17/, unloadable by the /opt-prefixed server. We ship
+# one per major, into the /opt layout, so the scripts' default
+# SHARED_PRELOAD_LIBRARIES=pgaudit preloads cleanly. Version per the upstream
+# README compatibility table (1.7.X=PG15, 16.X=PG16, 17.X=PG17, 18.X=PG18).
+# Bump manually alongside the PGDG pins (bot only touches postgresql configs).
+
+package:
+  name: pgaudit-17
+  version: 17.1
+  epoch: 100
+  description: "pgaudit extension for PostgreSQL 17, bitnami /opt layout"
+  copyright:
+    - license: BSD-3-Clause
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the GitHub source tarball
+  sha256: 9c5f37504d393486cc75d2ced83f75f5899be64fa85f689d6babb833b4361e6c
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - build-base
+      - ca-certificates-bundle
+      - curl
+      - postgresql-17
+      - postgresql-17-dev
+      # PGXS drags the server's own LIBS into the link line (Makefile.global
+      # from wolfi's postgresql-17); 16+ there gained zstd/lz4/xml2/xslt/pam.
+      - krb5-dev
+      - zstd-dev
+      - lz4-dev
+      - libxml2-dev
+      - libxslt-dev
+      - linux-pam-dev
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/pgaudit/pgaudit/archive/refs/tags/${{package.version}}.tar.gz" \
+        -o /home/build/pgaudit.tar.gz
+      echo "${{vars.sha256}}  /home/build/pgaudit.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf pgaudit.tar.gz
+      rm pgaudit.tar.gz
+
+  - working-directory: /home/build/pgaudit-${{package.version}}
+    runs: |
+      # PGXS against wolfi's 17 headers (pg_config ships in
+      # postgresql-17); install is root here, then the PGXS layout is
+      # re-homed into the /opt server's dirs (see repmgr-17.yaml — same
+      # reason: /usr/lib/postgresql17/ is unloadable for this image).
+      make USE_PGXS=1 PG_CONFIG=/usr/bin/pg_config with_llvm=no -j"$(nproc)"
+      make install USE_PGXS=1 PG_CONFIG=/usr/bin/pg_config with_llvm=no
+      D="${{targets.destdir}}"
+      install -d -m 755 "$D/opt/bitnami/postgresql/lib" \
+                        "$D/opt/bitnami/postgresql/share/extension"
+      install -d -m 755 "$D/var/lib/db/sbom"
+      chmod 0777 "$D/var/lib/db/sbom"
+      find /usr/lib/postgresql* -name 'pgaudit.so' -exec mv {} "$D/opt/bitnami/postgresql/lib/" \;
+      find /usr/share/postgresql* \( -name 'pgaudit--*.sql' -o -name 'pgaudit.control' \) \
+        -exec mv {} "$D/opt/bitnami/postgresql/share/extension/" \;
+      test -f "$D/opt/bitnami/postgresql/lib/pgaudit.so"
+      test -f "$D/opt/bitnami/postgresql/share/extension/pgaudit.control"

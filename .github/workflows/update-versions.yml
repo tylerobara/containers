@@ -25,7 +25,7 @@ on:
   workflow_dispatch:
     inputs:
       only:
-        description: "Comma-separated rows to check, e.g. postgresql-16,operator,openbao,cilium,cilium-envoy,metallb,frr-k8s,k8s-sidecar,local-path-provisioner,gatus,homepage (blank = all)"
+        description: "Comma-separated rows to check, e.g. postgresql-16,bitnami-postgresql-16,operator,openbao,cilium,cilium-envoy,metallb,frr-k8s,k8s-sidecar,local-path-provisioner,gatus,homepage (blank = all)"
         required: false
         default: ""
 
@@ -126,6 +126,24 @@ jobs:
             bump_row "postgresql-$major" "$yaml" "$latest" \
               "https://ftp.postgresql.org/pub/source/v${latest}/postgresql-${latest}.tar.bz2" \
               postgres
+          done
+
+          # --- bitnami-postgresql-<major>: same PGDG check for the
+          # bitnami-postgres family's postgresql configs (repmgr/pgaudit pins
+          # there are bumped by hand — see images/bitnami-postgres/README.md) ---
+          for yaml in images/bitnami-postgres/melange/postgresql-*.yaml; do
+            major=$(basename "$yaml" .yaml); major=${major#postgresql-}
+            want "bitnami-postgresql-$major" || continue
+            latest=$(curl -fsSL --retry 3 https://www.postgresql.org/ftp/source/ \
+              | grep -oE "v${major}\.[0-9]+/" | tr -d 'v/' | sort -V | tail -1)
+            if [ -z "$latest" ]; then
+              echo "::error::bitnami-postgresql-$major: no release found upstream"
+              FAILED=1
+              continue
+            fi
+            bump_row "bitnami-postgresql-$major" "$yaml" "$latest" \
+              "https://ftp.postgresql.org/pub/source/v${latest}/postgresql-${latest}.tar.bz2" \
+              bitnami-postgres
           done
 
           # --- operator: latest GitHub release ---

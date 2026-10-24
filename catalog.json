@@ -24,6 +24,19 @@
       "description": "PostgreSQL built from the PGDG source tarball by melange and assembled by apko on Wolfi. Drop-in for CloudNativePG clusters, with a sha-pinned ClusterImageCatalog."
     },
     {
+      "name": "bitnami-postgres",
+      "display_name": "PostgreSQL (Bitnami-compatible)",
+      "per_major": true,
+      "dir": "bitnami-postgres",
+      "apko": "postgresql.yaml.tpl",
+      "workflow": "bitnami-postgres.yml",
+      "category": "Databases",
+      "primary_package": "postgresql-@@MAJOR@@",
+      "upstream_url": "https://github.com/bitnami/containers",
+      "summary": "Bitnami-compatible PostgreSQL 15-18: PGDG source in the /opt layout, sha-pinned Bitnami scripts, melange + apko on Wolfi.",
+      "description": "PostgreSQL built from the PGDG source tarball by melange into the Bitnami OSS layout (/opt/bitnami/postgresql) with the sha-pinned legacy bitnami/containers script tree: entrypoint/setup contract, conf.default, initdb.d, uid 1001, pgaudit preload, repmgr compatibility package."
+    },
+    {
       "name": "cloudnative-pg",
       "display_name": "CloudNativePG operator",
       "dir": "cloudnative-pg-operator",

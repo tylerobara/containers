@@ -1,0 +1,265 @@
+# Melange build for PostgreSQL 15 with the Bitnami OSS layout: PGDG source
+# compiled --prefix=/opt/bitnami/postgresql + the sha-pinned legacy
+# bitnami/containers script tree (bitnami/postgresql/15/debian-12 rootfs +
+# prebuildfs), so the image reproduces the Bitnami chart contract —
+# /opt/bitnami/postgresql/{bin,lib,share,conf,conf.default,logs,tmp},
+# /opt/bitnami/scripts/**, /bitnami/postgresql volume, /docker-entrypoint-initdb.d.
+# Autotools build (configure/make), like PGDG ships it.
+#
+# melange pipelines run as root (no environment.accounts.runAs), so the
+# pipeline installs into the container's REAL /opt and runs Bitnami's own
+# postunpack.sh UNMODIFIED (conf.default, log symlinks, g+rwX) — the scripts
+# are byte-identical to upstream's, sha256-pinned tarball rather than vendored
+# copy (repo convention; melange v0.63 has no local-file 'copier' pipeline).
+#
+# Bump `version` + `vars.sha256` on each PGDG minor (the update-versions bot
+# does this); vars.bitnami_* only change on an intentional script-tree move —
+# see ../README.md for the provenance table.
+
+package:
+  name: postgresql-15
+  version: 15.19
+  epoch: 100
+  description: "PostgreSQL 15 built from PGDG source with the Bitnami OSS script layout"
+  copyright:
+    - license: PostgreSQL
+  # /usr/sbin/run-script is bitnami's fixed contract location (test.sh and
+  # the entrypoint chain expect exactly that path); usrmerge's "move it to
+  # /usr/bin" advice breaks the contract.
+  checks:
+    disabled:
+      - usrmerge
+
+vars:
+  # SHA256 of the PGDG source tarball
+  sha256: e1a64a87a46b825b88c082e4518161a47aab53c45694964f8ba1df28f7859f89
+  # bitnami/containers commit + tarball SHA256 of the pinned script tree
+  bitnami_commit: e7699df4c94f9182f739df15c56a8959f980000b
+  bitnami_sha256: c18218bb3339cc66f7e5d97159011e9321f0a2a85592904418262c36ff6545a3
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - build-base
+      - curl
+      - bison
+      - flex
+      - perl
+      - bash
+      # postunpack's ensure_user_exists ends on a false [[ -n ]] test when
+      # shadow's usermod/groupadd are absent — under the build's errexit that
+      # silently kills the pipeline; upstream's builder ships shadow-utils.
+      - shadow
+      # getent (group_exists lookups) is split into posix-libc-utils on wolfi.
+      - posix-libc-utils
+      # --with-* / -D feature flags need these dev packages:
+      - openssl-dev
+      - icu-dev
+      - libxml2-dev
+      - libxslt-dev
+      - zstd-dev
+      - zlib-dev
+      - lz4-dev
+      - krb5-dev
+      - openldap-2.6-dev
+      - readline-dev
+      - ncurses-dev
+      - util-linux-dev
+      - linux-pam-dev
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      # PGDG mirrors occasionally 403 bursts; retry like the minimal repo does.
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://ftp.postgresql.org/pub/source/v${{package.version}}/postgresql-${{package.version}}.tar.bz2" \
+        -o /home/build/postgresql.tar.gz
+      echo "${{vars.sha256}}  /home/build/postgresql.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf postgresql.tar.gz
+      rm postgresql.tar.gz
+
+  - runs: |
+      # Bitnami legacy script tree, sha-pinned (codeload per-commit archive;
+      # same URL class every other config here uses for GitHub tarballs).
+      mkdir -p /home/build/bitnami
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://codeload.github.com/bitnami/containers/tar.gz/${{vars.bitnami_commit}}" \
+        -o /home/build/bitnami/containers.tar.gz
+      echo "${{vars.bitnami_sha256}}  /home/build/bitnami/containers.tar.gz" | sha256sum -c -
+
+  - working-directory: /home/build/postgresql-${{package.version}}
+    runs: |
+      ./configure \
+        --prefix=/opt/bitnami/postgresql \
+        --sysconfdir=/opt/bitnami/postgresql/conf \
+        --bindir=/opt/bitnami/postgresql/bin \
+        --libdir=/opt/bitnami/postgresql/lib \
+        --with-icu \
+        --with-openssl \
+        --with-libxml \
+        --with-libxslt \
+        --with-lz4 \
+        --with-zstd \
+        --with-ldap \
+        --with-gssapi \
+        --with-pam \
+        --with-uuid=e2fs \
+        --with-readline \
+        --with-system-tzdata=/usr/share/zoneinfo
+      make -j"$(nproc)"
+
+  - working-directory: /home/build/postgresql-${{package.version}}
+    runs: |
+      # Pipelines run as root: install into the container's REAL /opt (no
+      # DESTDIR) so the bitnami scripts' absolute paths work unmodified; the
+      # package tree is assembled from /opt below.
+      make install
+      # Drop pure-build artifacts (CNPG rationale): server-side PGXS, static
+      # libs, headers, pkgconfig. lib/postgresql/*.so stay — loadable modules.
+      rm -rf /opt/bitnami/postgresql/include \
+             /opt/bitnami/postgresql/lib/postgresql/pgxs \
+             /opt/bitnami/postgresql/lib/pkgconfig
+      find /opt/bitnami/postgresql/lib -name '*.a' -delete
+      rm -f /opt/bitnami/postgresql/lib/libpq.so
+      # postgresql_create_config + initdb read the sample from $(datadir).
+      test -f /opt/bitnami/postgresql/share/postgresql.conf.sample
+
+  - runs: |
+      # Bitnami script tree from the sha-pinned legacy (pre-BSI) container
+      # definition in bitnami/containers. Full extract + cp (not tar patterns):
+      # the build container's busybox tar cannot be trusted on glob patterns.
+      mkdir -p /home/build/bitnami/x
+      tar xzf /home/build/bitnami/containers.tar.gz -C /home/build/bitnami/x
+      B=/home/build/bitnami/x/containers-${{vars.bitnami_commit}}/bitnami/postgresql/15/debian-12
+      # The melange build rootfs ships /usr/sbin as a merged-usr symlink and
+      # busybox cp refuses a symlink as copy target — give the copy an actual
+      # directory to land prebuildfs/usr/sbin/run-script in.
+      [ -d /usr/sbin ] && [ ! -L /usr/sbin ] || { rm -rf /usr/sbin; mkdir -p /usr/sbin; }
+      cp -a "$B/prebuildfs/." /   # libs (libbitnami/libos/...) + /usr/sbin/run-script
+      cp -a "$B/rootfs/." /       # app scripts (postgresql/*, libpostgresql.sh)
+
+      # busybox hostname has no --fqdn (only -f) but postgresql-env.sh calls
+      # `hostname --fqdn` on every source; the scripts prepend common/bin to
+      # PATH, so shim it there — build-side and runtime-side, one copy ships.
+      mkdir -p /opt/bitnami/common/bin
+      cat > /opt/bitnami/common/bin/hostname <<'SHIM'
+      #!/bin/sh
+      for a in "$@"; do
+        [ "$a" = "--fqdn" ] && exec /usr/bin/busybox hostname -f
+      done
+      exec /usr/bin/busybox hostname "$@"
+      SHIM
+      chmod 755 /opt/bitnami/common/bin/hostname
+      # wolfi busybox ships every applet in /usr/sbin, ahead of /usr/bin in
+      # the image PATH, and its cp silently no-ops the GNU `SRC/.` content
+      # form the pinned entrypoint depends on to materialize conf/. Ship a
+      # shim next to the hostname one (PATH position 2) emulating that form.
+      cat > /opt/bitnami/common/bin/cp <<'SHIM'
+      #!/bin/sh
+      # busybox cp (every applet lives in /usr/sbin, which precedes /usr/bin in the
+      # image PATH) silently copies NOTHING for the GNU "cp -nr SRC/. DEST" content
+      # form the pinned Bitnami entrypoint relies on. Emulate it with tar; -n is
+      # emulated by excluding entries that already exist as regular files in DEST
+      # (dirs merge like GNU). Every other invocation passes through untouched.
+      # PATH is sanitized to the plain system dirs: the scripts prepend this
+      # shim's own dir (recursion guard), and the melange build root — where
+      # postunpack also runs these scripts — has no /usr/sbin applets at all.
+      # shortcut: assumes whitespace-free paths (only two callers: entrypoint
+      # conf.default copy, mounted-conf copy).
+      PATH=/usr/sbin:/usr/bin:/bin
+      export PATH
+      flags="" src="" dest=""
+      for a in "$@"; do
+        case "$a" in
+          -*) flags="$flags $a" ;;
+          */.)  src="${a%/.}" ;;
+          *)    dest="$a" ;;
+        esac
+      done
+      if [ -n "$src" ] && [ -d "$src" ] && [ -n "$dest" ]; then
+        cd "$src" || exit 1
+        ex=""
+        case " $flags " in
+          *[\ -]n*)
+            for f in $(find . -mindepth 1 | sed 's#^\./##'); do
+              [ -f "$dest/$f" ] && ex="$ex --exclude=$f"
+            done
+            ;;
+        esac
+        mkdir -p "$dest"
+      tar cf - $ex . | tar -xf - -C "$dest"
+        exit $?
+      fi
+      exec cp "$@"
+      SHIM
+      chmod 755 /opt/bitnami/common/bin/cp
+
+
+      # postunpack's ensure_user_exists needs id/usermod/groupadd to end on a
+      # true command (shadow ships them; see environment). Pre-seed the
+      # account anyway (this /etc/passwd is the build rootfs's own; the image
+      # gets its passwd entries from apko accounts instead).
+      grep -q '^postgres:' /etc/passwd || echo 'postgres:x:26:26:PostgreSQL:/bitnami/postgresql:/bin/false' >> /etc/passwd
+      grep -q '^postgres:' /etc/group  || echo 'postgres:x:26:' >> /etc/group
+
+      # Run Bitnami's OWN postunpack as root: creates conf(+conf.d)/
+      # conf.default/logs/tmp/volume dirs, generates postgresql.conf from the
+      # $(datadir) sample with include_dir, writes the trust pg_hba.conf,
+      # chmods g+rwX, symlinks the log files to /dev/stdout.
+      rc=0; bash /opt/bitnami/scripts/postgresql/postunpack.sh || rc=$?
+      echo "postunpack rc=$rc"
+      [ "$rc" -eq 0 ]
+      test -f /opt/bitnami/postgresql/conf.default/postgresql.conf
+      test -f /opt/bitnami/postgresql/conf.default/pg_hba.conf
+      grep -q include_dir /opt/bitnami/postgresql/conf.default/postgresql.conf
+
+  - runs: |
+      D="${{targets.destdir}}"
+      install -d -m 755 "$D/opt" "$D/usr/sbin" "$D/docker-entrypoint-initdb.d" \
+        "$D/docker-entrypoint-preinitdb.d"
+      # melange writes the apk SBOM host-side, but the container's uid owns
+      # everything the pipeline mkdirs; pre-create the leaf 0777 (dokuwiki
+      # lesson) so the host melange can drop var/lib/db/sbom/*.spdx.json.
+      install -d -m 755 "$D/var/lib/db/sbom"
+      chmod 0777 "$D/var/lib/db/sbom"
+      cp -a /opt/bitnami "$D/opt/"
+      # setup.sh REWRITES conf/postgresql.conf + conf/pg_hba.conf at boot; if
+      # they ship in the apk they carry the build-user owner (apk tar keeps
+      # staging ownership) and runAsUser 1001 cannot truncate them. Bitnami's
+      # entrypoint recreates both via `cp -nr conf.default/. conf/`, so the
+      # package ships conf.default only — same net boot tree as upstream's
+      # chown-R'd conf/, but created by the runtime user and therefore
+      # writable. conf/ itself is apko's paths entry.
+      rm -rf "$D/opt/bitnami/postgresql/conf"
+      # postunpack created the volume dir in the build root; ship it too so
+      # the image gets the /bitnami/postgresql mount point (empty dirs are
+      # what the check task below asserts).
+      cp -a /bitnami "$D/"
+      cp -a /usr/sbin/run-script "$D/usr/sbin/run-script"
+      # Bitnami's own final pass (Dockerfile: chmod g+rwX /opt/bitnami) so any
+      # arbitrary uid can use the tree, OpenShift-style.
+      chmod -R g+rwX "$D/opt/bitnami"
+
+  - runs: |
+      D="${{targets.destdir}}"
+      export LD_LIBRARY_PATH=/opt/bitnami/postgresql/lib
+      /opt/bitnami/postgresql/bin/postgres --version | grep -q "${{package.version}}"
+      /opt/bitnami/postgresql/bin/psql --version | grep -q "${{package.version}}"
+      /opt/bitnami/postgresql/bin/pg_isready --version | grep -q "${{package.version}}"
+      test -x "$D/opt/bitnami/scripts/postgresql/entrypoint.sh"
+      test -x "$D/opt/bitnami/scripts/postgresql/setup.sh"
+      test -f "$D/opt/bitnami/scripts/libpostgresql.sh"  # sourced, shipped 644
+      test -x "$D/usr/sbin/run-script"
+      test -x "$D/opt/bitnami/common/bin/hostname"
+      test -x "$D/opt/bitnami/common/bin/cp"
+      test -L "$D/opt/bitnami/postgresql/logs/postgresql.log"
+      test -d "$D/bitnami/postgresql"
+      test -d "$D/docker-entrypoint-initdb.d"
+      test -d "$D/docker-entrypoint-preinitdb.d"

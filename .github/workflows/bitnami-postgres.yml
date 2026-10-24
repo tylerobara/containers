@@ -1,0 +1,407 @@
+name: bitnami-postgres
+
+# Publishes the Bitnami-compatible PostgreSQL images (PGDG source compiled by
+# melange into the Bitnami /opt layout + the sha-pinned bitnami/containers
+# legacy script tree, assembled by apko on Wolfi — no Dockerfile) to ghcr,
+# scanned with grype, cosign keyless signed when clean, cataloged on GitHub
+# Pages. One workflow per image family; the cert identity for cosign is THIS
+# file's name — verify with the identity in the sign step below.
+#   - pull_request runs the whole pipeline WITHOUT publish/sign/pages: melange
+#     build (postgresql + repmgr + pgaudit per major), apko lock guard, local
+#     apko build, test.sh, grype — bump PRs are proven green before merge.
+#     The same validate-only path is on demand via workflow_dispatch (ref +
+#     validate_only), which is how you validate a bot-opened PR.
+#   - schedule/workflow_dispatch always full-rebuild; push/PR cancel stale runs.
+#
+# Tags: <major>, <major.minor>, <major>-wolfi, <minor>-wolfi per leg, plus
+# :latest from the highest-major leg only (never races across majors).
+#
+# Upstream: PGDG releases become bump PRs via update-versions.yml
+# (bitnami-postgresql-<major> rows); repmgr/pgaudit pins are bumped by hand
+# per images/bitnami-postgres/README.md.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - images/bitnami-postgres/**
+      - .github/workflows/bitnami-postgres.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - images/bitnami-postgres/**
+      - .github/workflows/bitnami-postgres.yml
+  schedule:
+    - cron: '45 7 * * *' # daily — republishes tags so Wolfi CVE patches land within a day
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Ref to build (defaults to the branch dispatched from). Use a bump-PR branch to validate it."
+        required: false
+        default: ""
+      validate_only:
+        description: "Build + scan without publishing/signing/deploying pages"
+        type: boolean
+        default: false
+
+concurrency:
+  group: bitnami-postgres-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+
+env:
+  MELANGE_VERSION: v0.63.0
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # ----------------------------------------------------------------------------
+  # DETECT WHAT CHANGED — full rebuild on cron/dispatch/workflow-edits, surgical
+  # per-major builds on push/PR (matrix derived from the melange configs on
+  # disk: PG19 support = add postgresql-19.yaml, no workflow edit).
+  # ----------------------------------------------------------------------------
+  detect-changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      pg-matrix: ${{ steps.filter.outputs.pg-matrix }}
+      build-pg-matrix: ${{ steps.filter.outputs.build-pg-matrix }}
+      has-pg: ${{ steps.filter.outputs.has-pg }}
+      max-major: ${{ steps.filter.outputs.max-major }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed images and build matrices
+        id: filter
+        run: |
+          set -euo pipefail
+          EVENT='${{ github.event_name }}'
+          ALL_MAJORS=$(find images/bitnami-postgres/melange -name 'postgresql-*.yaml' 2>/dev/null \
+            | sed -nE 's|.*/postgresql-([0-9]+)\.yaml$|\1|p' || true)
+          FULL=false; MAJORS=""
+
+          if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; then
+            FULL=true
+          else
+            if [ "$EVENT" = pull_request ]; then
+              BASE='${{ github.event.pull_request.base.sha }}'
+            else
+              BASE='${{ github.event.before }}'
+            fi
+            if [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+              FULL=true
+            else
+              CHANGED=$(git diff --name-only "$BASE" '${{ github.sha }}')
+              echo "Changed files:"; echo "${CHANGED:-}" | sed '/^$/d; s/^/  /'
+              [ -z "${CHANGED:-}" ] && FULL=true
+              # Any change to the pipeline itself → trust nothing, rebuild all.
+              echo "${CHANGED:-}" | grep -qE '^\.github/' && FULL=true
+              PG_CHANGED=$(echo "${CHANGED:-}" | grep '^images/bitnami-postgres/' || true)
+              if [ -n "$PG_CHANGED" ]; then
+                if echo "$PG_CHANGED" | grep -qvE '^images/bitnami-postgres/melange/(postgresql|repmgr|pgaudit)-[0-9]+\.yaml$'; then
+                  # shared piece moved (apko template, test.sh, ...) → all majors
+                  MAJORS="$ALL_MAJORS"
+                else
+                  MAJORS=$(echo "$PG_CHANGED" | sed -nE 's|.*-(1?[0-9]+)\.yaml$|\1|p' | sort -u)
+                fi
+              fi
+            fi
+          fi
+
+          if [ "$FULL" = true ]; then MAJORS="$ALL_MAJORS"; fi
+          numstream() { tr ' ' '\n' <<< "${1:-}" | grep -E '^[0-9]+$' | sort -u; }
+          MAJ_JSON=$(comm -12 <(numstream "$MAJORS") <(numstream "$ALL_MAJORS") \
+            | jq -R . | jq -sc . || true)
+          MAJ_JSON=${MAJ_JSON:-[]}; [ "$(jq -c . <<<"$MAJ_JSON")" ] || MAJ_JSON='[]'
+
+          PG_MATRIX=$(jq -cn --argjson m "$MAJ_JSON" \
+            '{include: [$m[] as $maj | [{"arch":"x86_64","runner":"ubuntu-latest"},{"arch":"aarch64","runner":"ubuntu-24.04-arm"}][] | . + {major: $maj}]}')
+          BUILD_PG_MATRIX=$(jq -cn --argjson m "$MAJ_JSON" '{include: [$m[] as $maj | {major: $maj}]}')
+
+          echo "DEBUG ALL_MAJORS=[$ALL_MAJORS] MAJORS=[$MAJORS]"
+          echo "DEBUG MAJ_JSON=$MAJ_JSON"
+          echo "DEBUG PG_MATRIX=$PG_MATRIX"
+          echo "DEBUG BUILD_PG_MATRIX=$BUILD_PG_MATRIX"
+
+          {
+            echo "pg-matrix=$(tr -d '\n\r' <<<"$PG_MATRIX")"
+            echo "build-pg-matrix=$(tr -d '\n\r' <<<"$BUILD_PG_MATRIX")"
+            echo "has-pg=$(jq 'length > 0' <<<"$MAJ_JSON")"
+            echo "max-major=$(numstream "$ALL_MAJORS" | sort -n | tail -1)"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Build plan"
+            echo "- postgres majors: $(jq -c . <<<"$MAJ_JSON")"
+            echo "- full rebuild: $FULL ($EVENT)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # One signing key for the whole run: apko verifies every arch's package
+  # index, so all melange jobs must sign with the same key.
+  keygen:
+    runs-on: ubuntu-latest
+    outputs:
+      pub: ${{ steps.k.outputs.pub }}
+      priv: ${{ steps.k.outputs.priv }}
+    steps:
+      - name: Install melange
+        run: go install chainguard.dev/melange@${{ env.MELANGE_VERSION }}
+
+      - name: Generate key
+        id: k
+        run: |
+          ~/go/bin/melange keygen
+          { echo "pub=$(base64 -w0 melange.rsa.pub)"; echo "priv=$(base64 -w0 melange.rsa)"; } >> "$GITHUB_OUTPUT"
+
+  melange:
+    needs: [keygen, detect-changes]
+    if: ${{ !cancelled() && needs.keygen.result == 'success' && needs.detect-changes.outputs.has-pg == 'true' }}
+    runs-on: ${{ matrix.runner }}
+    # Three C builds per leg (server + repmgr + pgaudit), two legs per major.
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      # NOTE: the whole matrix: key must carry the fromJSON expression (see
+      # postgres.yml — expression on matrix.include: alone silently drops jobs).
+      matrix: ${{ fromJSON(needs.detect-changes.outputs.pg-matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Install melange
+        run: go install chainguard.dev/melange@${{ env.MELANGE_VERSION }}
+
+      - name: Restore signing key
+        run: |
+          # melange signs the packages + the APKINDEX host-side with this key;
+          # the build job mounts the .pub onto /work/melange.rsa.pub for apko,
+          # which must verify with the SAME key (hence one keygen per run).
+          echo '${{ needs.keygen.outputs.priv }}' | base64 -d > melange.rsa && chmod 600 melange.rsa
+          echo '${{ needs.keygen.outputs.pub }}' | base64 -d > melange.rsa.pub
+
+      - name: Build postgresql/repmgr/pgaudit-${{ matrix.major }} (${{ matrix.arch }})
+        run: |
+          for cfg in postgresql repmgr pgaudit; do
+            ~/go/bin/melange build "images/bitnami-postgres/melange/${cfg}-${{ matrix.major }}.yaml" \
+              --arch ${{ matrix.arch }} \
+              --signing-key melange.rsa \
+              --out-dir ./packages \
+              --runner docker
+          done
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packages-pg-${{ matrix.major }}-${{ matrix.arch }}
+          path: |
+            packages/
+            melange.rsa.pub
+
+  build:
+    # Run even if one melange leg failed — its major fails alone instead of
+    # blocking the others.
+    if: ${{ !cancelled() && needs.keygen.result == 'success' && needs.detect-changes.outputs.has-pg == 'true' }}
+    needs: [keygen, melange, detect-changes]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.detect-changes.outputs.build-pg-matrix) }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # only for cosign keyless below
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}/bitnami-postgres
+      PG_MAJOR: ${{ matrix.major }}
+      MAX_MAJOR: ${{ needs.detect-changes.outputs.max-major }}
+      PUBLISH: ${{ github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.validate_only != true) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: packages-pg-${{ matrix.major }}-*
+          path: .
+          merge-multiple: true
+
+      - name: Resolve pinned versions + render apko config
+        run: |
+          mkdir -p build
+          # The melange configs are the source of truth for the pinned minors.
+          PG_FULL=$(awk '/^  version:/{print $2; exit}' "images/bitnami-postgres/melange/postgresql-$PG_MAJOR.yaml")
+          case "$PG_FULL" in
+            "$PG_MAJOR".[0-9]*) echo "PG_FULL=$PG_FULL" >> "$GITHUB_ENV" ;;
+            *) echo "bad version '$PG_FULL' in melange config"; exit 1 ;;
+          esac
+          sed -e "s/@@MAJOR@@/$PG_MAJOR/g" -e "s/@@FULL@@/$PG_FULL/g" images/bitnami-postgres/apko/postgresql.yaml.tpl > "build/postgresql-$PG_MAJOR.yaml"
+          # :latest only ever from the highest-major leg (no cross-major race).
+          TAGS="$PG_MAJOR $PG_FULL $PG_MAJOR-wolfi $PG_FULL-wolfi"
+          [ "$PG_MAJOR" = "$MAX_MAJOR" ] && TAGS="$TAGS latest"
+          echo "TAGS=$TAGS" >> "$GITHUB_ENV"
+          echo "Publishing tags: $TAGS"
+
+      - name: Resolve package versions (apko lock, local repo wins)
+        run: |
+          docker run --rm --user root \
+            -v "$PWD:/work" \
+            -v "$PWD/melange.rsa.pub:/work/melange.rsa.pub:ro" \
+            cgr.dev/chainguard/apko lock "/work/build/postgresql-$PG_MAJOR.yaml" \
+              --arch x86_64 --arch aarch64 \
+              --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
+              --output "/work/build/pg-$PG_MAJOR.lock.json"
+          # Every locally-built package must resolve to OUR build: provider-
+          # priority is only consulted on a version tie, and repmgr/pgaudit DO
+          # tie with wolfi's 18-series (r100 breaks it). One Wolfi slip means
+          # an unloadable /usr-layout extension — hard-fail, all three.
+          for pkg in postgresql repmgr pgaudit; do
+            cfg="images/bitnami-postgres/melange/${pkg}-$PG_MAJOR.yaml"
+            want_v=$(awk '/^  version:/{print $2; exit}' "$cfg")
+            want_e=$(awk '/^  epoch:/{print $2; exit}' "$cfg")
+            RESOLVED=$(jq -r --arg p "${pkg}-$PG_MAJOR" \
+              '.contents.packages[] | select(.name==$p) | .version' "build/pg-$PG_MAJOR.lock.json" | head -1)
+            if [ "$RESOLVED" != "${want_v}-r${want_e}" ]; then
+              echo "apko resolved ${pkg}-$PG_MAJOR as '$RESOLVED', expected '${want_v}-r${want_e}' (lost resolution to Wolfi)"; exit 1
+            fi
+          done
+
+      - name: Log in to ghcr
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Publish multi-arch image to ghcr
+        if: env.PUBLISH == 'true'
+        run: |
+          M=$PG_MAJOR
+          TAG_ARGS=()
+          for t in $TAGS; do TAG_ARGS+=("$IMAGE:$t"); done
+          # ghcr intermittently 500s on publish (nested-package creation race) —
+          # retry before believing the failure.
+          for i in 1 2 3; do
+            if docker run --rm --user root \
+              -v "$PWD/build:/work/build:ro" \
+              -v "$PWD/packages:/work/packages:ro" \
+              -v "$PWD/melange.rsa.pub:/work/melange.rsa.pub:ro" \
+              -v "$HOME/.docker:/root/.docker:ro" \
+              cgr.dev/chainguard/apko publish "/work/build/postgresql-$M.yaml" \
+                "${TAG_ARGS[@]}" \
+                --arch x86_64,aarch64 \
+                --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
+                --lockfile "/work/build/pg-$M.lock.json"; then
+              break
+            fi
+            [ "$i" = 3 ] && { echo "apko publish failed after 3 attempts"; exit 1; }
+            echo "publish attempt $i failed; retrying in 15s"; sleep 15
+          done
+          echo "IMG_REF=$IMAGE:$PG_FULL" >> "$GITHUB_ENV"
+          echo "GRYPE_SRC=registry:$IMAGE:$PG_FULL" >> "$GITHUB_ENV"
+
+      - name: Build image locally (validate-only, no registry)
+        if: env.PUBLISH != 'true'
+        run: |
+          # Native arch proves the assembly + smoke test on PRs; the lock guard
+          # above already proved both arches resolve. The local tag must still
+          # start with the PG major: test.sh enforces the tag convention.
+          docker run --rm --user root \
+            -v "$PWD:/work" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            cgr.dev/chainguard/apko publish "/work/build/postgresql-$PG_MAJOR.yaml" \
+              "bitnami-pg-$PG_MAJOR:$PG_FULL-validate" \
+              --arch x86_64 \
+              --local \
+              --repository-append /work/packages --keyring-append /work/melange.rsa.pub
+          echo "IMG_REF=bitnami-pg-$PG_MAJOR:$PG_FULL-validate" >> "$GITHUB_ENV"
+          echo "GRYPE_SRC=docker:bitnami-pg-$PG_MAJOR:$PG_FULL-validate" >> "$GITHUB_ENV"
+
+      - name: Smoke test image
+        run: |
+          [ "$PUBLISH" = true ] && docker pull --platform linux/amd64 "$IMG_REF"
+          IMAGE="$IMG_REF" PG_MAJOR="$PG_MAJOR" ./images/bitnami-postgres/test.sh
+          # The whole point of the melange stage: the shipped binary must be
+          # the PGDG minor the tags claim, not Wolfi's stale prebuild.
+          docker run --rm --user 1001 --entrypoint /opt/bitnami/postgresql/bin/postgres \
+            "$IMG_REF" --version | grep -q "$PG_FULL" \
+            || { echo "image reports a version other than $PG_FULL"; exit 1; }
+
+      - name: Scan image with grype
+        run: |
+          mkdir -p scans
+          # || true: findings must not fail the job — the SIGNING gate reads
+          # the JSON; the job summary reports the counts.
+          docker run --rm --user 0:0 \
+            -v "$PWD/scans:/out" \
+            -v "$HOME/.docker:/root/.docker:ro" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            ghcr.io/anchore/grype:latest "$GRYPE_SRC" \
+              --output json --file "/out/bitnami-postgres-$PG_MAJOR.json" || true
+          # Signing gate: anything Low or above blocks. Negligible/Unknown are
+          # excluded on purpose — Wolfi's secdb parks "no fix recorded" CVEs in
+          # Unknown, which would veto signing forever.
+          LOWPLUS=$(jq '[.matches[] | select(.vulnerability.severity
+                     | IN("Low","Medium","High","Critical"))] | length' \
+            "scans/bitnami-postgres-$PG_MAJOR.json")
+          echo "lowplus=$LOWPLUS" >> "$GITHUB_OUTPUT"
+          echo "postgresql-$PG_MAJOR (bitnami) Low+ findings: $LOWPLUS" >> "$GITHUB_STEP_SUMMARY"
+        id: scan
+
+      # Keyless signing on the manifest DIGEST. Verify with:
+      #   cosign verify \
+      #     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      #     --certificate-identity-regexp '^https://github.com/tylerobara/containers/\.github/workflows/bitnami-postgres\.yml@refs/heads/main$' \
+      #     ghcr.io/tylerobara/containers/bitnami-postgres:<tag>
+      - name: Sign with cosign (only when scan has 0 Low+ findings)
+        if: env.PUBLISH == 'true' && steps.scan.outputs.lowplus == '0'
+        run: |
+          DIGEST=$(docker buildx imagetools inspect "$IMG_REF" \
+            --format '{{json .Manifest}}' | jq -r .digest)
+          docker run --rm --user 0:0 \
+            -v "$HOME/.docker:/root/.docker:ro" \
+            -e DOCKER_CONFIG=/root/.docker \
+            -e GITHUB_ACTIONS \
+            -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+            ghcr.io/sigstore/cosign/cosign:latest sign --yes "$IMG_REF@$DIGEST"
+          echo "SIGNED=true" >> "$GITHUB_ENV"
+
+      - name: Build pages data
+        if: env.PUBLISH == 'true'
+        run: |
+          DIGEST=$(docker buildx imagetools inspect "$IMG_REF" \
+            --format '{{json .Manifest}}' | jq -r .digest)
+          jq -n \
+            --arg image "$IMAGE" --argjson major "$PG_MAJOR" --arg version "$PG_FULL" \
+            --arg digest "$DIGEST" --arg built "$(date -u +%FT%TZ)" \
+            --arg tags "$TAGS" \
+            --arg built_with melange --argjson signed "${SIGNED:-false}" \
+            --arg signed_by bitnami-postgres.yml \
+            --slurpfile scan "scans/bitnami-postgres-$PG_MAJOR.json" \
+            '{image: $image, major: $major, version: $version,
+              tags: ($tags | split(" ")), digest: $digest, built: $built, built_with: $built_with,
+              signed: $signed, signed_by: $signed_by,
+              scan: $scan[0]}' > "scans/bitnami-postgres-$PG_MAJOR.json.tmp"
+          mv "scans/bitnami-postgres-$PG_MAJOR.json.tmp" "scans/bitnami-postgres-$PG_MAJOR.json"
+
+      - uses: actions/upload-artifact@v7
+        if: env.PUBLISH == 'true'
+        with:
+          name: pages-data-bitnami-pg-${{ matrix.major }}
+          path: scans/bitnami-postgres-${{ matrix.major }}.json
+
+  pages:
+    # Merge this run's fresh entries over the live index (see site.yml).
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.detect-changes.outputs.has-pg == 'true' }}
+    needs: [detect-changes, build]
+    permissions:
+      contents: write # push the generated gh-pages branch
+    uses: ./.github/workflows/site.yml
+    with:
+      artifact-pattern: pages-data-bitnami-pg-*
+      ref: ${{ inputs.ref || github.ref }}
