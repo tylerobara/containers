@@ -53,8 +53,8 @@ pipeline:
       # postgresql-15); install is root here, then the PGXS layout is
       # re-homed into the /opt server's dirs (see repmgr-15.yaml — same
       # reason: /usr/lib/postgresql15/ is unloadable for this image).
-      make USE_PGXS=1 PG_CONFIG=/usr/bin/pg_config -j"$(nproc)"
-      make install USE_PGXS=1 PG_CONFIG=/usr/bin/pg_config
+      make USE_PGXS=1 PG_CONFIG=/usr/bin/pg_config with_llvm=no -j"$(nproc)"
+      make install USE_PGXS=1 PG_CONFIG=/usr/bin/pg_config with_llvm=no
       D="${{targets.destdir}}"
       install -d -m 755 "$D/opt/bitnami/postgresql/lib/postgresql" \
                         "$D/opt/bitnami/postgresql/share/extension"

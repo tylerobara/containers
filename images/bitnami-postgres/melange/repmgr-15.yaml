@@ -66,8 +66,8 @@ pipeline:
       ./configure --prefix=/usr   # prefix: binaries to /usr/bin (pg_config's
                                   # bindir) so the re-home below finds them;
                                   # extension dirs come from pg_config itself
-      make -j"$(nproc)"
-      make install
+      make -j"$(nproc)" with_llvm=no
+      make install with_llvm=no
       # Re-home the PGXS install (root container) into the bitnami layout:
       # binaries to /opt/bitnami/repmgr/bin (where bitnami kept them), the
       # extension bits into the /opt server's dirs (shared with the

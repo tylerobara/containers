@@ -42,6 +42,14 @@ environment:
       - json-c-dev
       - postgresql-16
       - postgresql-16-dev
+      # PGXS drags the server's own LIBS into the link line (Makefile.global
+      # from wolfi's postgresql-16); 16+ there gained zstd/lz4/xml2/xslt/pam.
+      - krb5-dev
+      - zstd-dev
+      - lz4-dev
+      - libxml2-dev
+      - libxslt-dev
+      - linux-pam-dev
 
 pipeline:
   - runs: |
@@ -66,8 +74,8 @@ pipeline:
       ./configure --prefix=/usr   # prefix: binaries to /usr/bin (pg_config's
                                   # bindir) so the re-home below finds them;
                                   # extension dirs come from pg_config itself
-      make -j"$(nproc)"
-      make install
+      make -j"$(nproc)" with_llvm=no
+      make install with_llvm=no
       # Re-home the PGXS install (root container) into the bitnami layout:
       # binaries to /opt/bitnami/repmgr/bin (where bitnami kept them), the
       # extension bits into the /opt server's dirs (shared with the
