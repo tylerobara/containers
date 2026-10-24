@@ -486,4 +486,17 @@ jobs:
               gatus
           fi
 
+
+          # --- kubernetes-reflector: releases/latest is a vX.Y.Z GitVersion tag ---
+          if want kubernetes-reflector; then
+            latest=$(gh api repos/emberstack/kubernetes-reflector/releases/latest --jq '.tag_name | ltrimstr("v")')
+            if [ -z "$latest" ]; then
+              echo "::error::kubernetes-reflector: no release found upstream"
+              FAILED=1
+            else
+              bump_row kubernetes-reflector images/kubernetes-reflector/melange/kubernetes-reflector.yaml "$latest" \
+                "https://github.com/emberstack/kubernetes-reflector/archive/refs/tags/v${latest}.tar.gz" kubernetes-reflector
+            fi
+          fi
+
           exit $FAILED
