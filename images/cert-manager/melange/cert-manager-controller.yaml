@@ -12,7 +12,7 @@
 
 package:
   name: cert-manager-controller
-  version: 1.21.2
+  version: 1.21.3
   epoch: 101
   description: "cert-manager controller built from upstream source"
   copyright:
@@ -22,10 +22,10 @@ package:
 
 vars:
   # SHA256 of the GitHub release tarball (shared by all three configs)
-  sha256: 7654466dc0859d72e5bf0f5f88e9ba7bd41bd328e092ad953781bca4b1a5079b
+  sha256: fa2ea8e1a014289f12d1b1c939afa4b119ee116f8a5990e4662d439e10378c3f
   # Commit behind the upstream tag; injected exactly like upstream's release
   # build so the startup banner (version/git_commit) matches it.
-  git_commit: 922a06aa49ee4bb802db268ef72a174af70edd32
+  git_commit: ea04791b027b1ddd1884a02043ee8c9c097fc3ac
   # Upstream 1.21.2 pins vulnerable Go modules (grype Critical/High in
   # x/net <0.60.0; Low GHSA-8wmf-6v46-5gfg in otel <=1.44.0); we `go get`
   # them up to the patched releases before compiling. go get only raises
