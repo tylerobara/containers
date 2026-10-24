@@ -161,7 +161,7 @@ pipeline:
       # conf.default/logs/tmp/volume dirs, generates postgresql.conf from the
       # $(datadir) sample with include_dir, writes the trust pg_hba.conf,
       # chmods g+rwX, symlinks the log files to /dev/stdout.
-      /opt/bitnami/scripts/postgresql/postunpack.sh
+      bash -x /opt/bitnami/scripts/postgresql/postunpack.sh
       test -f /opt/bitnami/postgresql/conf.default/postgresql.conf
       test -f /opt/bitnami/postgresql/conf.default/pg_hba.conf
       grep -q include_dir /opt/bitnami/postgresql/conf.default/postgresql.conf
