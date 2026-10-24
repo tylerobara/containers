@@ -239,7 +239,7 @@ jobs:
             "$PG_MAJOR".[0-9]*) echo "PG_FULL=$PG_FULL" >> "$GITHUB_ENV" ;;
             *) echo "bad version '$PG_FULL' in melange config"; exit 1 ;;
           esac
-          sed "s/@@MAJOR@@/$PG_MAJOR/g" images/bitnami-postgres/apko/postgresql.yaml.tpl > "build/postgresql-$PG_MAJOR.yaml"
+          sed -e "s/@@MAJOR@@/$PG_MAJOR/g" -e "s/@@FULL@@/$PG_FULL/g" images/bitnami-postgres/apko/postgresql.yaml.tpl > "build/postgresql-$PG_MAJOR.yaml"
           # :latest only ever from the highest-major leg (no cross-major race).
           TAGS="$PG_MAJOR $PG_FULL $PG_MAJOR-wolfi $PG_FULL-wolfi"
           [ "$PG_MAJOR" = "$MAX_MAJOR" ] && TAGS="$TAGS latest"

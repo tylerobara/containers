@@ -149,12 +149,28 @@ environment:
   PATH: /opt/bitnami/postgresql/bin:/opt/bitnami/common/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
   LD_LIBRARY_PATH: /opt/bitnami/postgresql/lib
   LANG: en_US.UTF-8
+  LANGUAGE: en_US:en
   BITNAMI_DEBUG: "false"
   HOME: /
+  # The entrypoint runs under `set -o nounset` and sources libbitnami.sh
+  # (print_welcome_page derefs $BITNAMI_APP_NAME) BEFORE postgresql-env.sh
+  # supplies its own defaults — so the image itself must carry the ENV block
+  # the upstream Dockerfile sets, or first boot dies on an unbound variable.
+  # NSS_WRAPPER_LIB mirrors upstream's path: the file is not shipped, so
+  # postgresql_enable_nss_wrapper's [[ -f ]] guard makes it a clean no-op.
+  BITNAMI_APP_NAME: postgresql
+  BITNAMI_ROOT_DIR: /opt/bitnami
+  NSS_WRAPPER_LIB: /opt/bitnami/common/lib/libnss_wrapper.so
+  APP_VERSION: "@@FULL@@"
 
 paths:
   # Mutable tree for the 1001 runtime user (bitnami's own postunpack already
-  # chmod'd g+rwX in the package; ownership comes from apko here).
+  # chmod'd g+rwX in the package; ownership comes from apko here). conf/ is
+  # deliberately EMPTY in the apk: setup.sh rewrites conf/postgresql.conf and
+  # conf/pg_hba.conf at boot, and files shipped in a package keep the build
+  # owner (apk tars preserve staging ownership; apko paths do not chown
+  # package files) — so the entrypoint's `cp -nr conf.default/. conf/`
+  # materializes them at first boot, owned by whoever runs the container.
   - path: /opt/bitnami/postgresql/conf
     type: directory
     uid: 1001
