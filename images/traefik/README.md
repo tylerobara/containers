@@ -14,7 +14,7 @@ only the dashboard HTML/JS is absent, which matches how this one is used:
 ```
 docker run --rm ghcr.io/tylerobara/containers/traefik:latest version
 docker run --rm ghcr.io/tylerobara/containers/traefik:latest \
-  --entrypoints.web.address=:80 --ping --api.dashboard=false   # /ping on :8082
+  --entrypoints.web.address=:80 --ping --api.dashboard=false   # /ping on :8080
 ```
 
 ## Running

@@ -50,4 +50,4 @@ entrypoint:
 # image likewise ships ENTRYPOINT ["/traefik"] with no CMD, so `docker run
 # <img> <flags>` is the whole interface. Ports are whatever you declare via
 # --entrypoints.*.flags (minilab ingress: web :80 / websecure :443; --ping
-# serves /ping on the traefik entrypoint :8082).
+# serves /ping on the traefik entrypoint :8080).
