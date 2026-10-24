@@ -126,6 +126,10 @@ pipeline:
       mkdir -p /home/build/bitnami/x
       tar xzf /home/build/bitnami/containers.tar.gz -C /home/build/bitnami/x
       B=/home/build/bitnami/x/containers-${{vars.bitnami_commit}}/bitnami/postgresql/15/debian-12
+      # The melange build rootfs ships /usr/sbin as a merged-usr symlink and
+      # busybox cp refuses a symlink as copy target — give the copy an actual
+      # directory to land prebuildfs/usr/sbin/run-script in.
+      [ -d /usr/sbin ] && [ ! -L /usr/sbin ] || { rm -rf /usr/sbin; mkdir -p /usr/sbin; }
       cp -a "$B/prebuildfs/." /   # libs (libbitnami/libos/...) + /usr/sbin/run-script
       cp -a "$B/rootfs/." /       # app scripts (postgresql/*, libpostgresql.sh)
 
