@@ -36,7 +36,7 @@ contents:
     # apko's resolver ranks version above provider-priority, so a bare "frr"
     # resolves to wolfi frr-10.6 despite our k:100. Keep in sync with the
     # melange version+epoch (the update-versions bot rewrites this line).
-    - frr=10.4.3-r100
+    - frr=10.7.1-r100
 
 accounts:
   groups:
