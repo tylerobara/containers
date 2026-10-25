@@ -13,7 +13,7 @@
 
 package:
   name: frr
-  version: 10.4.3
+  version: 10.7.1
   epoch: 100
   description: "FRRouting Protocol Suite built from upstream source"
   copyright:
@@ -29,7 +29,7 @@ package:
 
 vars:
   # SHA256 of the GitHub release tarball (tag frr-<version>)
-  sha256: 4538af008f8a02454aa5ea8939fadfe6f104a29a58057668bc1fae5edc54840b
+  sha256: 6aaf9d89deb94eeda6acceaa6fe48d8cd365d0908231e58f628538ff49696fc4
 
 environment:
   contents:
