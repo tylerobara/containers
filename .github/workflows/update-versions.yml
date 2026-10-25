@@ -62,8 +62,17 @@ jobs:
           }
 
           bump_row() { # bump_row <name> <yaml-path> <latest> <tarball-url> <validating-workflow>
+            # Row-scoped options, set immediately before the call and consumed
+            # once (cleared up front so state cannot leak into later rows):
+            #   PIN_FILE        apko yaml whose exact `- pkg=<ver>-rN` pin
+            #                   moves to the new version with the bump
+            #   GIT_COMMIT_REPO owner/repo whose v<latest> tag sha is stamped
+            #                   into the config's `^  git_commit:` var
+            # shellcheck disable=SC2154
             local name=$1 yaml=$2 latest=$3 url=$4 wf=$5
-            local cur branch sha
+            local pin=${PIN_FILE:-} gc_repo=${GIT_COMMIT_REPO:-}
+            unset PIN_FILE GIT_COMMIT_REPO
+            local cur branch sha gc extra
             cur=$(awk '/^  version:/{print $2; exit}' "$yaml")
             # only ever move forward (guards against ftp page noise)
             if [ "$(printf '%s\n%s\n' "$cur" "$latest" | sort -V | tail -1)" != "$latest" ] || [ "$cur" = "$latest" ]; then
@@ -88,9 +97,31 @@ jobs:
               return 0
             fi
 
+            extra=("$yaml")
+            if [ -n "$gc_repo" ]; then
+              gc=$(gh api "repos/$gc_repo/git/ref/tags/v$latest" --jq '.object.sha')
+              if [ -z "$gc" ]; then
+                echo "::error::$name: no commit sha for tag $gc_repo/v$latest"
+                FAILED=1; git checkout -- "$yaml"; return 0
+              fi
+              sed -i "s/^  git_commit: .*/  git_commit: $gc/" "$yaml"
+              if [ "$(awk '/^  git_commit:/{print $2; exit}' "$yaml")" != "$gc" ]; then
+                echo "::error::$name: git_commit edit did not land"
+                FAILED=1; git checkout -- "$yaml"; return 0
+              fi
+            fi
+            if [ -n "$pin" ]; then
+              sed -i "s/=$cur-r\([0-9]*\)/=$latest-r\1/" "$pin"
+              if ! grep -q -- "=$latest-r" "$pin"; then
+                echo "::error::$name: =pin sync did not land in $pin"
+                FAILED=1; git checkout -- "$yaml" "$pin"; return 0
+              fi
+              extra+=("$pin")
+            fi
+
             branch="bump/$name-$latest"
             git switch -c "$branch"
-            git add "$yaml"
+            git add "${extra[@]}"
             git commit -m "chore($name): bump $cur -> $latest"
             git push -f origin "$branch"
 
@@ -589,9 +620,10 @@ jobs:
               echo "::error::frr: no release found upstream"
               FAILED=1
             fi
+            PIN_FILE=images/frr/apko/frr.yaml
             bump_row frr "$yaml" "$latest" \
               "https://github.com/FRRouting/frr/archive/refs/tags/frr-${latest}.tar.gz" \
-              frr images/frr/apko/frr.yaml
+              frr
           fi
 
 
@@ -672,9 +704,11 @@ jobs:
               echo "::error::alpine-k8s-helm: no 3.x release tag found upstream"
               FAILED=1
             else
-              # apko =pin (helm=<ver>-r100) + vars.git_commit move with the
-              # bump by hand — the workflow's lock guard + melange assert step
-              # fail loudly if they drift from this config's version.
+              # Sync apko's =pin (helm=<ver>-r100) and vars.git_commit (the
+              # upstream tag's commit sha) with the bump; the workflow's lock
+              # guard + melange assert step still fail loudly on any drift.
+              PIN_FILE=images/alpine-k8s/apko/alpine-k8s.yaml
+              GIT_COMMIT_REPO=helm/helm
               bump_row alpine-k8s-helm "$yaml" "$latest" \
                 "https://github.com/helm/helm/archive/refs/tags/v${latest}.tar.gz" alpine-k8s
             fi
