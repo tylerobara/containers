@@ -14,7 +14,7 @@
 
 package:
   name: helm-controller
-  version: 1.7.0
+  version: 1.7.1
   epoch: 100
   description: "Flux helm-controller built from upstream source"
   copyright:
@@ -24,7 +24,7 @@ package:
 
 vars:
   # SHA256 of the GitHub release tarball
-  sha256: e21471d255f30727d99f51fd08824b05fe4ce01bd6267eec790d78d0ccdeaba7
+  sha256: 6ef4e18f60d54ce33e456f4c98fae9c18f0ee9176ac57eb1d89e22a9406a202e
   # Flag unique to this controller among the flux four; the verify step
   # greps it out of the flag dump to prove the right main package was built.
   ident_flag: oom-watch-interval
