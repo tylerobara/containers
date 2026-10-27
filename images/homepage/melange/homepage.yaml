@@ -83,11 +83,13 @@ pipeline:
       # SRI bypass) — all fixed in 8.12.2, absent from every upstream release
       # lock so far. Override only while the lock sits below 8.12.2; once
       # upstream's renovate lands it the branch stops firing, and this block
-      # can go. Assert keeps it honest: build dies if 8.12.2 didn't land.
+      # can go. Overrides go in pnpm-workspace.yaml: pnpm 12 no longer reads
+      # package.json's "pnpm" field (it warns and ignores). Assert keeps it
+      # honest: build dies if 8.12.2 didn't land.
       undici_cur=$(grep -m1 -oE '^  undici@[0-9]+\.[0-9]+\.[0-9]+' pnpm-lock.yaml | cut -d@ -f2)
       if [ "$(printf '%s\n%s\n' "$undici_cur" 8.12.2 | sort -V | head -1)" = "$undici_cur" ] && [ "$undici_cur" != "8.12.2" ]; then
         echo "patching undici $undici_cur -> 8.12.2 (3 advisories)"
-        pnpm pkg set pnpm.overrides.undici=8.12.2
+        printf 'overrides:\n  undici: 8.12.2\n' >> pnpm-workspace.yaml
         pnpm install --lockfile-only
       fi
       pnpm install --frozen-lockfile --prefer-offline
