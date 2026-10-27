@@ -76,7 +76,26 @@ pipeline:
       # "created" label; epoch seconds parse as Invalid Date and crash the
       # page with RangeError: Invalid time value. VERSION keeps upstream's
       # "v" tag prefix so the footer's release link resolves.
+      #
+      # undici security patch: the upstream lock pins 8.11.2, which carries
+      # GHSA-xjj6-f33q-929c (High, DoS via content-encodings), GHSA-4qv8-2p9j-2685
+      # (Medium, EventSource unbounded memory) and GHSA-f72v-6w45-q472 (Medium,
+      # SRI bypass) — all fixed in 8.12.2, absent from every upstream release
+      # lock so far. Override only while the lock sits below 8.12.2; once
+      # upstream's renovate lands it the branch stops firing, and this block
+      # can go. Overrides go in pnpm-workspace.yaml: pnpm 12 no longer reads
+      # package.json's "pnpm" field (it warns and ignores). Assert keeps it
+      # honest: build dies if 8.12.2 didn't land.
+      undici_cur=$(grep -m1 -oE '^  undici@[0-9]+\.[0-9]+\.[0-9]+' pnpm-lock.yaml | cut -d@ -f2)
+      if [ "$(printf '%s\n%s\n' "$undici_cur" 8.12.2 | sort -V | head -1)" = "$undici_cur" ] && [ "$undici_cur" != "8.12.2" ]; then
+        echo "patching undici $undici_cur -> 8.12.2 (3 advisories)"
+        printf 'overrides:\n  undici: 8.12.2\n' >> pnpm-workspace.yaml
+        pnpm install --lockfile-only
+      fi
       pnpm install --frozen-lockfile --prefer-offline
+      undici_final=$(grep -m1 -oE '^  undici@[0-9]+\.[0-9]+\.[0-9]+' pnpm-lock.yaml | cut -d@ -f2)
+      [ "$(printf '%s\n%s\n' "$undici_final" 8.12.2 | sort -V | head -1)" = "8.12.2" ] \
+        || { echo "undici $undici_final still below the 8.12.2 fix"; exit 1; }
       NEXT_TELEMETRY_DISABLED=1 \
       NEXT_PUBLIC_BUILDTIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
       NEXT_PUBLIC_VERSION=v${{package.version}} \
