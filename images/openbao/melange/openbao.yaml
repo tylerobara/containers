@@ -10,7 +10,7 @@
 
 package:
   name: openbao
-  version: 2.7.1
+  version: 2.7.2
   epoch: 102
   description: "OpenBao secrets management built from upstream source"
   copyright:
@@ -20,7 +20,7 @@ package:
 
 vars:
   # SHA256 of the GitHub release tarball
-  sha256: 4d69328fa9110734f7740547f5aa7fc77f32141eaab9f7e965abb4f748c4a81a
+  sha256: 11b48e34ea1bbad5db4044ced904c7f1a4265da5230551463846c6745e507797
 
 environment:
   contents:
