@@ -714,4 +714,21 @@ jobs:
             fi
           fi
 
+          # --- valkey: latest GitHub release (upstream tags have NO v prefix,
+          # releases/latest .tag_name is a plain X.Y.Z; the apko world line is
+          # a floating `- valkey`, so no PIN_FILE sync — the workflow's lock
+          # guard fails loudly if Wolfi's valkey/valkey-<series> packages ever
+          # outrank our epoch-100 build) ---
+          if want valkey; then
+            yaml=images/valkey/melange/valkey.yaml
+            latest=$(gh api repos/valkey-io/valkey/releases/latest --jq '.tag_name')
+            if [ -z "$latest" ]; then
+              echo "::error::valkey: no release found upstream"
+              FAILED=1
+            fi
+            bump_row valkey "$yaml" "$latest" \
+              "https://github.com/valkey-io/valkey/archive/refs/tags/${latest}.tar.gz" \
+              valkey
+          fi
+
           exit $FAILED
