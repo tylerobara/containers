@@ -21,7 +21,7 @@
 package:
   name: traefik
   version: 3.7.16
-  epoch: 100
+  epoch: 101
   description: "Traefik reverse proxy built from upstream source"
   copyright:
     - license: MIT
@@ -32,11 +32,16 @@ vars:
   # SHA256 of the GitHub release tarball
   sha256: c59b3133f793cb532046bca8c53aea430317402f0b4641582fad63522d6c2fe8
   # Upstream 3.7.14 pins a vulnerable Go module (grype Critical/High in
-  # x/net <0.60.0); we `go get` it up to the patched release before
+  # x/net <0.60.0); we `go get` them up to the patched releases before
   # compiling. go get only raises requirements (MVS never downgrades), so
-  # once upstream ships >= this the bump is a no-op — retire the pin then.
+  # once upstream ships >= these the bumps are no-ops — retire the pins then.
   # (otel 1.46.0 / grpc 1.83.2 already ship patched in go.mod.)
-  xnet_version: 0.60.0
+  # x/net 0.62.0 additionally covers GO-2026-6860 / CVE-2026-78661 (x/net/html
+  # quadratic-complexity DoS on text-node coalescing, published Oct 27);
+  # go-jose/v4 4.1.6 covers GHSA-mgcc-cww5-fp2q / CVE-2026-116587 (JWK RSA
+  # parse DoS; same override as gatus/openbao/pocket-id, upstream still 4.1.5).
+  xnet_version: 0.62.0
+  gojose_version: 4.1.6
   # Release codename stamped by upstream's release CI (release.yaml).
   codename: langres
 
@@ -71,7 +76,8 @@ pipeline:
       # Raise the vulnerable dep pin (see vars); a no-op once upstream
       # ships >= this. (Only `go build` gets build flags — `go get`
       # rejects them; upstream passes no GOFLAGS at all.)
-      go get golang.org/x/net@v${{vars.xnet_version}}
+      go get golang.org/x/net@v${{vars.xnet_version}} \
+        github.com/go-jose/go-jose/v4@v${{vars.gojose_version}}
       go build -trimpath -buildvcs=false \
         -ldflags "-s -w \
           -X github.com/traefik/traefik/v3/pkg/version.Version=v${{package.version}} \
@@ -93,3 +99,7 @@ pipeline:
         | awk -F'\t' '$3=="golang.org/x/net"{print $4; exit}')
       [ "$(printf '%s\n%s\n' "$ver" "v${{vars.xnet_version}}" | sort -V | head -1)" = "v${{vars.xnet_version}}" ] \
         || { echo "golang.org/x/net is '$ver' in the binary, want >= v${{vars.xnet_version}}"; exit 1; }
+      gjver=$(go version -m "${{targets.destdir}}/usr/bin/traefik" \
+        | awk -F'\t' '$3=="github.com/go-jose/go-jose/v4"{print $4; exit}')
+      [ "$(printf '%s\n%s\n' "$gjver" "v${{vars.gojose_version}}" | sort -V | head -1)" = "v${{vars.gojose_version}}" ] \
+        || { echo "go-jose/v4 is '$gjver' in the binary, want >= v${{vars.gojose_version}}"; exit 1; }
