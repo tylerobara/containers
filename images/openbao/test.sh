@@ -54,6 +54,27 @@ until curl -fsS "http://127.0.0.1:${port}/v1/sys/health" >/dev/null 2>&1; do
   [ "$i" -gt 30 ] && { docker logs "$cid"; fail "dev server never became healthy"; }
   sleep 1
 done
+
+echo "Testing embedded Ember UI on /ui/ (issue #69)..."
+# curl writes to a file: the ember index is MBs of inline SVG, and a piped
+# `echo "$page" | grep -q` would let grep exit early and echo spit SIGPIPE noise
+page_f=$(mktemp)
+curl -fsS "http://127.0.0.1:${port}/ui/" -o "$page_f"
+if grep -qi 'not available in this binary' "$page_f"; then
+  docker logs "$cid"
+  fail "/ui/ serves the no-UI stub: binary built without the ui tag"
+fi
+grep -q '<title>OpenBao</title>' "$page_f" \
+  || fail "/ui/ is not the ember app index (missing <title>OpenBao</title>)"
+# the built index loads the ember bundles from the embedded FS; the stub page
+# references none of these
+grep -q '/ui/assets/vault\.js' "$page_f" \
+  || fail "/ui/ page references no ember vault.js bundle"
+# one real GET out of the go:embed FS proves the dist bytes shipped, not just index
+size=$(curl -fsS "http://127.0.0.1:${port}/ui/assets/vault.js" | wc -c | tr -d ' ')
+[ "$size" -gt 10000 ] || fail "embedded vault.js served only ${size} bytes"
+rm -f "$page_f"
+
 docker stop "$cid" >/dev/null
 trap - EXIT
 
