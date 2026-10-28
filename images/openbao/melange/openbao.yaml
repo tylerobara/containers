@@ -80,6 +80,11 @@ pipeline:
       # No vendor/ dir in the tarball, so modules resolve from the network.
       export CGO_ENABLED=0 GOTOOLCHAIN=local
       export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.27/bin"
+      # node tools (ember update-notifier/configstore) write $HOME/.config
+      # from detached child processes; landing inside the melange workspace
+      # (/home/build) as late root-owned files broke CI's xattr store step.
+      # Keep HOME off the workspace so nothing lands there.
+      export HOME=/tmp
       mkdir -p internal/http/web_ui  # Makefile's static-assets-dir
       # Bootstrap the exact pnpm pinned in ui/package.json packageManager
       # (Wolfi pnpm is node-22+, see env comment; upstream CI runs this same
