@@ -385,6 +385,18 @@
       "description": "The Pocket ID operator that reconciles instances, users, groups and OIDC clients from CRDs, compiled from the upstream release tarball by melange and assembled by apko on Wolfi. Same /manager entrypoint and nonroot uid as upstream's image."
     },
     {
+      "name": "external-secrets",
+      "display_name": "External Secrets Operator",
+      "dir": "external-secrets",
+      "apko": "external-secrets.yaml",
+      "workflow": "external-secrets.yml",
+      "category": "Security & Secrets",
+      "primary_package": "external-secrets",
+      "upstream_url": "https://external-secrets.io",
+      "summary": "External Secrets Operator (controller/webhook/certcontroller), built from upstream source.",
+      "description": "The External Secrets Operator that syncs secrets from external stores into Kubernetes, built from the upstream release tarball by melange and assembled by apko on Wolfi. One image, one binary, like upstream's: controller is the root command, webhook and certcontroller are subcommands the chart selects via args. Same USER 65534 and entrypoint as upstream's distroless image."
+    },
+    {
       "name": "valkey",
       "display_name": "Valkey",
       "dir": "valkey",

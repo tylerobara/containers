@@ -29,6 +29,7 @@ base. **No Dockerfiles anywhere.**
 | Pocket ID (pocket-id, pocket-id-operator) | `ghcr.io/tylerobara/containers/pocket-id` (+ `-operator`) | [`images/pocket-id/`](images/pocket-id/) |
 | Flux (helm, kustomize, notification, source controllers) | `ghcr.io/tylerobara/containers/helm-controller` (+ `kustomize-controller`, `notification-controller`, `source-controller`) | [`images/flux/`](images/flux/) |
 | Valkey (Redis-compatible key-value store) | `ghcr.io/tylerobara/containers/valkey` | [`images/valkey/`](images/valkey/) |
+| External Secrets Operator (controller/webhook/certcontroller) | `ghcr.io/tylerobara/containers/external-secrets` | [`images/external-secrets/`](images/external-secrets/) |
 
 Catalog + grype scan results: <https://tylerobara.github.io/containers/> — an
 Astro site (`site/`) with a page per image (specs, tags, advisories, cosign
@@ -37,10 +38,10 @@ build/scan data at `data/index.json`. See [`site/README.md`](site/README.md).
 
 ## CI
 
-One workflow per image family — `alpine-k8s.yml`, `bitnami-postgres.yml`, `cert-manager.yml`, `cilium.yml`, `cloudnative-pg-operator.yml`, `dokuwiki.yml`, `dozzle.yml`, `frr.yml`, `gatus.yml`, `grafana-image-renderer.yml`, `homepage.yml`, `k8s-sidecar.yml`, `kubernetes-reflector.yml`, `local-path-provisioner.yml`, `metallb.yml`, `openbao.yml`, `os-shell.yml`, `pocket-id.yml`, `postgres.yml`, `traefik.yml`, `flux.yml`, `valkey.yml` — so a change to one image can never rebuild or cancel another.
+One workflow per image family — `alpine-k8s.yml`, `bitnami-postgres.yml`, `cert-manager.yml`, `cilium.yml`, `cloudnative-pg-operator.yml`, `dokuwiki.yml`, `dozzle.yml`, `external-secrets.yml`, `frr.yml`, `gatus.yml`, `grafana-image-renderer.yml`, `homepage.yml`, `k8s-sidecar.yml`, `kubernetes-reflector.yml`, `local-path-provisioner.yml`, `metallb.yml`, `openbao.yml`, `os-shell.yml`, `pocket-id.yml`, `postgres.yml`, `traefik.yml`, `flux.yml`, `valkey.yml` — so a change to one image can never rebuild or cancel another.
 Routing is the native `on.push.paths` filter: a bump PR/push rebuilds **only
 the image whose directory moved**; each workflow's daily schedule rebuilds just
-its own image (fresh Wolfi CVE patches), staggered 06:00/06:05/06:10/06:15/06:20/06:25/06:30/06:35/06:40/06:45/06:50/06:55/07:00/07:05/07:10/07:15/07:20/07:25/07:35/07:40/07:45 UTC.
+its own image (fresh Wolfi CVE patches), staggered 06:00/06:05/06:10/06:15/06:20/06:25/06:30/06:35/06:40/06:45/06:50/06:55/07:00/07:05/07:10/07:15/07:20/07:25/07:35/07:40/07:45/07:50 UTC.
 
 Postgres additionally keeps a `detect-changes` job that turns the diff into its
 per-major matrix. Publish → smoke test → grype → cosign keyless sign **only
@@ -63,7 +64,9 @@ k8s-sidecar, local-path-provisioner, gatus, dozzle, kubernetes-reflector,
 alpine-k8s (whose row bumps the image VERSION on new kubectl patches),
 alpine-k8s helm (the helm binary the alpine-k8s image builds from source,
 3.x line only — releases/latest is helm 4, so the row filters the tag list),
-frr, traefik, pocket-id, pocket-id-operator and valkey — cilium-envoy follows the pin in
+frr, traefik, pocket-id, pocket-id-operator, valkey and external-secrets
+(the operator repo's releases/latest returns the CHART tag `helm-chart-X.Y.Z`,
+so that row filters the tag list for plain `vX.Y.Z` tags, traefik-style) — cilium-envoy follows the pin in
 cilium's own `images/cilium/Dockerfile`, cert-manager's three configs share
 one tarball so they bump together in a single PR, and so do metallb's
 controller + speaker (frr-k8s is its own upstream repo with its own version
@@ -76,7 +79,7 @@ config. Review the PR, then:
    `metallb.yml` / `k8s-sidecar.yml` / `local-path-provisioner.yml` /
    `gatus.yml` / `homepage.yml` / `dozzle.yml` / `kubernetes-reflector.yml` /
    `alpine-k8s.yml` / `frr.yml` / `traefik.yml` / `pocket-id.yml` /
-   `valkey.yml`) manually
+   `valkey.yml` / `external-secrets.yml`) manually
    with `ref = <bump branch>` and **validate_only** checked — builds + scans
    the branch without publishing anything. (Needed because
    GITHUB_TOKEN-authored PRs don't run checks automatically; a GitHub App
