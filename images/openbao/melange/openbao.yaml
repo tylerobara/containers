@@ -15,7 +15,7 @@
 package:
   name: openbao
   version: 2.7.2
-  epoch: 103
+  epoch: 104
   description: "OpenBao secrets management built from upstream source"
   copyright:
     - license: MPL-2.0
@@ -85,6 +85,24 @@ pipeline:
       # (/home/build) as late root-owned files broke CI's xattr store step.
       # Keep HOME off the workspace so nothing lands there.
       export HOME=/tmp
+      # go-jose/v4 security override — GHSA-mgcc-cww5-fp2q / CVE-2026-116587
+      # (High 7.5, DoS parsing JWKs containing RSA keys), fixed only in
+      # go-jose v4.1.6 (homepage's undici precedent: guard -> patch -> the
+      # fail-loudly assert after the build). The 2.7.2 tarball's go.mod pins
+      # v4.1.4 and no openbao release shipping 4.1.6 exists yet (openbao's
+      # own main already bumped v4), so pin the fix build-side here. When
+      # this block can go: once an openbao release ships v4.1.6 — the guard
+      # stops firing at >= 4.1.6 and the assert then names the block.
+      # Residual kept honest: go-jose/v3 v3.0.5 is UNFIXABLE by us — the
+      # jwt credential pulls it via github.com/hashicorp/cap/jwt, whose
+      # latest release and main still import v3 (go mod why); no patched v3
+      # exists. That one High stays, so this image REMAINS unsigned (gate =
+      # 0 Low+) until hashicorp/cap moves. Nothing here may touch it.
+      gijose_cur=$(awk '$1=="github.com/go-jose/go-jose/v4"{print $2; exit}' go.mod)
+      if [ -z "$gijose_cur" ] || { [ "$gijose_cur" != "v4.1.6" ] && [ "$(printf '%s\n%s\n' "$gijose_cur" v4.1.6 | sort -V | head -1)" = "$gijose_cur" ]; }; then
+        echo "patching go-jose/v4 ${gijose_cur:-unpinned} -> v4.1.6 (GHSA-mgcc-cww5-fp2q)"
+        go get github.com/go-jose/go-jose/v4@v4.1.6
+      fi
       mkdir -p internal/http/web_ui  # Makefile's static-assets-dir
       # Bootstrap the exact pnpm pinned in ui/package.json packageManager
       # (Wolfi pnpm is node-22+, see env comment; upstream CI runs this same
@@ -111,6 +129,14 @@ pipeline:
           -X github.com/openbao/openbao/v2/internal/version.CommitDate=$(date -u +%FT%TZ)" \
         -o bao .
       install -Dm755 bao "${{targets.destdir}}/usr/bin/bao"
+      # Fail loudly if the go-jose override above did not reach the shipped
+      # binary (the exact-module-line check homepage's undici block does):
+      # a 4.1.4/4.1.5 slipping through must die here, not light up a scan.
+      # go version -m's module lines are "<TAB>(mod|dep)<TAB>path<TAB>version".
+      gijose_bin=$(go version -m "${{targets.destdir}}/usr/bin/bao" \
+        | awk '$2=="github.com/go-jose/go-jose/v4"{print $3; exit}')
+      [ "$gijose_bin" = "v4.1.6" ] \
+        || { echo "shipped bao embeds go-jose/v4 '${gijose_bin:-none}', want exactly v4.1.6 (GHSA-mgcc-cww5-fp2q)"; exit 1; }
       # Upstream ships a vault compat symlink.
       ln -sfn bao "${{targets.destdir}}/usr/bin/vault"
       # The official openbao Helm chart hardcodes this path in its server
