@@ -1,0 +1,73 @@
+# Valkey image, assembled by apko (no Dockerfile). The valkey binaries and the
+# entrypoint are built from upstream source by melange (see
+# ../melange/valkey.yaml); everything else is Wolfi.
+#
+# Reference contract: the official valkey/valkey container
+# (github.com/valkey-io/valkey-container, the source of the Docker Hub valkey
+# image): tini + docker-entrypoint.sh supervising `valkey-server`, port 6379,
+# data dir /data, valkey user uid/gid 999, args/.conf file passed through to
+# the server. Deliberate differences from upstream, on purpose:
+#   - Wolfi busybox + ca-certificates base instead of debian slim (debug
+#     shell, no apk-tools at runtime); tzdata stays (upstream ships it for
+#     localtime use, docker-library/redis#138) and su-exec replaces the
+#     util-linux setpriv the upstream entrypoint uses.
+#   - ENTRYPOINT /sbin/tini with the top-level cmd supplying "-- " +
+#     docker-entrypoint.sh + valkey-server: apko has no per-entrypoint args,
+#     so this renders upstream's [tini -- docker-entrypoint.sh] + CMD
+#     [valkey-server]. Extra `docker run` args replace the cmd tail and land
+#     on docker-entrypoint.sh, which prepends valkey-server for -flags and
+#     *.conf paths exactly like upstream — `docker run <img> /data/valkey.conf`
+#     and `docker run <img> --save ''` both work; other first args exec
+#     verbatim (`docker run <img> valkey-cli ...`).
+#   - Start as root with run-as NOT pinned, like upstream: the entrypoint
+#     chowns /data and su-execs to valkey (999) when it starts as root, and a
+#     bare `--user <uid>` run works too because /data is 1777 (upstream's own
+#     trick). The entrypoint cds to /data — apko has no WORKDIR field.
+#   - Port is 6379 and /data is the data dir (apko has no EXPOSE/VOLUME
+#     fields, so this is documentation; mount your own /data for persistence).
+#   - protected-mode is patched off in the source, exactly as the official
+#     container does (explicit -p publishing makes it moot); put a TLS or
+#     firewall boundary in front if you publish 6379 publicly.
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    # busybox: shell + find for the entrypoint; ca-certificates + tzdata +
+    # tini: the upstream runtime set; su-exec: the uid drop (see header).
+    - busybox
+    - ca-certificates
+    - tzdata
+    - tini
+    - su-exec
+    # Built by melange; supplied via --repository-append at build time.
+    # Floating name (gatus-style): the workflow's lock guard fails loudly if
+    # Wolfi's same-named valkey / valkey-<series> packages (which publish
+    # `provides: valkey=`) ever outrank our epoch-100 build, so a Wolfi
+    # takeover can never ship silently — the update-versions bot bump restores
+    # the lead, and no =pin line needs syncing here.
+    - valkey
+
+accounts:
+  groups:
+    - groupname: valkey
+      gid: 999
+  users:
+    - username: valkey
+      uid: 999
+      gid: 999
+      shell: /bin/false
+  # No run-as on purpose: root start like the official container, with the
+  # entrypoint su-exec-ing to valkey (see header).
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+
+# Whole invocation in the entrypoint (apko whitespace-splits both fields):
+# an arg override replaces only the CMD, so the args reach
+# docker-entrypoint.sh — the upstream [tini, --, entrypoint] + CMD contract.
+entrypoint:
+  command: /sbin/tini -- /usr/bin/docker-entrypoint.sh
+cmd: "valkey-server"

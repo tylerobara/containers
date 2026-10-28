@@ -1,0 +1,212 @@
+# Melange build for Valkey (github.com/valkey-io/valkey) — the Redis-compatible
+# key-value store, built from the release tarball with upstream's own make
+# (bundled jemalloc + Lua, as upstream intends), packaged as plain `valkey` so
+# grype/secdb name-match. Wolfi DOES ship valkey: a `valkey` package through
+# 8.1.2 and `valkey-<series>` packages (valkey-9.1 at 9.1.3) that publish
+# `provides: valkey=`, so epoch 100 + provider-priority 100 are what keep OUR
+# package winning resolution — and our version must stay AT OR ABOVE the live
+# Wolfi valkey-<series> version (the workflow's lock guard fails loudly if
+# apko ever resolves Wolfi's build instead of ours).
+#
+# Build set = the proven flags from Wolfi's valkey-9.1.yaml + the official
+# valkey/valkey container Dockerfile: BUILD_TLS=yes (openssl), the bundled
+# jemalloc allocator (asserted `malloc=jemalloc` in --version below),
+# -DUSE_MALLOC_USABLE_SIZE, and the same protected-mode=0 source patch the
+# official image applies (unnecessary behind Docker's explicit -p publishing;
+# see the entrypoint notes in the apko config header).
+# USE_SYSTEMD=no pinned explicitly: upstream otherwise auto-detects libsystemd
+# via pkg-config, which would make the linkage runner-dependent. The
+# --build/--with-lg-page jemalloc configure overrides the official Dockerfile
+# applies are only needed for its cross-builds; melange builds natively per
+# arch, so the jemalloc defaults are correct.
+# USE_FAST_FLOAT is not a knob in 9.1.3 anymore — fast_float is unconditional.
+#
+# Bump `version` + `vars.sha256` on each release
+# (https://github.com/valkey-io/valkey/releases, tags have NO v prefix) — the
+# update-versions bot covers this row.
+
+package:
+  name: valkey
+  version: 9.1.3
+  epoch: 100
+  description: "Advanced key-value store built from upstream source"
+  copyright:
+    - license: BSD-3-Clause
+  dependencies:
+    provider-priority: 100
+    # posix-libc-utils: `getent` is required on startup in HA/cluster mode for
+    # ip introspection during cluster formation (same runtime dep Wolfi lists).
+    runtime:
+      - posix-libc-utils
+
+vars:
+  # SHA256 of the GitHub release tarball (tag <version>, no v prefix)
+  sha256: 184e34ed2d9b51879b682b5b15205e2b9d677c60280e3cb453be8f520d04e293
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      # The env set Wolfi's own valkey-9.1 build uses (autoconf/automake for
+      # the bundled jemalloc configure step), plus curl for the house fetch
+      # style and linux-headers for jemalloc.
+      - autoconf
+      - automake
+      - bash
+      - build-base
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      - linux-headers
+      - openssl-dev
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/valkey-io/valkey/archive/refs/tags/${{package.version}}.tar.gz" \
+        -o /home/build/valkey.tar.gz
+      echo "${{vars.sha256}}  /home/build/valkey.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf valkey.tar.gz && rm valkey.tar.gz
+
+  - working-directory: /home/build/valkey-${{package.version}}
+    runs: |
+      # The official-container protected-mode patch, verbatim from
+      # valkey-io/valkey-container: the grep guards make it fail loudly if
+      # upstream's config.c shape ever moves (then re-derive the sed).
+      grep -E '^ *createBoolConfig[(]"protected-mode",.*, *1 *,.*[)],$' src/config.c
+      sed -ri 's!^( *createBoolConfig[(]"protected-mode",.*, *)1( *,.*[)],)$!\10\2!' src/config.c
+      grep -E '^ *createBoolConfig[(]"protected-mode",.*, *0 *,.*[)],$' src/config.c
+
+  - working-directory: /home/build/valkey-${{package.version}}
+    runs: |
+      # Flags = Wolfi's valkey-9.1 build (BUILD_TLS + USE_MALLOC_USABLE_SIZE)
+      # minus their USE_SYSTEMD auto-detect, pinned off here for determinism.
+      # Bundled jemalloc + Lua are the upstream defaults (BUILD_LUA static).
+      export CFLAGS="$CFLAGS -DUSE_MALLOC_USABLE_SIZE"
+      make BUILD_TLS=yes USE_SYSTEMD=no all -j"$(nproc)"
+
+  - working-directory: /home/build/valkey-${{package.version}}
+    runs: |
+      # upstream's src/Makefile honours no DESTDIR — the proven install (same
+      # as Wolfi's) overrides INSTALL_BIN into destdir. Lua is linked statically
+      # into the server by default, so the bin/ dir is the whole install: the
+      # server, cli, benchmark plus check-rdb/check-aof/sentinel + redis-*
+      # compat symlinks upstream's install target lays down.
+      make install PREFIX=/usr INSTALL_BIN="${{targets.destdir}}/usr/bin"
+      # The /data data dir of the official image (its chmod 1777 so any
+      # --user can persist; melange ships dirs root-owned — melange#1395 —
+      # and the entrypoint chowns to valkey when it starts as root).
+      install -d -m1777 "${{targets.destdir}}/data"
+      # The official image's docker-entrypoint.sh (valkey-io/valkey-container),
+      # adopted with two Wolfi adaptations: setpriv -> su-exec (util-linux is
+      # otherwise unneeded), and an explicit cd into /data replacing upstream's
+      # WORKDIR, which apko has no field for.
+      cat > "${{targets.destdir}}/usr/bin/docker-entrypoint.sh" <<'EOF'
+      #!/bin/sh
+      # Valkey container startup (upstream valkey-io/valkey-container contract):
+      # prepend valkey-server for flag/.conf args, run as the valkey user when
+      # started as root, serve from /data.
+      set -e
+
+      # first arg is `-f` or `--some-option` or `something.conf`
+      if [ "${1#-}" != "$1" ] || [ "${1%.conf}" != "$1" ]; then
+        set -- valkey-server "$@"
+      fi
+
+      # allow the container to be started with `--user`
+      if [ "$1" = 'valkey-server' ]; then
+        mkdir -p /data
+        if [ "$(id -u)" = '0' ]; then
+          cd /data
+          chown valkey:valkey /data
+          exec su-exec valkey "$0" "$@"
+        else
+          cd /data
+          if [ ! -w . ]; then
+            echo >&2 "warning: directory '$(pwd)' is not writable by current user ($(id -u))"
+            echo >&2 "  If persistence is enabled, this will cause errors. Check mount permissions or run as root to allow chown"
+          fi
+        fi
+      fi
+
+      # set an appropriate umask (if one isn't set already)
+      um="$(umask)"
+      if [ "$um" = '0022' ]; then
+        umask 0077
+      fi
+
+      exec "$@" $VALKEY_EXTRA_FLAGS
+      EOF
+      chmod 755 "${{targets.destdir}}/usr/bin/docker-entrypoint.sh"
+
+  - runs: |
+      # Verify the build actually produced this version and the allocator the
+      # upstream containers run (the melange test pipeline below re-proves the
+      # install boots from a clean container with only the package installed).
+      v=$("${{targets.destdir}}/usr/bin/valkey-server" --version)
+      echo "$v"
+      echo "$v" | grep -q "v=${{package.version}} " || { echo "wrong version: $v"; exit 1; }
+      echo "$v" | grep -q 'malloc=jemalloc' || { echo "bundled jemalloc not linked: $v"; exit 1; }
+      "${{targets.destdir}}/usr/bin/valkey-cli" --version | grep -q "${{package.version}}"
+      "${{targets.destdir}}/usr/bin/valkey-benchmark" --version | grep -q "${{package.version}}"
+      # The full bin/ layout upstream's install lays down, plus our entrypoint.
+      for b in valkey-server valkey-cli valkey-benchmark valkey-check-aof \
+               valkey-check-rdb valkey-sentinel redis-server redis-cli \
+               redis-check-aof redis-check-rdb redis-sentinel \
+               docker-entrypoint.sh; do
+        test -e "${{targets.destdir}}/usr/bin/$b" || { echo "missing $b"; exit 1; }
+      done
+      test -d "${{targets.destdir}}/data"
+      # The startup contract parses (the boot itself is proven by the test
+      # pipeline below and by images/valkey/test.sh against the final image).
+      sh -n "${{targets.destdir}}/usr/bin/docker-entrypoint.sh"
+
+test:
+  environment:
+    contents:
+      packages:
+        - busybox
+  pipeline:
+    - runs: |
+        # Boot the INSTALLED package (only runtime deps resolved from indexes —
+        # proves the provider-priority resolution and the openssl/getent pulls).
+        valkey-server --port 6399 --dir /tmp --pidfile /tmp/valkey-test.pid \
+          --daemonize yes --save ''
+        i=0
+        until valkey-cli -p 6399 ping | grep -q PONG; do
+          i=$((i + 1))
+          [ "$i" -gt 30 ] && { valkey-cli -p 6399 ping; echo "server did not come up"; exit 1; }
+          sleep 1
+        done
+        # Version as the server reports it over INFO, not just --version.
+        # (valkey-cli passes RESP through, so strip the \r line endings first.)
+        # Valkey 9.x decoupled the Redis-compat version: 9.1.3 reports
+        # valkey_version:9.1.3 but redis_version:7.2.4 (compat level), so the
+        # exact pin goes on valkey_version; redis_version gets a shape check.
+        valkey-cli -p 6399 INFO server | tr -d '\r' | grep -Eq '^server_name:valkey$'
+        valkey-cli -p 6399 INFO server | tr -d '\r' | grep -Eq "^valkey_version:${{package.version}}$"
+        valkey-cli -p 6399 INFO server | tr -d '\r' | grep -Eq '^redis_version:7\.2\.[0-9]+$'
+        valkey-cli -p 6399 SET smoke:key "smoke value" >/dev/null
+        [ "$(valkey-cli -p 6399 GET smoke:key | tr -d '\r')" = "smoke value" ]
+        valkey-cli -p 6399 SHUTDOWN NOSAVE || true
+        # The daemonized server inherits this exec's stdout/stderr pipes, so
+        # melange's runner only returns once it is really gone; wait for it
+        # (SHUTDOWN can race with the forked child) and force-kill as fallback.
+        i=0
+        while pidof valkey-server >/dev/null; do
+          i=$((i + 1))
+          [ "$i" -gt 50 ] && { pkill -9 valkey-server; sleep 1; break; }
+          sleep 0.1
+        done
+        valkey-check-aof --version | grep -q "v=${{package.version}} "
+        # check-rdb with no args prints its usage and (being a valkey-server
+        # multi-call binary) then falls into the event loop instead of
+        # exiting — never pipe it; redirect to a file, tolerate the nonzero
+        # exit, and assert the usage landed.
+        valkey-check-rdb > /tmp/check-rdb.out 2>&1 || true
+        grep -F "Usage:" /tmp/check-rdb.out

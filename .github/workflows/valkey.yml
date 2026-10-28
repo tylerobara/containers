@@ -1,0 +1,270 @@
+name: valkey
+
+# Builds + publishes the Valkey image (valkey built from upstream source by
+# melange, assembled by apko on Wolfi, no Dockerfile). One workflow per
+# image family; routing is the native on.push.paths filter, so nothing here
+# ever builds postgres or the operator (their own workflows/schedules/groups).
+# cosign identity = THIS file:
+#   cosign verify \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#     --certificate-identity-regexp '^https://github.com/tylerobara/containers/\.github/workflows/valkey\.yml@refs/heads/main$' \
+#     ghcr.io/tylerobara/containers/valkey:<tag>
+# PRs run everything except publish/sign/pages; validate a bot bump PR via
+# workflow_dispatch (ref = bump branch, validate_only checked).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - images/valkey/**
+      - .github/workflows/valkey.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - images/valkey/**
+      - .github/workflows/valkey.yml
+  schedule:
+    - cron: '35 7 * * *' # daily, staggered off the 06:0x pack + update-versions (07:30)
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Ref to build (defaults to the branch dispatched from). Use a bump-PR branch to validate it."
+        required: false
+        default: ""
+      validate_only:
+        description: "Build + scan without publishing/signing/deploying pages"
+        type: boolean
+        default: false
+
+concurrency:
+  group: valkey-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+
+env:
+  MELANGE_VERSION: v0.63.0
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # No detect job: the on.push.paths trigger above IS the routing — if this
+  # workflow ran at all, valkey (or this file) changed.
+
+  keygen:
+    runs-on: ubuntu-latest
+    outputs:
+      pub: ${{ steps.k.outputs.pub }}
+      priv: ${{ steps.k.outputs.priv }}
+    steps:
+      - name: Install melange
+        run: go install chainguard.dev/melange@"$MELANGE_VERSION"
+
+      - name: Generate key
+        id: k
+        run: |
+          ~/go/bin/melange keygen
+          { echo "pub=$(base64 -w0 melange.rsa.pub)"; echo "priv=$(base64 -w0 melange.rsa)"; } >> "$GITHUB_OUTPUT"
+
+  melange:
+    needs: keygen
+    if: ${{ !cancelled() && needs.keygen.result == 'success' }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Install melange
+        run: go install chainguard.dev/melange@"$MELANGE_VERSION"
+
+      - name: Restore signing key
+        env:
+          PRIV: ${{ needs.keygen.outputs.priv }}
+          PUB: ${{ needs.keygen.outputs.pub }}
+        run: |
+          echo "$PRIV" | base64 -d > melange.rsa && chmod 600 melange.rsa
+          echo "$PUB" | base64 -d > melange.rsa.pub
+
+      - name: Build valkey (${{ matrix.arch }})
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          ~/go/bin/melange build images/valkey/melange/valkey.yaml \
+            --arch "$ARCH" \
+            --signing-key melange.rsa \
+            --out-dir ./packages \
+            --runner docker
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packages-valkey-${{ matrix.arch }}
+          path: |
+            packages/
+            melange.rsa.pub
+
+  build:
+    needs: [keygen, melange]
+    if: ${{ !cancelled() && needs.keygen.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # only for cosign keyless below
+    env:
+      VALKEY_IMAGE: ghcr.io/${{ github.repository }}/valkey
+      PUBLISH: ${{ github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.validate_only != true) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: packages-valkey-*
+          path: .
+          merge-multiple: true
+
+      - name: Resolve pinned version + version guard
+        run: |
+          VER=$(awk '/^  version:/{print $2; exit}' images/valkey/melange/valkey.yaml)
+          EPOCH=$(awk '/^  epoch:/{print $2; exit}' images/valkey/melange/valkey.yaml)
+          case "$VER" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "bad version '$VER'"; exit 1 ;; esac
+          echo "VALKEY_VER=$VER" >> "$GITHUB_ENV"
+          echo "VALKEY_MINOR=$(echo "$VER" | cut -d. -f1,2)" >> "$GITHUB_ENV"
+          docker run --rm --user root \
+            -v "$PWD:/work" \
+            cgr.dev/chainguard/apko lock /work/images/valkey/apko/valkey.yaml \
+              --arch x86_64 --arch aarch64 \
+              --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
+              --output /work/valkey.lock.json
+          RESOLVED=$(jq -r '.contents.packages[] | select(.name=="valkey") | .version' valkey.lock.json | head -1)
+          # exact pkgver match or the melange package lost resolution to Wolfi's
+          # valkey / valkey-<series> packages (both publish `provides: valkey=`)
+          if [ "$RESOLVED" != "${VER}-r${EPOCH}" ]; then
+            echo "apko resolved valkey as '$RESOLVED', expected '${VER}-r${EPOCH}'"; exit 1
+          fi
+
+      - name: Log in to ghcr
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Publish multi-arch valkey image to ghcr
+        if: env.PUBLISH == 'true'
+        run: |
+          for i in 1 2 3; do
+            if docker run --rm --user root \
+              -v "$PWD:/work:ro" \
+              -v "$HOME/.docker:/root/.docker:ro" \
+              cgr.dev/chainguard/apko publish /work/images/valkey/apko/valkey.yaml \
+                "$VALKEY_IMAGE:$VALKEY_VER" "$VALKEY_IMAGE:$VALKEY_MINOR" "$VALKEY_IMAGE:latest" \
+                --arch x86_64,aarch64 \
+                --repository-append /work/packages --keyring-append /work/melange.rsa.pub \
+                --lockfile /work/valkey.lock.json; then
+              break
+            fi
+            [ "$i" = 3 ] && { echo "apko publish failed after 3 attempts"; exit 1; }
+            echo "publish attempt $i failed; retrying in 15s"; sleep 15
+          done
+          echo "VALKEY_REF=$VALKEY_IMAGE:$VALKEY_VER" >> "$GITHUB_ENV"
+          echo "GRYPE_SRC=registry:$VALKEY_IMAGE:$VALKEY_VER" >> "$GITHUB_ENV"
+
+      - name: Build image locally (validate-only, no registry)
+        if: env.PUBLISH != 'true'
+        run: |
+          docker run --rm --user root \
+            -v "$PWD:/work" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            cgr.dev/chainguard/apko publish /work/images/valkey/apko/valkey.yaml \
+              "valkey:validate" \
+              --arch x86_64 \
+              --local \
+              --repository-append /work/packages --keyring-append /work/melange.rsa.pub
+          echo "VALKEY_REF=valkey:validate" >> "$GITHUB_ENV"
+          echo "GRYPE_SRC=docker:valkey:validate" >> "$GITHUB_ENV"
+
+      - name: Smoke test image
+        run: |
+          [ "$PUBLISH" = true ] && docker pull --platform linux/amd64 "$VALKEY_REF"
+          IMAGE="$VALKEY_REF" VERSION="$VALKEY_VER" ./images/valkey/test.sh
+
+      - name: Scan image with grype
+        id: scan
+        run: |
+          mkdir -p scans
+          docker run --rm --user 0:0 \
+            -v "$PWD/scans:/out" \
+            -v "$HOME/.docker:/root/.docker:ro" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            ghcr.io/anchore/grype:latest "$GRYPE_SRC" \
+              --output json --file /out/valkey.json || true
+          # Same signing gate as every other image here: any Low+ finding blocks.
+          LOWPLUS=$(jq '[.matches[] | select(.vulnerability.severity
+                     | IN("Low","Medium","High","Critical"))] | length' scans/valkey.json)
+          echo "lowplus=$LOWPLUS" >> "$GITHUB_OUTPUT"
+          echo "valkey Low+ findings: $LOWPLUS" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Sign with cosign (only when scan has 0 Low+ findings)
+        if: env.PUBLISH == 'true' && steps.scan.outputs.lowplus == '0'
+        run: |
+          DIGEST=$(docker buildx imagetools inspect "$VALKEY_REF" \
+            --format '{{json .Manifest}}' | jq -r .digest)
+          docker run --rm --user 0:0 \
+            -v "$HOME/.docker:/root/.docker:ro" \
+            -e DOCKER_CONFIG=/root/.docker \
+            -e GITHUB_ACTIONS \
+            -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+            ghcr.io/sigstore/cosign/cosign:latest sign --yes "$VALKEY_REF@$DIGEST"
+          echo "SIGNED=true" >> "$GITHUB_ENV"
+
+      - name: Build pages data
+        if: env.PUBLISH == 'true'
+        run: |
+          DIGEST=$(docker buildx imagetools inspect "$VALKEY_REF" \
+            --format '{{json .Manifest}}' | jq -r .digest)
+          jq -n \
+            --arg image "$VALKEY_IMAGE" --arg version "$VALKEY_VER" \
+            --arg digest "$DIGEST" --arg built "$(date -u +%FT%TZ)" \
+            --arg tags "$VALKEY_VER $VALKEY_MINOR latest" \
+            --arg built_with melange --argjson signed "${SIGNED:-false}" \
+            --arg signed_by valkey.yml \
+            --slurpfile scan scans/valkey.json \
+            '{image: $image, major: null, version: $version,
+              tags: ($tags | split(" ")), digest: $digest, built: $built, built_with: $built_with,
+              signed: $signed, signed_by: $signed_by,
+              scan: $scan[0]}' > scans/valkey.json.tmp
+          mv scans/valkey.json.tmp scans/valkey.json
+
+      - uses: actions/upload-artifact@v7
+        if: env.PUBLISH == 'true'
+        with:
+          name: pages-data-valkey
+          path: scans/valkey.json
+
+  pages:
+    # Merge this run's fresh entries over the live index (sibling entries are
+    # preserved, keyed on image+major with fresh entries winning), rebuild the
+    # Astro site and deploy — see site.yml.
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    needs: [build]
+    permissions:
+      contents: write # push the generated gh-pages branch
+    uses: ./.github/workflows/site.yml
+    with:
+      artifact-pattern: pages-data-valkey
+      ref: ${{ inputs.ref || github.ref }}

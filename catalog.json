@@ -383,6 +383,18 @@
       "upstream_url": "https://github.com/aclerici38/pocket-id-operator",
       "summary": "Pocket ID Kubernetes operator, built from upstream source.",
       "description": "The Pocket ID operator that reconciles instances, users, groups and OIDC clients from CRDs, compiled from the upstream release tarball by melange and assembled by apko on Wolfi. Same /manager entrypoint and nonroot uid as upstream's image."
+    },
+    {
+      "name": "valkey",
+      "display_name": "Valkey",
+      "dir": "valkey",
+      "apko": "valkey.yaml",
+      "workflow": "valkey.yml",
+      "category": "Databases",
+      "primary_package": "valkey",
+      "upstream_url": "https://valkey.io",
+      "summary": "Valkey key-value store, built from upstream source.",
+      "description": "Valkey, the Redis-compatible key-value store, built from the upstream release tarball by melange (bundled jemalloc + Lua, TLS on) and assembled by apko on Wolfi. Drop-in for the official valkey/valkey container: tini + docker-entrypoint.sh, valkey user 999, /data, port 6379."
     }
   ]
 }
