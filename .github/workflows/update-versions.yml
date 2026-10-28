@@ -752,4 +752,26 @@ jobs:
             fi
           fi
 
+          # --- cloudflared: upstream tags are date-style YYYY.M.N with NO v
+          # prefix (2026.10.5), and releases/latest returns one — but the tag
+          # list has carried non-version tags before, so filter with the
+          # strict date-shape grep, sort -V, strip nothing. Wolfi ships its own
+          # cloudflared package, so the melange epoch 100 + provider-priority
+          # keep ours winning; the workflow's lock guard fails loudly if it
+          # ever resolves Wolfi's build instead of ours. The apko world line is
+          # a floating `- cloudflared`, so no PIN_FILE sync. ---
+          if want cloudflared; then
+            yaml=images/cloudflared/melange/cloudflared.yaml
+            latest=$(gh api --paginate repos/cloudflare/cloudflared/tags --jq '.[].name' \
+              | grep -E '^[0-9]{4}\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+            if [ -z "$latest" ]; then
+              echo "::error::cloudflared: no date-style release tag found upstream"
+              FAILED=1
+            else
+              bump_row cloudflared "$yaml" "$latest" \
+                "https://github.com/cloudflare/cloudflared/archive/refs/tags/${latest}.tar.gz" \
+                cloudflared
+            fi
+          fi
+
           exit $FAILED

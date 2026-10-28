@@ -1,0 +1,164 @@
+# Melange build for cloudflared (github.com/cloudflare/cloudflared) — the
+# Cloudflare Tunnel agent, from the release tarball with upstream's exact
+# build contract (Makefile `cloudflared` target + Dockerfile env):
+# CGO_ENABLED=0, `go build -mod=readonly -ldflags='<VERSION_FLAGS>' \
+# github.com/cloudflare/cloudflared/cmd/cloudflared`. cgo appears only under
+# darwin/windows ICMP build tags, so the static build matches upstream's
+# container build. FIPS builds (GOFIPS140=latest) are an upstream release-
+# engineering extra we do not replicate — the plain build is the default here.
+#
+# Unlike the flux/external-secrets builds, upstream DOES stamp the version:
+#   -X "main.Version=$(git describe --tags --always --match '[0-9][0-9][0-9][0-9].*.*')"
+#   -X "main.BuildTime=$(date -u -r RELEASE_NOTES '+%Y-%m-%d-%H:%M UTC')"
+# git describe cannot work from the sha-pinned tarball (no .git) — and if the
+# stamp is simply lost, main.go's defaults print "DEV"/"unknown" — so we stamp
+# vars.version ourselves and compute BuildTime with upstream's own recipe (the
+# RELEASE_NOTES mtime survives the GitHub archive, verified at 2026-10-27).
+# The Dockerfile's CONTAINER_BUILD=1 exists only to add the
+# metrics.Runtime=virtual ldflag (metrics server binds in "virtual" posture
+# inside containers), so we pass that ldflag directly. The verify step below
+# FAILS LOUDLY unless --version prints exactly the pinned version — this repo
+# always prefers the upstream-shaped --version assertion over the
+# build-info-only fallback the stamp-less binaries need.
+#
+# Wolfi DOES ship a `cloudflared` package (through 2026.5.2-r2 at authoring
+# time), so epoch 100 + provider-priority 100 are what keep OUR package
+# winning resolution (the valkey precedent) — and the pin must stay AT OR
+# ABOVE the highest live Wolfi version, since a plain higher Wolfi version
+# still needs the epoch to be beaten; the workflow's lock guard asserts the
+# apko-resolved pkgver is exactly <version>-r100.
+#
+# No vendor/ in the tarball (the Dockerfile runs `go mod download`), so
+# modules resolve from the network — same as the flux/external-secrets builds.
+# go.mod's `go` directive is 1.27.3 with no toolchain line, so GOTOOLCHAIN=local
+# needs a toolchain >= 1.27.3: Wolfi go-1.27 is exactly 1.27.3-r0.
+#
+# Bump `version` + `vars.sha256` on each release
+# (https://github.com/cloudflare/cloudflared/releases, date-style tags
+# YYYY.M.N with NO v prefix) — the update-versions bot covers this row.
+
+package:
+  name: cloudflared
+  version: 2026.10.5
+  epoch: 100
+  description: "Cloudflare Tunnel agent built from upstream source"
+  copyright:
+    - license: Apache-2.0
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the GitHub release tarball (tag <version>, no v prefix)
+  sha256: cca0918e869d6e303ab9d0a31bc1d96ae7dbbbfe6ff2bde9208159ea91f793d6
+  # Upstream 2026.10.5 pins go-jose v4.1.4 (grype High: GHSA-mgcc-cww5-fp2q
+  # / CVE-2026-116587, JWK RSA-parse DoS, patched in v4.1.6); we `go get` it
+  # up before compiling — the gatus dep-pin pattern. go get only raises
+  # requirements (MVS never downgrades), so once upstream ships >= this the
+  # bump is a no-op — retire the pin then.
+  gojose_version: 4.1.6
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      # go.mod wants go >= 1.27.3 (the flux/external-secrets
+      # upstream-bumped-past-Wolfi's-default lesson); Wolfi go-1.27 ships
+      # exactly 1.27.3-r0, which GOTOOLCHAIN=local satisfies.
+      - go-1.27
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/cloudflare/cloudflared/archive/refs/tags/${{package.version}}.tar.gz" \
+        -o /home/build/cloudflared.tar.gz
+      echo "${{vars.sha256}}  /home/build/cloudflared.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf cloudflared.tar.gz && rm cloudflared.tar.gz
+
+  - working-directory: /home/build/cloudflared-${{package.version}}
+    runs: |
+      # Upstream's Makefile line, verbatim in the essentials:
+      #   CGO_ENABLED=0 go build -mod=readonly \
+      #     -ldflags='-X "main.Version=…" -X "main.BuildTime=…" -X "…metrics.Runtime=virtual"' \
+      #     github.com/cloudflare/cloudflared/cmd/cloudflared
+      # with -trimpath/-buildvcs this repo adds; the package-form build is
+      # also what stamps the module path into the build info grype reads.
+      export CGO_ENABLED=0 GOTOOLCHAIN=local
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.27/bin"
+      # Raise the vulnerable dep pin (see vars; no-op once upstream ships
+      # >= this — gatus pattern; only `go build` takes build flags, `go get`
+      # rejects them).
+      go get github.com/go-jose/go-jose/v4@v${{vars.gojose_version}}
+      BUILD_TIME=$(date -u -r RELEASE_NOTES '+%Y-%m-%d-%H:%M UTC')
+      go build -trimpath -buildvcs=false -mod=readonly \
+        -ldflags "-X main.Version=${{package.version}} -X \"main.BuildTime=${BUILD_TIME}\" -X github.com/cloudflare/cloudflared/metrics.Runtime=virtual" \
+        -o cloudflared github.com/cloudflare/cloudflared/cmd/cloudflared
+      install -Dm755 cloudflared "${{targets.destdir}}/usr/bin/cloudflared"
+
+  - runs: |
+      # The version-stamp proof this repo grants whenever upstream stamps:
+      # --version must print EXACTLY the pinned version (unstamped it would
+      # print main.go's 'DEV' default or an 'unknown' build time), via
+      # upstream's exact output shape `cloudflared version <ver> (built
+      # <YYYY-MM-DD-HH:MM UTC>)`. timeout guards the (unexpected) hang case;
+      # these code paths need no network (urfave/cli short-circuits before any
+      # action runs, and the auto-updater only starts inside tunnel actions).
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.27/bin"
+      bin="${{targets.destdir}}/usr/bin/cloudflared"
+      out=$(timeout 60 "$bin" --version 2>&1) || { echo "cloudflared --version exited non-zero"; exit 1; }
+      echo "$out"
+      echo "$out" | grep -Eq "^cloudflared version ${{package.version}} \(built [0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}:[0-9]{2} UTC\)$" \
+        || { echo "--version is '$out', want 'cloudflared version ${{package.version}} (built <date> UTC)' — version stamp lost"; exit 1; }
+      short=$(timeout 60 "$bin" version --short 2>&1)
+      [ "$short" = "${{package.version}}" ] \
+        || { echo "version --short printed '$short', want exactly '${{package.version}}'"; exit 1; }
+      # Command surface: the tunnel command and its key subcommands must be
+      # wired (help exits 0, needs no Cloudflare auth).
+      help=$(timeout 60 "$bin" --help 2>&1)
+      echo "$help" | grep -Eq "^[[:space:]]+tunnel" || { echo "--help missing tunnel command"; exit 1; }
+      thelp=$(timeout 60 "$bin" tunnel --help 2>&1)
+      for sub in create run list login; do
+        echo "$thelp" | grep -Eq "^[[:space:]]+${sub}\b" || { echo "tunnel --help missing ${sub}"; exit 1; }
+      done
+      timeout 60 "$bin" tunnel login --help >/dev/null 2>&1 || { echo "tunnel login --help exited non-zero"; exit 1; }
+      # grype reads Go deps from the embedded build info — assert it is this
+      # module's binary.
+      go version -m "$bin" \
+        | awk -F'\t' '$2=="mod" && $3=="github.com/cloudflare/cloudflared"{f=1} END{exit !f}' \
+        || { echo "binary does not embed module github.com/cloudflare/cloudflared"; exit 1; }
+      # …and that the go-jose bump actually landed in the binary (the grype
+      # High GHSA-mgcc-cww5-fp2q is only gone if it did — gatus assertion).
+      gjver=$(go version -m "$bin" | awk -F'\t' \
+        '$3=="github.com/go-jose/go-jose/v4"{print $4; exit}')
+      [ "$(printf '%s\n%s\n' "$gjver" "v${{vars.gojose_version}}" | sort -V | head -1)" = "v${{vars.gojose_version}}" ] \
+        || { echo "go-jose is '$gjver' in the binary, want >= v${{vars.gojose_version}}"; exit 1; }
+
+test:
+  environment:
+    contents:
+      packages:
+        - busybox
+  pipeline:
+    - runs: |
+        # Boot the INSTALLED package (epoch-100/provider-priority resolution
+        # against Wolfi's own cloudflared, the valkey precedent): --version and
+        # version --short must report the pinned version off the apk-installed
+        # binary, and the tunnel command surface must be present. No network:
+        # every command here is handled before the app action layer runs.
+        # Output is captured before grepping (a bare `cloudflared … | grep -q`
+        # raced a SIGPIPE under melange's runner: grep exits early, cloudflared
+        # dies on the closed pipe, pipeline status 141).
+        out=$(cloudflared --version)
+        echo "$out" | grep -q "^cloudflared version ${{package.version}} (built "
+        [ "$(cloudflared version --short)" = "${{package.version}}" ]
+        out=$(cloudflared --help 2>&1)
+        echo "$out" | grep -Eq "^[[:space:]]+tunnel"
+        out=$(cloudflared tunnel --help 2>&1)
+        echo "$out" | grep -Eq "^[[:space:]]+run\b"

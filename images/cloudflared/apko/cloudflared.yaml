@@ -1,0 +1,63 @@
+# cloudflared image, assembled by apko (no Dockerfile). The cloudflared
+# binary is built from the upstream release tarball by melange (see
+# ../melange/cloudflared.yaml); everything else is Wolfi. Mirrors upstream's
+# Dockerfile (static CGO_ENABLED=0 binary -> distroless base-debian13 nonroot,
+# USER 65532:65532, ENTRYPOINT ["cloudflared", "--no-autoupdate"],
+# CMD ["version"]), with these deliberate deviations:
+#   - busybox+ca-certs Wolfi base instead of the distroless glibc base (the
+#     binary is static so glibc is dead weight; busybox buys the repo-wide
+#     debug shell, and no apk-tools ships in prod)
+#   - /usr/bin/cloudflared (FHS) instead of /usr/local/bin, with a named
+#     65532 user/group block instead of distroless' implicit nonroot — same
+#     numeric uid:gid upstream pins (their comment: Kubernetes needs numeric
+#     IDs), spelled the way the gatus/frr configs here do
+#   - the entrypoint KEEPS upstream's --no-autoupdate guard, which is the
+#     right call for the same reason upstream makes it: inside an image the
+#     binary is immutable and the update channel is the image tag
+# The default cmd mirrors upstream's CMD ["version"]: a bare `docker run`
+# prints the stamped version and exits 0. All real usage overrides it —
+# NO tunnel args are baked in (a tunnel name/token is per-deployment
+# state, so it comes from docker run args, like upstream's own docs):
+#   docker run -d <img> tunnel run <your-tunnel-or-name>
+# No ports anywhere: cloudflared is a pure outbound-connect tool (it dials
+# Cloudflare's edge; nothing connects in). apko has no EXPOSE fields anyway.
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    # Debug shell only — the binary is static Go. ca-certificates for the
+    # outbound TLS to the Cloudflare edge the whole tunnel runs on.
+    - busybox
+    - ca-certificates
+    # Built by melange; supplied via --repository-append at build time.
+    # Floating (no =pin), like the valkey/external-secrets rows — Wolfi ships
+    # its own cloudflared package, so the workflow's lock guard is what proves
+    # the resolved apk is our 2026.10.5-r100, not Wolfi's 2026.x.y-rN.
+    - cloudflared
+
+accounts:
+  groups:
+    - groupname: cloudflared
+      gid: 65532
+  users:
+    - username: cloudflared
+      uid: 65532
+      gid: 65532
+      shell: /bin/false
+  # Upstream's USER 65532:65532 (distroless nonroot).
+  run-as: 65532
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+
+entrypoint:
+  # Split into exec form (valkey's tini line is the precedent), mirroring
+  # upstream's ENTRYPOINT ["cloudflared", "--no-autoupdate"].
+  command: /usr/bin/cloudflared --no-autoupdate
+
+# Upstream's CMD ["version"]: bare `docker run <img>` prints the stamped
+# version and exits. Everything real overrides it via docker run args.
+cmd: version
