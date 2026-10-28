@@ -18,7 +18,7 @@
 package:
   name: pocket-id
   version: 2.19.1
-  epoch: 100
+  epoch: 101
   description: "Pocket ID passkey OIDC provider built from upstream source"
   copyright:
     - license: BSD-2-Clause
@@ -86,11 +86,31 @@ pipeline:
       # pure Go (modernc.org via gorm), so CGO_ENABLED=0 needs nothing extra.
       export CGO_ENABLED=0 GOTOOLCHAIN=local
       export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.27/bin"
+      # go-jose/v4 security override — GHSA-mgcc-cww5-fp2q / CVE-2026-116587
+      # (High 7.5, DoS parsing JWKs containing RSA keys), fixed only in
+      # go-jose v4.1.6 (openbao's guard -> patch -> fail-loudly assert, the
+      # homepage undici pattern). backend/go.mod pins v4.1.5 and no upstream
+      # release ships 4.1.6 yet, so pin the fix build-side here (go get runs
+      # from cmd/ but edits the backend/ module — no go mod tidy). When this
+      # block can go: once upstream's backend/go.mod ships v4.1.6 — the guard
+      # stops firing at >= 4.1.6 and the assert then names the block.
+      gijose_cur=$(awk '$1=="github.com/go-jose/go-jose/v4"{print $2; exit}' ../go.mod)
+      if [ -z "$gijose_cur" ] || { [ "$gijose_cur" != "v4.1.6" ] && [ "$(printf '%s\n%s\n' "$gijose_cur" v4.1.6 | sort -V | head -1)" = "$gijose_cur" ]; }; then
+        echo "patching go-jose/v4 ${gijose_cur:-unpinned} -> v4.1.6 (GHSA-mgcc-cww5-fp2q)"
+        go get github.com/go-jose/go-jose/v4@v4.1.6
+      fi
       go build -trimpath -buildvcs=false \
         -ldflags "-w -s -buildid=${{package.version}} \
           -X github.com/pocket-id/pocket-id/backend/internal/common.Version=${{package.version}}" \
         -o pocket-id .
       install -D -m 0755 pocket-id "${{targets.destdir}}/usr/bin/pocket-id"
+      # Fail loudly if the go-jose override above did not reach the shipped
+      # binary; a 4.1.4/4.1.5 slipping through must die here, not light up a
+      # scan (pocket-id is the Low+-gated image that must reach signed).
+      gijose_bin=$(go version -m "${{targets.destdir}}/usr/bin/pocket-id" \
+        | awk '$2=="github.com/go-jose/go-jose/v4"{print $3; exit}')
+      [ "$gijose_bin" = "v4.1.6" ] \
+        || { echo "shipped pocket-id embeds go-jose/v4 '${gijose_bin:-none}', want exactly v4.1.6 (GHSA-mgcc-cww5-fp2q)"; exit 1; }
 
   - runs: |
       # Assert what we ship: the ldflag stamp, not the "unknown" default. The
