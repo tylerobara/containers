@@ -407,6 +407,18 @@
       "upstream_url": "https://valkey.io",
       "summary": "Valkey key-value store, built from upstream source.",
       "description": "Valkey, the Redis-compatible key-value store, built from the upstream release tarball by melange (bundled jemalloc + Lua, TLS on) and assembled by apko on Wolfi. Drop-in for the official valkey/valkey container: tini + docker-entrypoint.sh, valkey user 999, /data, port 6379."
+    },
+    {
+      "name": "cloudflared",
+      "display_name": "Cloudflare Tunnel",
+      "dir": "cloudflared",
+      "apko": "cloudflared.yaml",
+      "workflow": "cloudflared.yml",
+      "category": "Kubernetes & Networking",
+      "primary_package": "cloudflared",
+      "upstream_url": "https://github.com/cloudflare/cloudflared",
+      "summary": "Cloudflare Tunnel agent (cloudflared), built from upstream source.",
+      "description": "The Cloudflare Tunnel agent, built from the date-tagged upstream release tarball by melange (static CGO_ENABLED=0 Go binary, version stamped via -X main.Version like upstream's Makefile) and assembled by apko on Wolfi. Mirrors upstream's container contract: entrypoint cloudflared --no-autoupdate, default cmd version, nonroot 65532. Pure outbound-connect tool — no ports. Wolfi ships its own cloudflared package, so epoch 100 + provider-priority keep this build winning resolution."
     }
   ]
 }
