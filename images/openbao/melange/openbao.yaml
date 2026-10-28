@@ -4,6 +4,10 @@
 # package today, so provider-priority/epoch are belt-and-suspenders in case
 # one ever appears with the same name.
 #
+# The Ember UI ships in the same tarball under ui/ and is compiled in via
+# the upstream `ui` build tag (see the build step), so a `version` +
+# `vars.sha256` bump covers the UI too.
+#
 # Bump `version` + `vars.sha256` on each release
 # (https://github.com/openbao/openbao/releases) — the update-versions bot
 # covers this row.
@@ -11,7 +15,7 @@
 package:
   name: openbao
   version: 2.7.2
-  epoch: 102
+  epoch: 103
   description: "OpenBao secrets management built from upstream source"
   copyright:
     - license: MPL-2.0
@@ -29,11 +33,25 @@ environment:
     keyring:
       - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
     packages:
+      # build-base + python are the node-gyp fallback for native modules whose
+      # prebuilds a platform misses (homepage's pnpm-build precedent)
+      - build-base
       - busybox
       - ca-certificates-bundle
       - curl
       # .go-version wants 1.27.1; Wolfi go-1.27 is 1.27.3.
       - go-1.27
+      # Ember UI build env. ui/package.json engines pins node 20, so this is
+      # the node upstream CI runs (setup-node node-version-file: package.json).
+      # Wolfi's pnpm package is NOT usable under it (10.28.x needs the
+      # node:sqlite builtin → node 22+), and nodejs-20 ships no corepack;
+      # instead npm-12 bootstraps the exact packageManager pin (pnpm@10.34.4)
+      # below — the same version upstream CI runs via pnpm/action-setup.
+      # npm 12 nominally wants node 22+, but it is only used for that one
+      # global install; ember itself runs on node 20 + pnpm 10.34.4.
+      - nodejs-20
+      - npm-12
+      - python-3.13
 
 pipeline:
   - runs: |
@@ -48,18 +66,44 @@ pipeline:
 
   - working-directory: /home/build/openbao-${{package.version}}
     runs: |
-      # Mirrors scripts/build.sh (go build -tags openbao . -o bin/bao + the
-      # internal/version ldflags); built-in plugin binaries and the web UI
-      # are skipped — same as upstream's image, which ships only bao.
+      # Mirrors upstream's release recipe exactly: `make static-dist`
+      # (install-ui-dependencies + ember-dist: pnpm install && pnpm build in
+      # ui/, whose ui/.ember-cli "output-path": "../internal/http/web_ui"
+      # drops the dist right onto the go:embed target), then scripts/build.sh
+      # `go build -tags openbao ui` (Makefile's bin target adds `ui` to
+      # BUILD_TAGS) + the internal/version ldflags. Without the ui tag
+      # internal/http/assets.go (//go:build ui) is excluded and the binary
+      # serves the "OpenBao UI is not available" stub — issue #69. An empty
+      # web_ui/ makes the go:embed pattern match nothing, so go build itself
+      # hard-fails if the ember step produced nothing. Built-in plugin
+      # binaries stay skipped — same as upstream's image, which ships only bao.
       # No vendor/ dir in the tarball, so modules resolve from the network.
       export CGO_ENABLED=0 GOTOOLCHAIN=local
       export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.27/bin"
+      # node tools (ember update-notifier/configstore) write $HOME/.config
+      # from detached child processes; landing inside the melange workspace
+      # (/home/build) as late root-owned files broke CI's xattr store step.
+      # Keep HOME off the workspace so nothing lands there.
+      export HOME=/tmp
+      mkdir -p internal/http/web_ui  # Makefile's static-assets-dir
+      # Bootstrap the exact pnpm pinned in ui/package.json packageManager
+      # (Wolfi pnpm is node-22+, see env comment; upstream CI runs this same
+      # pnpm under node 20). Asserted non-empty so a lost pin fails here.
+      pnpm_pin=$(sed -n 's/.*"packageManager": "pnpm\(@[^"]*\)".*/\1/p' ui/package.json)
+      [ -n "$pnpm_pin" ] || { echo "ui/package.json has no pnpm packageManager pin"; exit 1; }
+      npm install -g "pnpm${pnpm_pin}" >/dev/null
+      pnpm --version | grep -F "${pnpm_pin#@}" >/dev/null \
+        || { echo "pnpm ${pnpm_pin} did not install"; exit 1; }
+      (cd ui && pnpm install --frozen-lockfile && pnpm build)
+      # assetcheck.sh's own check, run post-build instead of pre
+      test -f internal/http/web_ui/index.html \
+        || { echo "ember build produced no internal/http/web_ui/index.html"; exit 1; }
       # fullVersion is the unexported stamp upstream's release CI overrides
       # (scripts/build.sh alone only sets GitCommit/CommitDate; a tarball
       # build without it self-reports the dev default "2.0.0-HEAD").
       # VersionMetadata is the sanctioned downstream knob (no leading v:
       # "v" + version would double the v in `bao version`).
-      go build -trimpath -buildvcs=false -tags openbao \
+      go build -trimpath -buildvcs=false -tags "openbao ui" \
         -ldflags "-s -w \
           -X github.com/openbao/openbao/v2/internal/version.fullVersion=${{package.version}} \
           -X github.com/openbao/openbao/v2/internal/version.VersionMetadata=wolfi \
@@ -94,6 +138,19 @@ pipeline:
   - runs: |
       # Verify the build actually produced this version
       "${{targets.destdir}}/usr/bin/bao" version | grep -q "${{package.version}}"
+      # UI-embedded proof (fail loudly, never ship the #69 stub). The
+      # "OpenBao UI is not available" string is NOT a usable marker:
+      # handler.go's handleUIStub is compiled under every tag (uiBuiltIn is a
+      # runtime switch, not a build-time one), so that string lives in the
+      # rodata of UI-enabled builds too (proved locally: present in both the
+      # ui-tagged and plain binaries). The real markers are file names the
+      # go:embed records, which only exist if internal/http/assets.go
+      # (//go:build ui) compiled against a real ember dist; both are absent
+      # from the no-tag binary.
+      grep -qa 'web_ui/index.html' "${{targets.destdir}}/usr/bin/bao" \
+        || { echo "UI not embedded: no web_ui/ files in the binary (ui build tag missing?)"; exit 1; }
+      grep -qa 'web_ui/assets/vault.js' "${{targets.destdir}}/usr/bin/bao" \
+        || { echo "UI embed is not the ember dist: no web_ui/assets/vault.js (empty or non-ember dist?)"; exit 1; }
       # The chart hardcodes this path; prove it's present, parseable, and
       # carries the chown-tolerance patch: 2 sed-applied lines + upstream's
       # own config line = exactly 3 `|| echo` chown guards.
