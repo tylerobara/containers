@@ -731,4 +731,25 @@ jobs:
               valkey
           fi
 
+          # --- external-secrets: releases/latest returns the CHART release
+          # (tag helm-chart-X.Y.Z), NOT the operator's, so take the highest
+          # plain vX.Y.Z tag the traefik way — the strict regex drops the
+          # helm-chart-* releases and any rc/beta tags. The apko world line is
+          # a floating `- external-secrets`, so no PIN_FILE sync — the
+          # workflow's lock guard fails loudly if a Wolfi same-named package
+          # ever outranks our epoch-100 build. ---
+          if want external-secrets; then
+            yaml=images/external-secrets/melange/external-secrets.yaml
+            latest=$(gh api --paginate repos/external-secrets/external-secrets/tags --jq '.[].name' \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 | sed 's/^v//')
+            if [ -z "$latest" ]; then
+              echo "::error::external-secrets: no release tag found upstream"
+              FAILED=1
+            else
+              bump_row external-secrets "$yaml" "$latest" \
+                "https://github.com/external-secrets/external-secrets/archive/refs/tags/v${latest}.tar.gz" \
+                external-secrets
+            fi
+          fi
+
           exit $FAILED
