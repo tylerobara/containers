@@ -39,7 +39,7 @@
 
 package:
   name: cloudflared
-  version: 2026.10.5
+  version: 2026.10.6
   epoch: 100
   description: "Cloudflare Tunnel agent built from upstream source"
   copyright:
@@ -49,7 +49,7 @@ package:
 
 vars:
   # SHA256 of the GitHub release tarball (tag <version>, no v prefix)
-  sha256: cca0918e869d6e303ab9d0a31bc1d96ae7dbbbfe6ff2bde9208159ea91f793d6
+  sha256: eb4d6b02b017cd3e49676934f14fe3025cebb07f9f272cd60dd790a2d812b90b
   # Upstream 2026.10.5 pins go-jose v4.1.4 (grype High: GHSA-mgcc-cww5-fp2q
   # / CVE-2026-116587, JWK RSA-parse DoS, patched in v4.1.6); we `go get` it
   # up before compiling — the gatus dep-pin pattern. go get only raises
