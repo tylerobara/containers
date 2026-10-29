@@ -21,7 +21,7 @@
 package:
   name: homepage
   version: 2.7.0
-  epoch: 101
+  epoch: 102
   description: "Homepage — a self-hosted application dashboard for your services wall"
   copyright:
     - license: Apache-2.0
@@ -86,16 +86,34 @@ pipeline:
       # can go. Overrides go in pnpm-workspace.yaml: pnpm 12 no longer reads
       # package.json's "pnpm" field (it warns and ignores). Assert keeps it
       # honest: build dies if 8.12.2 didn't land.
+      # systeminformation security patch (same mechanism, same deal): the
+      # upstream 2.7.0 lock pins 5.33.13 — GHSA-3f7j-7jwc-fxfj (High, fixed
+      # 5.33.16) + GHSA-4vjg-vx72-qq4g (Low, fixed 5.33.14), both published
+      # Oct 29; one override to 5.33.16 covers both. Both guards below write
+      # a single combined "overrides:" block (a duplicate key would break
+      # pnpm-workspace.yaml).
+      ov=""
       undici_cur=$(grep -m1 -oE '^  undici@[0-9]+\.[0-9]+\.[0-9]+' pnpm-lock.yaml | cut -d@ -f2)
       if [ "$(printf '%s\n%s\n' "$undici_cur" 8.12.2 | sort -V | head -1)" = "$undici_cur" ] && [ "$undici_cur" != "8.12.2" ]; then
         echo "patching undici $undici_cur -> 8.12.2 (3 advisories)"
-        printf 'overrides:\n  undici: 8.12.2\n' >> pnpm-workspace.yaml
+        ov="${ov}  undici: 8.12.2\n"
+      fi
+      sysinfo_cur=$(grep -m1 -oE '^  systeminformation@[0-9]+\.[0-9]+\.[0-9]+' pnpm-lock.yaml | cut -d@ -f2)
+      if [ "$(printf '%s\n%s\n' "$sysinfo_cur" 5.33.16 | sort -V | head -1)" = "$sysinfo_cur" ] && [ "$sysinfo_cur" != "5.33.16" ]; then
+        echo "patching systeminformation $sysinfo_cur -> 5.33.16 (2 advisories)"
+        ov="${ov}  systeminformation: 5.33.16\n"
+      fi
+      if [ -n "$ov" ]; then
+        printf "overrides:\n$ov" >> pnpm-workspace.yaml
         pnpm install --lockfile-only
       fi
       pnpm install --frozen-lockfile --prefer-offline
       undici_final=$(grep -m1 -oE '^  undici@[0-9]+\.[0-9]+\.[0-9]+' pnpm-lock.yaml | cut -d@ -f2)
       [ "$(printf '%s\n%s\n' "$undici_final" 8.12.2 | sort -V | head -1)" = "8.12.2" ] \
         || { echo "undici $undici_final still below the 8.12.2 fix"; exit 1; }
+      sysinfo_final=$(grep -m1 -oE '^  systeminformation@[0-9]+\.[0-9]+\.[0-9]+' pnpm-lock.yaml | cut -d@ -f2)
+      [ "$(printf '%s\n%s\n' "$sysinfo_final" 5.33.16 | sort -V | head -1)" = "5.33.16" ] \
+        || { echo "systeminformation $sysinfo_final still below the 5.33.16 fix"; exit 1; }
       NEXT_TELEMETRY_DISABLED=1 \
       NEXT_PUBLIC_BUILDTIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
       NEXT_PUBLIC_VERSION=v${{package.version}} \
