@@ -21,7 +21,7 @@
 
 package:
   name: gatus
-  version: 5.37.0
+  version: 5.38.0
   epoch: 101
   description: "Gatus health monitor and status page built from upstream source"
   copyright:
@@ -31,7 +31,7 @@ package:
 
 vars:
   # SHA256 of the GitHub release tarball
-  sha256: a58ddb7052086218f404185803d3423be3985aa7b8f4f3c7ab4444a7b307fcf8
+  sha256: 31f14f397188e3d1ffcc8917f0d249572ae5fffb99fe7121d122a90adfb65931
   # Upstream 5.37.0 pins vulnerable Go modules (grype Critical/High in
   # x/net <0.60.0; High in grpc <1.83.1/1.83.2 (GHSA-2v4p-qf9q-27wj,
   # GHSA-vp52-pcj8-j9qc); Low GHSA-8wmf-6v46-5gfg in otel <=1.44.0; x/crypto
