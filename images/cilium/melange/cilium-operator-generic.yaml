@@ -14,7 +14,7 @@
 package:
   name: cilium-operator-generic
   version: 1.20.4
-  epoch: 100
+  epoch: 101
   description: "Cilium operator (generic IPAM variant), built from upstream source"
   copyright:
     - license: Apache-2.0
@@ -24,6 +24,11 @@ package:
 vars:
   # SHA256 of the GitHub release tarball (same tarball as cilium.yaml)
   sha256: 90e4f8796db57542eed10f34e0a70d47b2e03f2d3767785adb5fdd66621ca7ec
+  # Vendored go-jose uplift — see the patch step below (GHSA-mgcc-cww5-fp2q
+  # / CVE-2026-116587 JWK parse DoS; the operator links it via registry
+  # auth, the agent binary doesn't — 0 findings there, so cilium.yaml is
+  # untouched). Retire once upstream's vendor tree ships >= this.
+  gojose_version: 4.1.6
 
 environment:
   contents:
@@ -55,6 +60,28 @@ pipeline:
 
   - working-directory: /home/build/cilium-${{package.version}}
     runs: |
+      # Vendored build, so `go get` would break vendor consistency — swap
+      # the go-jose tree by hand instead. Sources come from the module
+      # cache after `go mod download` verified them against sum.golang.org;
+      # go-jose's go.mod has no deps and the same go directive across the
+      # versions, so only the tree and its two version stamps (go.mod +
+      # vendor/modules.txt) move. Fail loudly if upstream's vendored
+      # version is no longer what this patch was written against.
+      export GOTOOLCHAIN=local
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      grep -q '^# github.com/go-jose/go-jose/v4 v4.1.4$' vendor/modules.txt \
+        || { echo "vendor/modules.txt no longer pins go-jose v4.1.4; revisit this patch"; exit 1; }
+      go mod download github.com/go-jose/go-jose/v4@v${{vars.gojose_version}}
+      src="$(go env GOMODCACHE)/github.com/go-jose/go-jose/v4@v${{vars.gojose_version}}"
+      dst="vendor/github.com/go-jose/go-jose/v4"
+      rm -rf "$dst"
+      cp -R "$src" "$dst"
+      chmod -R u+w "$dst"
+      go mod edit -require=github.com/go-jose/go-jose/v4@v${{vars.gojose_version}}
+      sed -i "s|^# github.com/go-jose/go-jose/v4 v4.1.4\$|# github.com/go-jose/go-jose/v4 v${{vars.gojose_version}}|" vendor/modules.txt
+
+  - working-directory: /home/build/cilium-${{package.version}}
+    runs: |
       export GOTOOLCHAIN=local
       export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
       case "$(uname -m)" in
@@ -73,3 +100,10 @@ pipeline:
   - runs: |
       "${{targets.destdir}}/usr/bin/cilium-operator-generic" \
         --version | grep -q "${{package.version}}"
+      # grype reads Go deps from the embedded build info — fail loudly if
+      # the vendored uplift didn't land in the binary.
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      gjver=$(go version -m "${{targets.destdir}}/usr/bin/cilium-operator-generic" \
+        | awk -F'\t' '$3=="github.com/go-jose/go-jose/v4"{print $4; exit}')
+      [ "$gjver" = "v${{vars.gojose_version}}" ] \
+        || { echo "go-jose/v4 is '$gjver' in the binary, want v${{vars.gojose_version}}"; exit 1; }
