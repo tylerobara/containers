@@ -265,6 +265,18 @@
       "description": "Homepage, the self-hosted application dashboard for your services wall. The Next.js app is built from the pinned release tarball by melange and served by Wolfi nodejs on :3000 as nonroot, with config at /app/config."
     },
     {
+      "name": "web-check",
+      "display_name": "Web-Check",
+      "dir": "web-check",
+      "apko": "web-check.yaml",
+      "workflow": "web-check.yml",
+      "category": "Apps",
+      "primary_package": "web-check",
+      "upstream_url": "https://github.com/lissy93/web-check",
+      "summary": "Web-Check OSINT analyzer, built from upstream source, served by Wolfi node.",
+      "description": "Web-Check, the all-in-one OSINT tool for analysing any website. The Express+Astro app is built from the pinned source tarball by melange (upstream's two-stage yarn build) and served by Wolfi nodejs on :3000 as nonroot; browser-based checks ship without chromium by design."
+    },
+    {
       "name": "gatus",
       "display_name": "Gatus",
       "dir": "gatus",

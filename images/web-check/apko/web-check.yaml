@@ -1,0 +1,69 @@
+# web-check image, assembled by apko (no Dockerfile). The built app tree
+# (/app) + entrypoint ship from the melange package (see
+# ../melange/web-check.yaml — upstream source tarball, two-stage yarn build);
+# this file is the runtime: Wolfi nodejs-24 + the apk. Mirrors the final
+# stage of upstream's Dockerfile (node server.js on :3000, GUI + /api lambdas
+# + /healthz), with the repo-wide deviations:
+#   - busybox+ca-certs Wolfi base instead of node:22-bookworm(-slim)+apt
+#   - NO chromium: upstream apt-installs chromium + tini and ships
+#     puppeteer/chromium npm packages pointed at /usr/bin/chromium. Wolfi's
+#     chromium drags thousands of unfixable grype findings (the grafana
+#     precedent) for the screenshot/browser checks only — every other check
+#     runs fine without it, and the puppeteer-based checks fail soft per-check
+#     (server.js wraps errors; uncaughtException is logged, not fatal —
+#     asserted by the boot test). If browser features are ever needed, add
+#     `chromium` back here and expect this image to go unsigned.
+#   - NO traceroute: the traceroute check shells out to a binary Wolfi does
+#     not ship; that single check degrades like the browser ones.
+#   - dumb-init PID 1 instead of tini; run-as nonroot 65532 (upstream runs as
+#     root in a slim debian).
+# The default command is `node server.js` via /entrypoint.sh; the server
+# listens on $PORT (default 3000) on all interfaces (apko has no EXPOSE).
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    - busybox
+    # /etc/os-release + the world-writable base dirs (/tmp 1777)
+    - wolfi-baselayout
+    # outbound TLS for the ~30 API checks (dns/ssl/http lookups) — same role
+    # the ca-certificates inside upstream's node image plays
+    - ca-certificates
+    # PID 1 reaping (entrypoint shebang; upstream's tini equivalent)
+    - dumb-init
+    # runtime matching the melange build env (../melange/web-check.yaml pins
+    # nodejs-24, inside upstream's engines window ^22.22.3 || ^24.16.0);
+    # explicit stream instead of the nodejs virtual so a Wolfi stream
+    # rollover cannot silently change the runtime major
+    - nodejs-24
+    # Built by melange; supplied via --repository-append at build time.
+    # Floating (no =pin), like homepage/valkey — Wolfi ships no web-check
+    # package, so the bare name resolves to ours trivially; the workflow's
+    # lock guard asserts the resolved pkgver is exactly <version>-r101 anyway.
+    - web-check
+
+accounts:
+  groups:
+    - groupname: web-check
+      gid: 65532
+  users:
+    - username: web-check
+      uid: 65532
+      gid: 65532
+      shell: /sbin/nologin
+  run-as: 65532
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+  # upstream Dockerfile ENVs that matter at runtime: production GUI build is
+  # what dist/ was compiled for; PORT is the server's own env (default 3000).
+  # CHROME_PATH/PUPPETEER_EXECUTABLE_PATH are deliberately ABSENT (no
+  # chromium — see header).
+  NODE_ENV: production
+  PORT: 3000
+
+entrypoint:
+  command: /entrypoint.sh
