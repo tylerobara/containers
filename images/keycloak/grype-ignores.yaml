@@ -1,14 +1,16 @@
 # Grype scan exceptions for the keycloak image — maintainer-reviewed, not a
 # scan loosening: the scan + signing gate run unmodified (grype.yml step),
 # and ONLY the exact vulnerability IDs below are excluded, per-ID.
-match:
-  ignore:
-    # Both are 2017-era WildFly/Keycloak < 3 advisories (Elycrack /
-    # keystore password-check) that grype name-fuzzy-matches to the bare
-    # `keycloak` apk at 26.8.1. The affected WildFly/legacy artifacts do
-    # not exist in the 26.x quarkus distribution — false positive, same
-    # class of stale-name match as the fleet's known residuals.
-    - vulnerability: CVE-2017-12159
-      reason: "grype fuzzy name-match on the bare keycloak apk; 2017 WildFly-era advisory, no affected artifact in the KC 26.x dist (maintainer-confirmed FP)"
-    - vulnerability: CVE-2017-12158
-      reason: "grype fuzzy name-match on the bare keycloak apk; 2017 WildFly-era advisory, no affected artifact in the KC 26.x dist (maintainer-confirmed FP)"
+# Schema note: grype's ignore list is TOP-LEVEL. Nesting it under `match:`
+# (the matcher-tuning root) is silently ignored by grype — verified against
+# grype 0.121.0, which is how CVE-2017-12158/12159 survived PR #88 unsigned.
+ignore:
+  # Both are 2017-era WildFly/Keycloak < 3 advisories (Elycrack /
+  # keystore password-check) that grype name-fuzzy-matches to the bare
+  # `keycloak` apk at 26.8.1. The affected WildFly/legacy artifacts do
+  # not exist in the 26.x quarkus distribution — false positive, same
+  # class of stale-name match as the fleet's known residuals.
+  - vulnerability: CVE-2017-12159
+    reason: "grype fuzzy name-match on the bare keycloak apk; 2017 WildFly-era advisory, no affected artifact in the KC 26.x dist (maintainer-confirmed FP)"
+  - vulnerability: CVE-2017-12158
+    reason: "grype fuzzy name-match on the bare keycloak apk; 2017 WildFly-era advisory, no affected artifact in the KC 26.x dist (maintainer-confirmed FP)"
