@@ -60,8 +60,8 @@ environment:
       - busybox
       - ca-certificates-bundle
       - curl
-      # go.mod wants go 1.26.0; Wolfi go-1.26 is 1.26.x.
-      - go-1.26
+      # 3.7.17 go.mod wants go >= 1.27.0; Wolfi go-1.27 satisfies it.
+      - go-1.27
 
 pipeline:
   - runs: |
@@ -77,7 +77,7 @@ pipeline:
     runs: |
       # No vendor/ in the tarball, so modules resolve from the network.
       export CGO_ENABLED=0 GOTOOLCHAIN=local
-      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.27/bin"
       # Raise the vulnerable dep pin (see vars); a no-op once upstream
       # ships >= this. (Only `go build` gets build flags — `go get`
       # rejects them; upstream passes no GOFLAGS at all.)
@@ -100,7 +100,7 @@ pipeline:
       echo "$out" | grep -q "v${{package.version}}"
       # grype reads Go deps from the embedded build info — assert the
       # bumped pin actually landed in the binary.
-      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.27/bin"
       ver=$(go version -m "${{targets.destdir}}/usr/bin/traefik" \
         | awk -F'\t' '$3=="golang.org/x/net"{print $4; exit}')
       [ "$(printf '%s\n%s\n' "$ver" "v${{vars.xnet_version}}" | sort -V | head -1)" = "v${{vars.xnet_version}}" ] \
