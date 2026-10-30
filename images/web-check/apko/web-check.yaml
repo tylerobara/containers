@@ -42,7 +42,8 @@ contents:
     # Built by melange; supplied via --repository-append at build time.
     # Floating (no =pin), like homepage/valkey — Wolfi ships no web-check
     # package, so the bare name resolves to ours trivially; the workflow's
-    # lock guard asserts the resolved pkgver is exactly <version>-r101 anyway.
+    # lock guard asserts the resolved pkgver is exactly the melange
+    # config's <version>-r<epoch> anyway.
     - web-check
 
 accounts:
