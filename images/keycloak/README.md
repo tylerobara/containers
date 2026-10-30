@@ -72,6 +72,21 @@ upstream's contract, not an image bug; `start-dev` is the dev-mode override.
   `docker run -p 8080 -p 9000` contract with zero overrides. Deployments
   that want stricter defaults override via `KC_*` env.
 
+- **CVE remediations baked into the apk/image** (26.8.1-r101):
+  - bundled `guava 33.6.0-jre` (GHSA-xxph-c9ww-hj94, High) is replaced in
+    the melange pipeline with sha256-pinned **33.7.2-jre** from Maven
+    Central, before `kc.sh build`, keeping quarkus' jar naming; a guard
+    fails the build if upstream's dist starts bundling a different guava
+    (re-verify the patch is still needed, then re-pin the vars).
+  - the JRE's `alsa-lib` apk (3 Medium CVEs, sound subsystem the server
+    JVM never loads — boot-tested) is pruned by an provides-only
+    `alsa-lib-stub` package (`so:libasound.so.2` + `alsa-lib`, priority
+    100), so the real apk never resolves into the image.
+  - `CVE-2017-12159`/`-12158` (2017 WildFly-era advisories grype
+    fuzzy-matches onto the bare `keycloak` apk name) are excluded **by
+    exact ID only** via [`grype-ignores.yaml`](grype-ignores.yaml); the
+    scan and the sign-only-when-0-Low+ gate themselves are unmodified.
+
 ## Versioning
 
 `version` + `vars.sha256` track the GitHub release asset

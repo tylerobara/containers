@@ -11,9 +11,21 @@
 # `start` offline, exactly as upstream's image build-time RUN bakes it.
 #
 # Wolfi ships stream-named keycloak-26.5/keycloak-26.6 packages but NO bare
-# `keycloak`, so resolution is trivially ours; epoch 100 + provider-priority
+# `keycloak`, so resolution is trivially ours; epoch 101 + provider-priority
 # and the workflow's lock guard (cloudflared precedent) fail loudly if a
 # bare keycloak package ever appears upstream and wins over this build.
+#
+# CVE remediations baked here (grype findings on the published image):
+#   - guava 33.6.0-jre bundled in lib/lib/main/ is swapped for sha256-pinned
+#     33.7.2-jre from Maven Central (GHSA-xxph-c9ww-hj94 fixed in 33.7.2),
+#     BEFORE `kc.sh build` so the augmentation indexes the patched jar —
+#     plus an in-place same-length rewrite of the filename references cached
+#     in the dist's serialized .dat augmentation state (see swap step).
+#   - the JRE's alsa-lib apk (3 Medium CVEs, sound subsystem the Keycloak
+#     server never loads) is pruned at image level by alsa-lib-stub.yaml.
+#   - CVE-2017-12159/-12158 are grype name-fuzzy false positives on the bare
+#     `keycloak` apk (2017 WildFly-era advisories); excluded by-ID only in
+#     images/keycloak/grype-ignores.yaml — scan and signing gate unchanged.
 #
 # Bump `version` + `vars.sha256` on each release — tags are plain semver
 # with NO v prefix (26.8.1), asset URL
@@ -23,7 +35,7 @@
 package:
   name: keycloak
   version: 26.8.1
-  epoch: 100
+  epoch: 101
   description: "Keycloak IAM/SSO server (upstream release distribution)"
   copyright:
     - license: Apache-2.0
@@ -33,6 +45,12 @@ package:
 vars:
   # SHA256 of the GitHub release dist tarball (tag <version>, no v prefix)
   sha256: 4e2740b181faa2ea623a1c2ecf00855935311e546046e2f857615a47ed24cbe8
+  # Bundled vs patched guava (CVE remediation, see header): on an upstream
+  # bump that changes the bundled guava, the guard in the install step fails
+  # loudly — re-verify whether the patch is still needed and re-pin both.
+  guava-bundled: 33.6.0-jre
+  guava-patched: 33.7.2-jre
+  guava-sha256: b530942257fb935f8b2cfaa5f8eb5bd59c555fd8e8d01b8ce98912e077ea606c
 
 environment:
   contents:
@@ -44,6 +62,8 @@ environment:
       - busybox
       - ca-certificates-bundle
       - curl
+      # .dat rewrite in the guava swap step (binary-safe slurp replace).
+      - perl
       # kc.sh build runs the dist's bundled quarkus toolchain; Keycloak 26
       # supports Java 17/21 (JDK, not JRE, for the augmentation step).
       - openjdk-21
@@ -60,6 +80,43 @@ pipeline:
 
   - working-directory: /home/build/keycloak-${{package.version}}
     runs: |
+      # CVE remediation (see header): swap the dist's bundled guava for the
+      # patched release BEFORE any augmentation touches lib/lib/main, keeping
+      # quarkus' module-version.jar naming so the augmentation indexes it.
+      OLDV=${{vars.guava-bundled}} NEWV=${{vars.guava-patched}}
+      [ "${#OLDV}" -eq "${#NEWV}" ] \
+        || { echo "guava pins not byte-length equal ($OLDV/$NEWV) — the .dat rewrite below preserves serialization lengths and needs same-length versions; if upstream changed digit count, rework this step"; exit 1; }
+      NEWJAR="lib/lib/main/com.google.guava.guava-$NEWV.jar"
+      if [ -f "$NEWJAR" ]; then
+        echo "dist already bundles guava $NEWV — re-check whether the patch is still needed, then bump vars deliberately"; exit 1
+      fi
+      OLDJAR="lib/lib/main/com.google.guava.guava-$OLDV.jar"
+      [ -f "$OLDJAR" ] \
+        || { echo "bundled guava is not $OLDV as pinned — review lib/lib/main and re-pin vars"; exit 1; }
+      rm "$OLDJAR"
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://repo1.maven.org/maven2/com/google/guava/guava/$NEWV/guava-$NEWV.jar" \
+        -o "$NEWJAR"
+      echo "${{vars.guava-sha256}}  $NEWJAR" | sha256sum -c -
+      # The dist caches augmentation state in serialized .dat files that
+      # enumerate dependency jars BY FILENAME — lib/quarkus/
+      # quarkus-application.dat plus lib/lib/deployment/{appmodel,
+      # deployment-class-path}.dat. With a stale name they are fatal: kc.sh
+      # boot dies NoSuchFileException at QuarkusEntryPoint, and `kc.sh
+      # build` dies NoClassDefFoundError io.quarkus.paths.PathVisitor mid-
+      # augmentation (both probed). Rewrite the references in place — safe
+      # because same-length replacements preserve the serialization's
+      # length prefixes (probed: build OK + nonroot boot OK after patch).
+      DATS=$(find lib -name '*.dat' -exec grep -l "guava-$OLDV" {} +)
+      [ -n "$DATS" ] \
+        || { echo "no .dat references guava-$OLDV — dist layout changed, review before trusting the swap"; exit 1; }
+      # shellcheck disable=SC2086
+      perl -0777 -pi -e "s/\Q$OLDV\E/$NEWV/g" $DATS
+      if find lib -name '*.dat' -exec grep -l "$OLDV" {} + | grep -q .; then
+        echo "guava-$OLDV references survive the .dat patch — kc.sh would refuse to boot; failing the build"
+        exit 1
+      fi
+
       # Install layout == upstream container image: /opt/keycloak with
       # bin/ lib/ conf/ themes/ providers/ (dist ships no data/ — created
       # below at 0777 for the runtime uid).
@@ -89,6 +146,11 @@ pipeline:
         find "$D/lib/quarkus" -name "$f" | grep -q . \
           || { echo "kc.sh build left no $f under $D/lib/quarkus"; exit 1; }
       done
+      # Exactly one guava jar in the package and it is the patched one
+      # (guards both the removal of the vulnerable jar and the swap).
+      find "$D/lib/lib/main" -name 'com.google.guava.guava-*.jar' \
+        | grep -qx "$D/lib/lib/main/com.google.guava.guava-${{vars.guava-patched}}.jar" \
+        || { echo "guava in package is not exactly ${{vars.guava-patched}}"; exit 1; }
       # melange cannot chown; ship the runtime-writable dirs 0777 (the
       # cilium-operator /home/gops precedent) with FILES left 644 root-owned:
       #   - data/: H2 db bootstrap on first start

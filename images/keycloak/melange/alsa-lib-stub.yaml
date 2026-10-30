@@ -1,0 +1,40 @@
+# Provider stub that prunes alsa-lib from the keycloak image.
+# openjdk-21-jre depends on `alsa-lib` AND `so:libasound.so.2` (APKINDEX
+# verified) for the java sound subsystem — which Keycloak's server JVM never
+# loads (headless, no AWT/sound; boot-tested every publish). The published
+# alsa-lib (1.2.16.1-r5) carried 3 Medium CVEs (CVE-2026-96675/-96674/
+# -90781) with no fixed Wolfi build at authoring time, so apko resolves the
+# JRE's alsa deps to THIS package via provides + provider-priority and the
+# real apk never installs. Content-free: if anything ever needs sound, drop
+# this package from the apko config and the real alsa-lib resolves back.
+package:
+  name: alsa-lib-stub
+  version: 999.0.0
+  epoch: 101
+  description: "Empty provider stub replacing alsa-lib (unused by the keycloak JRE runtime)"
+  copyright:
+    - license: Apache-2.0
+  dependencies:
+    provider-priority: 100
+    # The two names openjdk-21-jre's alsa deps resolve against (APKINDEX
+    # verified: `alsa-lib` + `so:libasound.so.2`). High version + priority
+    # 100 outrank wolfi's real alsa-lib for the shared deps.
+    provides:
+      - alsa-lib=999.0.0
+      - so:libasound.so.2=999.0.0
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+
+pipeline:
+  - runs: |
+      install -d -m755 "${{targets.destdir}}/usr/share/doc/alsa-lib-stub"
+      echo "Intentionally empty. Prunes alsa-lib from the keycloak image; see images/keycloak/melange/alsa-lib-stub.yaml header." \
+        > "${{targets.destdir}}/usr/share/doc/alsa-lib-stub/README"

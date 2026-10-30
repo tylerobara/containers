@@ -29,11 +29,15 @@ contents:
     # Runtime for the built dist; Keycloak 26 supports Java 17/21 (the
     # melange build's kc.sh build ran on the matching openjdk-21 JDK).
     - openjdk-21-jre
+    # Prunes the JRE's alsa-lib dependency chain (sound subsystem Keycloak
+    # never loads; alsa-lib 1.2.16.1-r5 carried 3 unfixable-at-the-time
+    # Medium CVEs). Melange package, provides-only; see its yaml header.
+    - alsa-lib-stub
     # Built by melange; supplied via --repository-append at build time.
     # Floating (no =pin), like the valkey/external-secrets rows — Wolfi
     # ships only stream-named keycloak-26.5/26.6 packages, so the bare
     # name resolves to ours trivially; the workflow's lock guard asserts
-    # the resolved pkgver is exactly <version>-r100 anyway.
+    # the resolved pkgver is exactly <version>-r101 anyway.
     - keycloak
 
 accounts:
@@ -61,7 +65,8 @@ environment:
   KC_HTTP_HOST: 0.0.0.0
   # Health endpoints are DISABLED by default even in dev mode (probed:
   # /health/ready answers nothing until this is on). Baked so the bare
-  # image answers orchestrator liveness/readiness probes on the main port.
+  # image answers orchestrator liveness/readiness probes (served on the
+  # management port :9000; the main port 404s /health — probed).
   KC_HEALTH_ENABLED: "true"
 
 entrypoint:
