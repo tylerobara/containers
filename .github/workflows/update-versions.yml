@@ -774,4 +774,29 @@ jobs:
             fi
           fi
 
+          # --- keycloak: upstream tags are plain semver with NO v prefix
+          # (26.8.1). The bump target is the GitHub release DIST asset
+          # keycloak-<ver>.tar.gz (releases/download/<ver>/…) — the same
+          # artifact upstream's own container image unpacks, so the melange
+          # config packages it (sha256-pinned + version-asserted) instead of
+          # rebuilding the maven+node quarkus source. The tag list carries
+          # prerelease/major-noise tags, so filter strict X.Y.Z + sort -V.
+          # Wolfi ships only stream-named keycloak-26.5/26.6 packages (no
+          # bare keycloak), so resolution is trivially ours; the workflow's
+          # lock guard fails loudly the day that changes. Floating apko line,
+          # no PIN_FILE sync. ---
+          if want keycloak; then
+            yaml=images/keycloak/melange/keycloak.yaml
+            latest=$(gh api --paginate repos/keycloak/keycloak/tags --jq '.[].name' \
+              | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+            if [ -z "$latest" ]; then
+              echo "::error::keycloak: no semver release tag found upstream"
+              FAILED=1
+            else
+              bump_row keycloak "$yaml" "$latest" \
+                "https://github.com/keycloak/keycloak/releases/download/${latest}/keycloak-${latest}.tar.gz" \
+                keycloak
+            fi
+          fi
+
           exit $FAILED

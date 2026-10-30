@@ -1,0 +1,138 @@
+# Melange build for Keycloak (github.com/keycloak/keycloak) — the IAM/SSO
+# server. This packages the official Apache-2.0 release distribution, which
+# is exactly what upstream's own container Dockerfile consumes: unpack the
+# keycloak-<version>.tar.gz release asset to /opt/keycloak and run
+# `kc.sh build` (their RUN line). Unlike the Go builds here there is no
+# compile step: Keycloak's source build is the maven+node quarkus assembly
+# that upstream CI runs BEFORE cutting this dist — the dist IS the upstream
+# container-build contract, so it is sha256-pinned and version-asserted
+# rather than rebuilt. `kc.sh build` (the bundled offline quarkus
+# augmentation, no maven/node) is baked in at package time so the image can
+# `start` offline, exactly as upstream's image build-time RUN bakes it.
+#
+# Wolfi ships stream-named keycloak-26.5/keycloak-26.6 packages but NO bare
+# `keycloak`, so resolution is trivially ours; epoch 100 + provider-priority
+# and the workflow's lock guard (cloudflared precedent) fail loudly if a
+# bare keycloak package ever appears upstream and wins over this build.
+#
+# Bump `version` + `vars.sha256` on each release — tags are plain semver
+# with NO v prefix (26.8.1), asset URL
+# github.com/keycloak/keycloak/releases/download/<ver>/keycloak-<ver>.tar.gz
+# — the update-versions bot covers this row.
+
+package:
+  name: keycloak
+  version: 26.8.1
+  epoch: 100
+  description: "Keycloak IAM/SSO server (upstream release distribution)"
+  copyright:
+    - license: Apache-2.0
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the GitHub release dist tarball (tag <version>, no v prefix)
+  sha256: 4e2740b181faa2ea623a1c2ecf00855935311e546046e2f857615a47ed24cbe8
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      # kc.sh build runs the dist's bundled quarkus toolchain; Keycloak 26
+      # supports Java 17/21 (JDK, not JRE, for the augmentation step).
+      - openjdk-21
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/keycloak/keycloak/releases/download/${{package.version}}/keycloak-${{package.version}}.tar.gz" \
+        -o /home/build/keycloak.tar.gz
+      echo "${{vars.sha256}}  /home/build/keycloak.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf keycloak.tar.gz && rm keycloak.tar.gz
+
+  - working-directory: /home/build/keycloak-${{package.version}}
+    runs: |
+      # Install layout == upstream container image: /opt/keycloak with
+      # bin/ lib/ conf/ themes/ providers/ (dist ships no data/ — created
+      # below at 0777 for the runtime uid).
+      D="${{targets.destdir}}/opt/keycloak"
+      install -d -m755 "$D"
+      cp -a ./* "$D/"
+      # Upstream Dockerfile's build-time RUN, baked here so the image
+      # starts offline. JAVA_HOME resolved from the installed JDK, fail
+      # loudly if the Wolfi package ever moves the binary.
+      JAVA_BIN=$(find /usr/lib/jvm -type f -name java | head -1)
+      [ -n "$JAVA_BIN" ] \
+        || { echo "no java binary under /usr/lib/jvm — openjdk-21 layout changed"; exit 1; }
+      # (separate lines: both expansions on one export would see the old JAVA_HOME)
+      JAVA_HOME="${JAVA_BIN%/*}"
+      JAVA_HOME="${JAVA_HOME%/*}"
+      export JAVA_HOME
+      [ -x "$JAVA_HOME/bin/java" ] \
+        || { echo "JAVA_HOME=$JAVA_HOME has no bin/java"; exit 1; }
+      export HOME=/home/build
+      timeout 1800 "$D/bin/kc.sh" build
+      # The augmentation must have left its artifacts (probed layout: kc.sh
+      # re-augments rewrite lib/quarkus/{generated,transformed}-bytecode.jar
+      # + quarkus-application.dat in place — Keycloak has no target/ and no
+      # quarkus-run.jar; dependencies live in lib/lib/main/. A failed build
+      # is loud via kc.sh's own exit code; this catches "silently empty").
+      for f in transformed-bytecode.jar quarkus-application.dat; do
+        find "$D/lib/quarkus" -name "$f" | grep -q . \
+          || { echo "kc.sh build left no $f under $D/lib/quarkus"; exit 1; }
+      done
+      # melange cannot chown; ship the runtime-writable dirs 0777 (the
+      # cilium-operator /home/gops precedent) with FILES left 644 root-owned:
+      #   - data/: H2 db bootstrap on first start
+      #   - lib/quarkus/: kc.sh re-runs the augmentation in place on
+      #     start-dev / whenever build-time options change; quarkus
+      #     unlink+recreates its jars, so DIRECTORY write suffices
+      #     (probed: files 644, uid 65532 start-dev boots in ~12s).
+      #     Dir-only also keeps the worldwrite linter silent — it flags
+      #     world-writable FILES. Upstream's image is likewise group-
+      #     writable over /opt/keycloak for arbitrary-UID runs; bin/ conf/
+      #     themes/ stay root-owned and non-writable here.
+      install -d -m777 "$D/data"
+      find "$D/lib/quarkus" -type d -exec chmod 0777 {} +
+
+  - runs: |
+      # FAIL LOUDLY: the dist must self-report the pinned version
+      # (upstream --version first line: "Keycloak <ver>", then JVM/OS lines).
+      D="${{targets.destdir}}/opt/keycloak"
+      JAVA_BIN=$(find /usr/lib/jvm -type f -name java | head -1)
+      JAVA_HOME="${JAVA_BIN%/*}"
+      JAVA_HOME="${JAVA_HOME%/*}"
+      export JAVA_HOME
+      export HOME=/home/build
+      out=$(timeout 300 "$D/bin/kc.sh" --version 2>&1) \
+        || { echo "kc.sh --version exited non-zero"; exit 1; }
+      echo "$out"
+      echo "$out" | grep -Eq "^Keycloak ${{package.version}}$" \
+        || { echo "--version is '$out', want first line 'Keycloak ${{package.version}}'"; exit 1; }
+
+test:
+  environment:
+    contents:
+      packages:
+        - busybox
+        - openjdk-21-jre
+  pipeline:
+    - runs: |
+        # Boot the INSTALLED package: the apk must ship the built dist and
+        # self-report the pinned version on the runtime JRE. (Wolfi's JRE
+        # does not put java on PATH — kc.sh needs JAVA_HOME.)
+        JAVA_BIN=$(find /usr/lib/jvm -type f -name java | head -1)
+        JAVA_HOME="${JAVA_BIN%/*}"
+        JAVA_HOME="${JAVA_HOME%/*}"
+        export JAVA_HOME HOME=/home/build
+        out=$(timeout 300 /opt/keycloak/bin/kc.sh --version 2>&1)
+        echo "$out"
+        echo "$out" | grep -q "^Keycloak ${{package.version}}$"

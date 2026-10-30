@@ -419,6 +419,18 @@
       "upstream_url": "https://github.com/cloudflare/cloudflared",
       "summary": "Cloudflare Tunnel agent (cloudflared), built from upstream source.",
       "description": "The Cloudflare Tunnel agent, built from the date-tagged upstream release tarball by melange (static CGO_ENABLED=0 Go binary, version stamped via -X main.Version like upstream's Makefile) and assembled by apko on Wolfi. Mirrors upstream's container contract: entrypoint cloudflared --no-autoupdate, default cmd version, nonroot 65532. Pure outbound-connect tool — no ports. Wolfi ships its own cloudflared package, so epoch 100 + provider-priority keep this build winning resolution."
+    },
+    {
+      "name": "keycloak",
+      "display_name": "Keycloak",
+      "dir": "keycloak",
+      "apko": "keycloak.yaml",
+      "workflow": "keycloak.yml",
+      "category": "Security & Secrets",
+      "primary_package": "keycloak",
+      "upstream_url": "https://github.com/keycloak/keycloak",
+      "summary": "Keycloak IAM/SSO server, packaged from the upstream release distribution.",
+      "description": "Keycloak, packaged from the official Apache-2.0 release distribution — the same artifact upstream's own container image consumes: the sha256-pinned keycloak-<ver>.tar.gz unpacked to /opt/keycloak with kc.sh build (the bundled offline quarkus augmentation) baked in at package time; the maven+node source build stays upstream CI's job. Assembled by apko on Wolfi with the Wolfi openjdk-21 JRE, entrypoint kc.sh + cmd start, nonroot 65532; data/ (H2 bootstrap) and lib/quarkus/ (kc.sh re-augments in place on start-dev and build-option changes) ship 0777 so uid 65532 can write. Wolfi ships only stream-named keycloak-26.5/26.6 packages, so the bare keycloak name resolves to this build trivially; epoch 100 + provider-priority + the workflow lock guard keep it that way."
     }
   ]
 }
