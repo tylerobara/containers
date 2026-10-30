@@ -107,6 +107,12 @@ jobs:
             --signing-key melange.rsa \
             --out-dir ./packages \
             --runner docker
+          # Provider stub pruning the JRE's alsa-lib (see its yaml header).
+          ~/go/bin/melange build images/keycloak/melange/alsa-lib-stub.yaml \
+            --arch "$ARCH" \
+            --signing-key melange.rsa \
+            --out-dir ./packages \
+            --runner docker
 
       - uses: actions/upload-artifact@v7
         with:
@@ -213,9 +219,11 @@ jobs:
           mkdir -p scans
           docker run --rm --user 0:0 \
             -v "$PWD/scans:/out" \
+            -v "$PWD/images/keycloak/grype-ignores.yaml:/cfg/grype.yaml:ro" \
             -v "$HOME/.docker:/root/.docker:ro" \
             -v /var/run/docker.sock:/var/run/docker.sock \
             ghcr.io/anchore/grype:latest "$GRYPE_SRC" \
+              --config /cfg/grype.yaml \
               --output json --file /out/keycloak.json || true
           # Same signing gate as every other image here: any Low+ finding blocks.
           LOWPLUS=$(jq '[.matches[] | select(.vulnerability.severity
