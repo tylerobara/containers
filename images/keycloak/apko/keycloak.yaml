@@ -1,0 +1,71 @@
+# keycloak image, assembled by apko (no Dockerfile). The built Keycloak
+# distribution is shipped by the melange package (see ../melange/keycloak.yaml
+# — upstream release tarball + build-time kc.sh build, the exact contract of
+# upstream's own Dockerfile); this file is the runtime: Wolfi JRE + the apk.
+# Mirrors upstream's container contract (/opt/keycloak layout, ENTRYPOINT
+# kc.sh + CMD start, ports 8080/8443/9000 are keycloak defaults, not baked
+# here — apko has no EXPOSE), with the repo-wide deviations:
+#   - busybox+ca-certs Wolfi base instead of ubi/temurin (debug shell; no
+#     apk-tools in prod), openjdk-21-jre instead of a full JDK or temurin
+#   - run-as 65532 (upstream's image runs as root or arbitrary UID depending
+#     on flavor; the repo pins numeric nonroot like gatus/frr, and the
+#     dist's data/ ships 0777 from the apk so the H2 db can bootstrap —
+#     production deployments should volume-mount /opt/keycloak/data and set
+#     KC_DB_* for a real database)
+# The default cmd "start" means a bare `docker run` boots Keycloak in
+# production mode (https required via KC_... env). test.sh exercises the
+# dev-mode boot path; real deployments override cmd and/or mount config,
+# exactly as upstream's operator/docs do it.
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    # Debug shell + trust store for the OIDC/SAML outbound TLS.
+    - busybox
+    - ca-certificates
+    # Runtime for the built dist; Keycloak 26 supports Java 17/21 (the
+    # melange build's kc.sh build ran on the matching openjdk-21 JDK).
+    - openjdk-21-jre
+    # Built by melange; supplied via --repository-append at build time.
+    # Floating (no =pin), like the valkey/external-secrets rows — Wolfi
+    # ships only stream-named keycloak-26.5/26.6 packages, so the bare
+    # name resolves to ours trivially; the workflow's lock guard asserts
+    # the resolved pkgver is exactly <version>-r100 anyway.
+    - keycloak
+
+accounts:
+  groups:
+    - groupname: keycloak
+      gid: 65532
+  users:
+    - username: keycloak
+      uid: 65532
+      gid: 65532
+      shell: /bin/false
+  # Repo-wide numeric nonroot (gatus/frr precedent).
+  run-as: 65532
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+  # Wolfi's JRE installs under /usr/lib/jvm and does NOT put java on PATH;
+  # kc.sh resolves java via JAVA_HOME (verified against openjdk-21-jre).
+  JAVA_HOME: /usr/lib/jvm/java-21-openjdk
+  # Keycloak 26 binds its HTTP listener to LOOPBACK by default (probed:
+  # start-dev listens on 127.0.0.1:8080 — published container ports can
+  # never reach it). 0.0.0.0 is the container contract every other service
+  # image here gets implicitly; deployments publish/select interfaces via
+  # reverse proxy or KC_HTTP_* overrides per upstream docs.
+  KC_HTTP_HOST: 0.0.0.0
+  # Health endpoints are DISABLED by default even in dev mode (probed:
+  # /health/ready answers nothing until this is on). Baked so the bare
+  # image answers orchestrator liveness/readiness probes on the main port.
+  KC_HEALTH_ENABLED: "true"
+
+entrypoint:
+  # Upstream image: ENTRYPOINT ["/opt/keycloak/bin/kc.sh"] CMD ["start"].
+  command: /opt/keycloak/bin/kc.sh
+
+cmd: start
