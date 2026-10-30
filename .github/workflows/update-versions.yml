@@ -4,14 +4,15 @@ name: update-versions
 # this repo's image families. Checks upstream (PGDG ftp for each tracked
 # postgresql-<major>.yaml, GitHub releases for the operator, openbao, homepage,
 # dokuwiki, grafana-image-renderer, cilium, cert-manager, frr-k8s, k8s-sidecar,
-# local-path-provisioner and gatus;
+# local-path-provisioner, gatus and web-check (GitHub TAGS, not releases —
+# upstream's releases/latest lags its tag list);
 # cilium-envoy follows cilium's own images/cilium/Dockerfile pin and gets its
 # payload shas re-extracted; metallb's controller + speaker configs are bumped
 # together off the latest non-chart metallb tag) and
 # opens a PR bumping `version` + `vars.sha256` in the melange config. Nothing
 # is merged or published here: review the PR, validate it with that image's
 # own workflow (postgres / cloudnative-pg-operator / openbao / homepage / dokuwiki /
-# grafana-image-renderer / cert-manager / metallb / k8s-sidecar / local-path-provisioner / gatus) via
+# grafana-image-renderer / cert-manager / metallb / k8s-sidecar / local-path-provisioner / gatus / web-check) via
 # workflow_dispatch (ref = PR branch, validate_only = true),
 # then merge — the merge push rebuilds and publishes just that image.
 #
@@ -25,7 +26,7 @@ on:
   workflow_dispatch:
     inputs:
       only:
-        description: "Comma-separated rows to check, e.g. postgresql-16,bitnami-postgresql-16,operator,openbao,cilium,cilium-envoy,metallb,frr-k8s,k8s-sidecar,local-path-provisioner,gatus,homepage (blank = all)"
+        description: "Comma-separated rows to check, e.g. postgresql-16,bitnami-postgresql-16,operator,openbao,cilium,cilium-envoy,metallb,frr-k8s,k8s-sidecar,local-path-provisioner,gatus,homepage,web-check (blank = all)"
         required: false
         default: ""
 
@@ -214,6 +215,20 @@ jobs:
             bump_row homepage "$yaml" "$latest" \
               "https://github.com/gethomepage/homepage/archive/refs/tags/v${latest}.tar.gz" \
               homepage
+          fi
+
+          # --- web-check: highest semver TAG (releases/latest lags tags upstream) ---
+          if want web-check; then
+            yaml=images/web-check/melange/web-check.yaml
+            latest=$(gh api repos/lissy93/web-check/tags?per_page=20 \
+              | jq -r '.[].name' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+            if [ -z "$latest" ]; then
+              echo "::error::web-check: no semver tag found upstream"
+              FAILED=1
+            fi
+            bump_row web-check "$yaml" "$latest" \
+              "https://github.com/lissy93/web-check/archive/refs/tags/${latest}.tar.gz" \
+              web-check
           fi
 
           # --- dokuwiki: latest GitHub release (release-2026-07-14c -> 2026.07.14c) ---

@@ -19,6 +19,7 @@ base. **No Dockerfiles anywhere.**
 | MetalLB (controller, speaker, frr-k8s) | `ghcr.io/tylerobara/containers/metallb-controller` (+ `-speaker`, `-frr-k8s`) | [`images/metallb/`](images/metallb/) |
 | k8s-sidecar (Grafana dashboards sidecar) | `ghcr.io/tylerobara/containers/k8s-sidecar` | [`images/k8s-sidecar/`](images/k8s-sidecar/) |
 | Homepage | `ghcr.io/tylerobara/containers/homepage` | [`images/homepage/`](images/homepage/) |
+| Web-Check | `ghcr.io/tylerobara/containers/web-check` | [`images/web-check/`](images/web-check/) |
 | Local Path Provisioner | `ghcr.io/tylerobara/containers/local-path-provisioner` | [`images/local-path-provisioner/`](images/local-path-provisioner/) |
 | Gatus | `ghcr.io/tylerobara/containers/gatus` | [`images/gatus/`](images/gatus/) |
 | Kubernetes Reflector | `ghcr.io/tylerobara/containers/kubernetes-reflector` | [`images/kubernetes-reflector/`](images/kubernetes-reflector/) |
@@ -40,7 +41,7 @@ build/scan data at `data/index.json`. See [`site/README.md`](site/README.md).
 
 ## CI
 
-One workflow per image family — `alpine-k8s.yml`, `bitnami-postgres.yml`, `cert-manager.yml`, `cilium.yml`, `cloudflared.yml`, `cloudnative-pg-operator.yml`, `dokuwiki.yml`, `dozzle.yml`, `external-secrets.yml`, `frr.yml`, `gatus.yml`, `grafana-image-renderer.yml`, `homepage.yml`, `k8s-sidecar.yml`, `keycloak.yml`, `kubernetes-reflector.yml`, `local-path-provisioner.yml`, `metallb.yml`, `openbao.yml`, `os-shell.yml`, `pocket-id.yml`, `postgres.yml`, `traefik.yml`, `flux.yml`, `valkey.yml` — so a change to one image can never rebuild or cancel another.
+One workflow per image family — `alpine-k8s.yml`, `bitnami-postgres.yml`, `cert-manager.yml`, `cilium.yml`, `cloudflared.yml`, `cloudnative-pg-operator.yml`, `dokuwiki.yml`, `dozzle.yml`, `external-secrets.yml`, `frr.yml`, `gatus.yml`, `grafana-image-renderer.yml`, `homepage.yml`, `k8s-sidecar.yml`, `keycloak.yml`, `kubernetes-reflector.yml`, `local-path-provisioner.yml`, `metallb.yml`, `openbao.yml`, `os-shell.yml`, `pocket-id.yml`, `postgres.yml`, `traefik.yml`, `flux.yml`, `valkey.yml`, `web-check.yml` — so a change to one image can never rebuild or cancel another.
 Routing is the native `on.push.paths` filter: a bump PR/push rebuilds **only
 the image whose directory moved**; each workflow's daily schedule rebuilds just
 its own image (fresh Wolfi CVE patches), staggered 06:00/06:05/06:10/06:15/06:20/06:25/06:30/06:35/06:40/06:45/06:50/06:55/07:00/07:05/07:10/07:15/07:20/07:25/07:35/07:40/07:45/07:50/07:55/08:00 UTC.
@@ -66,7 +67,9 @@ k8s-sidecar, local-path-provisioner, gatus, dozzle, kubernetes-reflector,
 alpine-k8s (whose row bumps the image VERSION on new kubectl patches),
 alpine-k8s helm (the helm binary the alpine-k8s image builds from source,
 3.x line only — releases/latest is helm 4, so the row filters the tag list),
-frr, traefik, pocket-id, pocket-id-operator, valkey, external-secrets
+frr, traefik, pocket-id, pocket-id-operator, valkey, web-check (GitHub tags,
+not releases — its releases/latest lags the tag list, so the row takes the
+highest semver-shaped tag), external-secrets
 (the operator repo's releases/latest returns the CHART tag `helm-chart-X.Y.Z`,
 so that row filters the tag list for plain `vX.Y.Z` tags, traefik-style),
 keycloak (plain-semver tags with NO v prefix, e.g. 26.8.1 — the row filters

@@ -1,0 +1,168 @@
+# Melange build for Web-Check (github.com/lissy93/web-check) — the all-in-one
+# OSINT/analysis web app. Mirrors the upstream Dockerfile's two yarn stages:
+# build stage = full devDeps install (astro check + astro build -> dist/) from
+# the pinned source tarball; deps stage = prod-only node_modules (upstream's
+# `npm pkg delete devDependencies` + pure-lockfile install, run in a sibling
+# dir so the shipped package.json stays pristine). The runtime tree is the
+# Dockerfile's final-stage copy list; `node server.js` (express GUI + /api
+# lambdas + astro handler for dist/client) ships via /entrypoint.sh. No Wolfi
+# web-check package exists today, so provider-priority/epoch are
+# belt-and-suspenders (openbao convention) and the workflow's lock guard
+# (cloudflared precedent) fails loudly if that changes.
+#
+# Upstream's GitHub RELEASES lag tags (2.3.0 release vs 2.3.11 tag at
+# authoring time) — pin the latest semver TAG, and the update-versions bot
+# sources tags (not releases) for this row accordingly.
+#
+# Bump `version` + `vars.sha256` on each tag — tarball URL
+# github.com/lissy93/web-check/archive/refs/tags/<version>.tar.gz (no v).
+
+package:
+  name: web-check
+  version: 2.3.11
+  epoch: 101
+  description: "Web-Check — all-in-one OSINT tool for analysing any website"
+  copyright:
+    - license: MIT
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of https://github.com/lissy93/web-check/archive/refs/tags/<version>.tar.gz (bump with version)
+  sha256: 46060ec1db95feffedd72fee50373bcef563962e86da38e70f0d86804768077a
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      # build-base + python are the node-gyp fallback for native modules whose
+      # prebuilds a platform misses (homepage's pnpm-build precedent)
+      - build-base
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      - nodejs-24
+      # yarn 1.22 stream == upstream's packageManager pin (yarn@1.22.22)
+      - yarn
+      - npm-12
+      - python-3.13
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/lissy93/web-check/archive/refs/tags/${{package.version}}.tar.gz" \
+        -o /home/build/web-check.tar.gz
+      echo "${{vars.sha256}}  /home/build/web-check.tar.gz" | sha256sum -c -
+      mkdir /home/build/src
+      tar xf web-check.tar.gz -C /home/build/src --strip-components 1
+      rm web-check.tar.gz
+
+  - working-directory: /home/build/src
+    runs: |
+      # Upstream's browser kill switches (Dockerfile ENV lines): the tree
+      # depends on puppeteer + the npm `chromium` package, whose install hooks
+      # download a browser unless told not to. The image ships NO chromium at
+      # all (see apko config header), so nothing may pull one into the package.
+      export PUPPETEER_SKIP_DOWNLOAD=true NODE_CHROMIUM_SKIP_INSTALL=true
+      # Build stage of the upstream Dockerfile: full toolchain (astro check
+      # runs typescript, @astrojs/check lives in deps upstream-side), frozen
+      # lockfile, `yarn build` = astro check && astro build -> dist/.
+      yarn install --frozen-lockfile --network-timeout 100000
+      rm -rf node_modules/.cache
+      yarn build
+      # Deps stage of the upstream Dockerfile (a separate container there;
+      # a sibling dir here so the pristine package.json is what gets shipped):
+      # prod-only node_modules for the runtime tree.
+      mkdir -p /home/build/prod
+      cp package.json yarn.lock /home/build/prod/
+      (cd /home/build/prod \
+        && npm pkg delete devDependencies \
+        && yarn install --pure-lockfile --network-timeout 100000 \
+        && rm -rf node_modules/.cache)
+
+  - runs: |
+      D="${{targets.destdir}}"
+      # melange writes the apk SBOM host-side, but the container's uid owns
+      # everything the pipeline mkdirs; pre-create the leaf at 0777 so the
+      # host melange can drop var/lib/db/sbom/*.spdx.json in (same workaround
+      # as homepage/dokuwiki — only the trees outside /usr hit this).
+      install -d -m755 "$D/app" "$D/var/lib/db/sbom"
+      chmod 0777 "$D/var/lib/db/sbom"
+
+      # Final stage of the upstream Dockerfile — its exact copy list: prod
+      # node_modules, astro dist/, api lambdas, public/, server.js,
+      # healthcheck.js, package.json, yarn.lock.
+      cp -a /home/build/src/server.js /home/build/src/healthcheck.js \
+        /home/build/src/package.json /home/build/src/yarn.lock "$D/app/"
+      cp -a /home/build/src/dist "$D/app/dist"
+      cp -a /home/build/src/api "$D/app/api"
+      cp -a /home/build/src/public "$D/app/public"
+      cp -a /home/build/prod/node_modules "$D/app/node_modules"
+
+      # yarn 1 predates npm's `libc` field, so it installed the optional
+      # native bindings for BOTH libc flavours (sharp/libvips, rolldown,
+      # lightningcss, astro's compiler, satteri). The musl ones are dead
+      # weight on a glibc Wolfi runtime AND melange's soname scanner turns
+      # them into a dep on so:libc.musl-aarch64.so.1, which Wolfi can never
+      # provide (apko solve failure). Drop them; fail loudly if a family ever
+      # loses its gnu sibling — the package loaders need it at runtime.
+      musl=$(find "$D/app/node_modules" -mindepth 1 -maxdepth 2 -type d \
+        \( -name '*-musl' -o -name '*linuxmusl*' \))
+      for d in $musl; do
+        gnu=$(echo "$d" | sed -e 's/linuxmusl/linux/' -e 's/-musl$/-gnu/')
+        test -d "$gnu" || { echo "musl binding $(basename "$d") has no gnu sibling"; exit 1; }
+        rm -rf "$d"
+      done
+      if find "$D/app/node_modules" -mindepth 1 -maxdepth 2 -type d \
+        \( -name '*-musl' -o -name '*linuxmusl*' \) | grep -q .; then
+        echo "musl bindings survived the prune"; exit 1
+      fi
+
+      # dumb-init PID 1 shebang + fixed CMD (house pattern; upstream uses
+      # tini — same job). server.js reads $PORT (default 3000) and binds all
+      # interfaces, so no HOSTNAME probe is needed (unlike homepage).
+      cat > "$D/entrypoint.sh" <<'EEOF'
+      #!/usr/bin/dumb-init /bin/sh
+      # PID 1: dumb-init reaps orphans and forwards signals to the node server.
+      set -e
+      cd /app
+      exec node server.js
+      EEOF
+      chmod 755 "$D/entrypoint.sh"
+
+  - runs: |
+      D="${{targets.destdir}}"
+      # app tree integrity (melange#1395 lesson: assert shipped bits)
+      test -f "$D/app/server.js"
+      test -f "$D/app/healthcheck.js"
+      test -f "$D/app/dist/server/entry.mjs"
+      test -n "$(ls -A "$D/app/dist/client")"
+      test -n "$(ls -A "$D/app/api")"
+      test -n "$(ls -A "$D/app/public")"
+      test -d "$D/app/node_modules"
+      grep -q '"version": "${{package.version}}"' "$D/app/package.json"
+      # ESM files — --check must parse them as modules (the repo ships
+      # type:module semantics via node >=22 syntax detection).
+      node --input-type=module --check < "$D/app/server.js"
+      node --input-type=module --check < "$D/app/healthcheck.js"
+      # Upstream's own integrity gate (Dockerfile RUN line, verbatim intent):
+      # the compiled server module must import in the runtime env or the
+      # container dies at first boot instead of here.
+      (cd "$D/app" && node --input-type=module \
+        -e "await import('./dist/server/entry.mjs');")
+      # deps-stage purity: dev-only tooling must not ship in the prod
+      # node_modules (nodemon is a devDependency and nothing else pulls it).
+      [ ! -e "$D/app/node_modules/nodemon" ] \
+        || { echo "nodemon leaked into the prod node_modules"; exit 1; }
+      # no browser binaries smuggled in via install hooks
+      ! find "$D/app/node_modules" -maxdepth 3 -name 'chrome' -o -maxdepth 3 -name 'headless_shell' 2>/dev/null | grep -q .
+      # entrypoint sanity (openbao precedent)
+      test -x "$D/entrypoint.sh"
+      sh -n "$D/entrypoint.sh"
+      grep -q "^exec node server.js" "$D/entrypoint.sh"
+      # SBOM landing spot must be host-writable (see install step above)
+      test -d "$D/var/lib/db/sbom"
