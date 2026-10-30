@@ -54,6 +54,20 @@ Same keyless policy as every image here: signed only when the CI grype scan
 reports 0 findings Low+; verify per the command on
 <https://tylerobara.github.io/containers/>.
 
+The first build (r101) published **unsigned**: 5 advisories in the JS tree
+(qs 6.16.0 Medium; extract-zip 1.7.0/2.0.1 High ×2 GHSAs; basic-ftp 5.3.1
+High; zod 3.25.76/4.6.5 High). r102 remediates all of them: `qs`→6.16.1 and
+`zod`→4.6.6 via yarn resolutions on the prod install (asserted in-build),
+and extract-zip (both copies) + basic-ftp pruned outright — they are pure
+browser-install utilities (@puppeteer/browsers unpack helpers, the npm
+chromium pkg's fetcher, get-uri's proxy fetch), unreachable in a browserless
+image; boot rehearsal confirmed every /api route still registers with them
+gone. Upstream's `yarn.lock` is also **not shipped** — nothing reads it at
+runtime, and syft's lockfile cataloger otherwise reports every version the
+lockfile ever declared (toml, node-forge, the old pins) as if installed.
+No findings are ignored to reach zero, and the installed node_modules tree
+is scanned in full.
+
 ## Updating
 
 `version` + `vars.sha256` in `melange/web-check.yaml` (tarball URL

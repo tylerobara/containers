@@ -20,7 +20,7 @@
 package:
   name: web-check
   version: 2.3.11
-  epoch: 101
+  epoch: 102
   description: "Web-Check — all-in-one OSINT tool for analysing any website"
   copyright:
     - license: MIT
@@ -81,7 +81,8 @@ pipeline:
       cp package.json yarn.lock /home/build/prod/
       (cd /home/build/prod \
         && npm pkg delete devDependencies \
-        && yarn install --pure-lockfile --network-timeout 100000 \
+        && node -e "const f='package.json',p=require('./'+f);p.resolutions={...(p.resolutions||{}),qs:'6.16.1',zod:'4.6.6'};require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n')" \
+        && yarn install --network-timeout 100000 \
         && rm -rf node_modules/.cache)
 
   - runs: |
@@ -93,11 +94,15 @@ pipeline:
       install -d -m755 "$D/app" "$D/var/lib/db/sbom"
       chmod 0777 "$D/var/lib/db/sbom"
 
-      # Final stage of the upstream Dockerfile — its exact copy list: prod
-      # node_modules, astro dist/, api lambdas, public/, server.js,
-      # healthcheck.js, package.json, yarn.lock.
+      # Final stage of the upstream Dockerfile — its copy list MINUS
+      # yarn.lock: the runtime never reads it, but syft's lockfile cataloger
+      # turns every declared version into a scanned package, so shipping it
+      # reports the whole upstream dev graph (toml, node-forge, the
+      # pre-remediation qs/zod/extract-zip/basic-ftp pins) as if installed.
+      # node_modules is the shipped truth; the lockfile is upstream's, not
+      # this tree's, so it goes.
       cp -a /home/build/src/server.js /home/build/src/healthcheck.js \
-        /home/build/src/package.json /home/build/src/yarn.lock "$D/app/"
+        /home/build/src/package.json "$D/app/"
       cp -a /home/build/src/dist "$D/app/dist"
       cp -a /home/build/src/api "$D/app/api"
       cp -a /home/build/src/public "$D/app/public"
@@ -121,6 +126,19 @@ pipeline:
         \( -name '*-musl' -o -name '*linuxmusl*' \) | grep -q .; then
         echo "musl bindings survived the prune"; exit 1
       fi
+
+      # CVE remediation — dead browser-install utilities (grype: extract-zip
+      # GHSA-7pqw-9j4j-h8q3/GHSA-jmr9-qjv8-65gv x2 copies, basic-ftp
+      # GHSA-c475-qrg2-pj4r). extract-zip is reached only from
+      # @puppeteer/browsers' unpack helpers + the npm chromium pkg's fetcher
+      # (both install-time browser downloads, disabled here by the
+      # PUPPETEER_SKIP_DOWNLOAD/NODE_CHROMIUM_SKIP_INSTALL kill switches);
+      # basic-ftp comes via get-uri (proxy fetch path). Boot rehearsal on
+      # 2.3.11-r101 proved /healthz ready:true + GUI 200 with all three gone.
+      # qs/zod are remediated above via yarn resolutions to patched releases.
+      rm -rf "$D/app/node_modules/extract-zip" \
+        "$D/app/node_modules/chromium/node_modules/extract-zip" \
+        "$D/app/node_modules/basic-ftp"
 
       # dumb-init PID 1 shebang + fixed CMD (house pattern; upstream uses
       # tini — same job). server.js reads $PORT (default 3000) and binds all
@@ -160,6 +178,24 @@ pipeline:
         || { echo "nodemon leaked into the prod node_modules"; exit 1; }
       # no browser binaries smuggled in via install hooks
       ! find "$D/app/node_modules" -maxdepth 3 -name 'chrome' -o -maxdepth 3 -name 'headless_shell' 2>/dev/null | grep -q .
+      if [ -e "$D/app/yarn.lock" ]; then
+        echo "yarn.lock shipped — lockfile cataloger would fabricate packages"; exit 1
+      fi
+      # CVE remediation landed: dead browser-install utilities gone, and the
+      # resolutions above took effect (yarn would silently keep the old
+      # versions if the field ever stops being honored).
+      for pkg in extract-zip chromium/node_modules/extract-zip basic-ftp; do
+        [ ! -e "$D/app/node_modules/$pkg" ] \
+          || { echo "$pkg survived the prune"; exit 1; }
+      done
+      grep -q '"version": "6.16.1"' "$D/app/node_modules/qs/package.json" \
+        || { echo "qs not at patched 6.16.1"; exit 1; }
+      # every copy still in the tree (yarn may dedupe nested ones away)
+      for zd in $(find "$D/app/node_modules" -type d -name zod); do
+        grep -q '"version": "4.6.6"' "$zd/package.json" \
+          || { echo "$zd not at patched 4.6.6"; exit 1; }
+      done
+      [ -d "$D/app/node_modules/zod" ] || { echo "top-level zod missing"; exit 1; }
       # entrypoint sanity (openbao precedent)
       test -x "$D/entrypoint.sh"
       sh -n "$D/entrypoint.sh"

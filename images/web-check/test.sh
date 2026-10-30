@@ -13,12 +13,12 @@ docker run --rm --entrypoint /bin/cat "$IMAGE" /app/package.json \
 echo "Testing app tree (server, healthcheck, dist, api, public, node_modules)..."
 docker run --rm --entrypoint /bin/sh "$IMAGE" -c '
   test -f /app/server.js && test -f /app/healthcheck.js \
-  && test -f /app/package.json && test -f /app/yarn.lock \
+  && test -f /app/package.json && [ ! -e /app/yarn.lock ] \
   && test -f /app/dist/server/entry.mjs \
   && test -n "$(ls -A /app/dist/client)" \
   && test -n "$(ls -A /app/api)" && test -n "$(ls -A /app/public)" \
   && test -d /app/node_modules' \
-  || fail "/app tree incomplete (server.js / healthcheck.js / dist / api / public / node_modules)"
+  || fail "/app tree incomplete (or yarn.lock shipped — lockfile cataloger risk)"
 
 echo "Testing node v24 runtime + ESM sources parse..."
 docker run --rm --entrypoint /usr/bin/node "$IMAGE" --version | grep -q '^v24\.' \
