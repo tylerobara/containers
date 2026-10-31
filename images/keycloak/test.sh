@@ -24,7 +24,7 @@ docker run --rm --entrypoint /bin/sh "$IMAGE" -c '
   command -v apk  >/dev/null 2>&1 && exit 1
   exit 0' || fail "bash or apk-tools present in prod image"
 
-echo "Testing version anchor: installed apk is exactly ${VERSION}-r101..."
+echo "Testing version anchor: installed apk is exactly ${VERSION}-r102..."
 # Wolfi ships only stream-named keycloak-26.5/26.6 packages today, so the
 # bare name resolving to ours is the expectation — but this check is the
 # load-bearing guard (workflow lock guard + cloudflared/valkey precedent) if
@@ -32,13 +32,15 @@ echo "Testing version anchor: installed apk is exactly ${VERSION}-r101..."
 docker run --rm --network none --entrypoint /bin/sh "$IMAGE" -ec "
   grep -q '^P:keycloak\$' /lib/apk/db/installed \
     || { echo 'keycloak apk not installed'; exit 1; }
-  awk '/^P:keycloak\$/{getline; ok=(\$0==\"V:${VERSION}-r101\"); print \$0; exit !ok}' /lib/apk/db/installed" \
-  || fail "installed apk is not exactly keycloak ${VERSION}-r101"
+  awk '/^P:keycloak\$/{getline; ok=(\$0==\"V:${VERSION}-r102\"); print \$0; exit !ok}' /lib/apk/db/installed" \
+  || fail "installed apk is not exactly keycloak ${VERSION}-r102"
 
-echo "Testing CVE remediations: no alsa-lib apk, stub present, patched guava..."
+echo "Testing CVE remediations: no alsa-lib apk, stub present, patched guava + mariadb..."
 # alsa-lib (3 Medium CVEs, sound libs the server JVM never loads) must be
-# pruned via the provider stub; the dist's bundled guava must be exactly the
-# patched jar baked by the melange pipeline (GHSA-xxph-c9ww-hj94).
+# pruned via the provider stub; the dist's bundled guava and mariadb client
+# must be exactly the patched jars baked by the melange pipeline
+# (GHSA-xxph-c9ww-hj94; GHSA-4jq2-8v3c-97w8/-fhx5-2xqw-2cgm/-grfq-r75j-rw9x/
+# -h599-m3w5-9m7x).
 docker run --rm --network none --entrypoint /bin/sh "$IMAGE" -ec '
   grep -q "^P:alsa-lib$" /lib/apk/db/installed \
     && { echo "alsa-lib still installed"; exit 1; }
@@ -46,8 +48,11 @@ docker run --rm --network none --entrypoint /bin/sh "$IMAGE" -ec '
     || { echo "alsa-lib-stub missing"; exit 1; }
   set -- /opt/keycloak/lib/lib/main/com.google.guava.guava-*.jar
   [ "$#" -eq 1 ] && [ "$(basename "$1")" = "com.google.guava.guava-33.7.2-jre.jar" ] \
-    || { echo "guava jars: $*"; exit 1; }' \
-  || fail "alsa-lib pruning or guava 33.7.2-jre patch not in effect"
+    || { echo "guava jars: $*"; exit 1; }
+  set -- /opt/keycloak/lib/lib/main/org.mariadb.jdbc.mariadb-java-client-*.jar
+  [ "$#" -eq 1 ] && [ "$(basename "$1")" = "org.mariadb.jdbc.mariadb-java-client-3.5.11.jar" ] \
+    || { echo "mariadb jars: $*"; exit 1; }' \
+  || fail "alsa-lib pruning or guava/mariadb patch not in effect"
 
 echo "Testing JAVA_HOME (Wolfi JRE puts no java on PATH; kc.sh needs it)..."
 docker run --rm --network none --entrypoint /bin/sh "$IMAGE" -ec '
