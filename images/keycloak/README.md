@@ -72,12 +72,15 @@ upstream's contract, not an image bug; `start-dev` is the dev-mode override.
   `docker run -p 8080 -p 9000` contract with zero overrides. Deployments
   that want stricter defaults override via `KC_*` env.
 
-- **CVE remediations baked into the apk/image** (26.8.1-r101):
+- **CVE remediations baked into the apk/image** (26.8.1-r102):
   - bundled `guava 33.6.0-jre` (GHSA-xxph-c9ww-hj94, High) is replaced in
     the melange pipeline with sha256-pinned **33.7.2-jre** from Maven
-    Central, before `kc.sh build`, keeping quarkus' jar naming; a guard
-    fails the build if upstream's dist starts bundling a different guava
-    (re-verify the patch is still needed, then re-pin the vars).
+    Central, before `kc.sh build`, keeping quarkus' jar naming; and bundled
+    `mariadb-java-client 3.5.10` (4 rogue-DB-server advisories, Medium/Low)
+    with sha256-pinned **3.5.11** — both swaps also rewrite the jar names
+    cached in the dist's serialized quarkus `.dat` augmentation state. Guards
+    fail the build if upstream's dist starts bundling different jars
+    (re-verify the patches are still needed, then re-pin the vars).
   - the JRE's `alsa-lib` apk (3 Medium CVEs, sound subsystem the server
     JVM never loads — boot-tested) is pruned by an provides-only
     `alsa-lib-stub` package (`so:libasound.so.2` + `alsa-lib`, priority

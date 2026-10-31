@@ -37,7 +37,7 @@ contents:
     # Floating (no =pin), like the valkey/external-secrets rows — Wolfi
     # ships only stream-named keycloak-26.5/26.6 packages, so the bare
     # name resolves to ours trivially; the workflow's lock guard asserts
-    # the resolved pkgver is exactly <version>-r101 anyway.
+    # the resolved pkgver is exactly <version>-r<epoch> anyway.
     - keycloak
 
 accounts:
