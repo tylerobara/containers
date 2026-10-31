@@ -21,7 +21,7 @@
 package:
   name: homepage
   version: 2.7.0
-  epoch: 102
+  epoch: 103
   description: "Homepage — a self-hosted application dashboard for your services wall"
   copyright:
     - license: Apache-2.0
@@ -89,8 +89,12 @@ pipeline:
       # systeminformation security patch (same mechanism, same deal): the
       # upstream 2.7.0 lock pins 5.33.13 — GHSA-3f7j-7jwc-fxfj (High, fixed
       # 5.33.16) + GHSA-4vjg-vx72-qq4g (Low, fixed 5.33.14), both published
-      # Oct 29; one override to 5.33.16 covers both. Both guards below write
-      # a single combined "overrides:" block (a duplicate key would break
+      # Oct 29; one override to 5.33.16 covers both.
+      # follow-redirects security patch (same mechanism, same deal): the
+      # upstream 2.7.0 lock pins 1.16.1 — GHSA-mrwp-f3q8-3g9p (High,
+      # cross-realm redirects discard sensitiveHeaders and let custom
+      # credentials follow), fixed in 1.16.2. All guards below write a single
+      # combined "overrides:" block (a duplicate key would break
       # pnpm-workspace.yaml).
       ov=""
       undici_cur=$(grep -m1 -oE '^  undici@[0-9]+\.[0-9]+\.[0-9]+' pnpm-lock.yaml | cut -d@ -f2)
@@ -103,6 +107,11 @@ pipeline:
         echo "patching systeminformation $sysinfo_cur -> 5.33.16 (2 advisories)"
         ov="${ov}  systeminformation: 5.33.16\n"
       fi
+      fr_cur=$(grep -m1 -oE '^  follow-redirects@[0-9]+\.[0-9]+\.[0-9]+' pnpm-lock.yaml | cut -d@ -f2)
+      if [ "$(printf '%s\n%s\n' "$fr_cur" 1.16.2 | sort -V | head -1)" = "$fr_cur" ] && [ "$fr_cur" != "1.16.2" ]; then
+        echo "patching follow-redirects $fr_cur -> 1.16.2 (1 advisory)"
+        ov="${ov}  follow-redirects: 1.16.2\n"
+      fi
       if [ -n "$ov" ]; then
         printf "overrides:\n$ov" >> pnpm-workspace.yaml
         pnpm install --lockfile-only
@@ -114,6 +123,9 @@ pipeline:
       sysinfo_final=$(grep -m1 -oE '^  systeminformation@[0-9]+\.[0-9]+\.[0-9]+' pnpm-lock.yaml | cut -d@ -f2)
       [ "$(printf '%s\n%s\n' "$sysinfo_final" 5.33.16 | sort -V | head -1)" = "5.33.16" ] \
         || { echo "systeminformation $sysinfo_final still below the 5.33.16 fix"; exit 1; }
+      fr_final=$(grep -m1 -oE '^  follow-redirects@[0-9]+\.[0-9]+\.[0-9]+' pnpm-lock.yaml | cut -d@ -f2)
+      [ "$(printf '%s\n%s\n' "$fr_final" 1.16.2 | sort -V | head -1)" = "1.16.2" ] \
+        || { echo "follow-redirects $fr_final still below the 1.16.2 fix"; exit 1; }
       NEXT_TELEMETRY_DISABLED=1 \
       NEXT_PUBLIC_BUILDTIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
       NEXT_PUBLIC_VERSION=v${{package.version}} \
