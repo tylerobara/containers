@@ -30,8 +30,10 @@ cosign verify \
 The melange **package** is named `traefik-fips` (distinct in SBOMs/scans)
 while the in-image binary stays `/usr/bin/traefik` — a `-fips` tag must be a
 drop-in replacement for the plain tag, differing only in its crypto module.
-The site catalog entry stays `traefik`'s (site.yml keys entries on
-image+major; this workflow deliberately emits no pages-data).
+On the site, this workflow publishes a companion index entry keyed
+`major:"fips"` (site.yml keys entries on image+major, so it coexists with
+`traefik.yml`'s `major:null` entry); it renders as the FIPS tag set on
+[`/images/traefik/`](https://tylerobara.github.io/containers/images/traefik/#tags).
 
 ## Why the recipe looks the way it does
 

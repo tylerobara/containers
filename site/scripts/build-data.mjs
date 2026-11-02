@@ -356,14 +356,28 @@ async function main() {
     const repo = `${ctx.registry}/${ctx.repository}/${entry.name}`;
     const builds = index.filter((b) => b && b.image === repo);
     builds.forEach((b) => matched.add(b));
+    // -fips suffix tags ride along as a companion entry keyed major:"fips"
+    // (traefik-fips.yml) — a second tag set on the same page, not its own page.
+    const fips = entry.per_major ? null : (builds.find((b) => b.major === 'fips') || null);
     // per_major images (postgres) get one page per published major, newest first.
     const targets = entry.per_major
       ? builds.filter((b) => b.major != null).sort((a, b) => b.major - a.major)
-      : [builds.find((b) => b.major == null) || builds[0] || null];
+      : [builds.find((b) => b.major == null) || builds.find((b) => b !== fips) || null];
     if (entry.per_major && targets.length === 0) targets.push(null);
     for (const built of targets) {
       try {
-        records.push(await buildRecord(entry, ctx, built));
+        const record = await buildRecord(entry, ctx, built);
+        if (built && fips) {
+          record.fips = {
+            version: fips.version || null,
+            tags: Array.isArray(fips.tags) ? fips.tags.map(String) : [],
+            digest: fips.digest || null,
+            built: fips.built || null,
+            signed: Boolean(fips.signed),
+            signedBy: fips.signed_by || null,
+          };
+        }
+        records.push(record);
       } catch (e) {
         warn(`image "${entry.name}" failed hard: ${e.message}`);
       }

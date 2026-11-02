@@ -69,6 +69,15 @@ export interface ImageRecord {
   dataStatus: { build: boolean; scan: boolean; apko: boolean; registry: boolean };
   degraded: boolean;
   notes: string[];
+  /** -fips suffix tag set published by a sibling workflow for the same repo. */
+  fips?: {
+    version: string | null;
+    tags: string[];
+    digest: string | null;
+    built: string | null;
+    signed: boolean;
+    signedBy: string | null;
+  } | null;
 }
 
 export interface Dataset {

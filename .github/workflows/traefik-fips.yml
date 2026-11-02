@@ -12,9 +12,9 @@ name: traefik-fips
 #     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
 #     --certificate-identity-regexp '^https://github.com/tylerobara/containers/\.github/workflows/traefik-fips\.yml@refs/heads/main$' \
 #     ghcr.io/tylerobara/containers/traefik:<tag>-fips
-# Deliberately no pages-data/pages jobs: the site lists images, not tags; the
-# traefik.yml run owns the catalog entry for this image repo, and a second
-# entry with the same image+major key would overwrite it.
+# Pages data: publishes a companion index entry keyed major:"fips" (site.yml
+# keys entries on image+major, so it coexists with traefik.yml's major:null
+# entry); site/src renders it as the FIPS tag set on traefik's Tags tab.
 
 on:
   push:
@@ -225,3 +225,40 @@ jobs:
             -e GITHUB_ACTIONS \
             -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
             ghcr.io/sigstore/cosign/cosign:latest sign --yes "$TRAEFIK_REF@$DIGEST"
+          echo "SIGNED=true" >> "$GITHUB_ENV"
+
+      - name: Build pages data
+        if: env.PUBLISH == 'true'
+        run: |
+          DIGEST=$(docker buildx imagetools inspect "$TRAEFIK_REF" \
+            --format '{{json .Manifest}}' | jq -r .digest)
+          jq -n \
+            --arg image "$TRAEFIK_IMAGE" --arg version "$TRAEFIK_VER" \
+            --arg digest "$DIGEST" --arg built "$(date -u +%FT%TZ)" \
+            --arg tags "$TRAEFIK_VER-fips $TRAEFIK_MINOR-fips latest-fips" \
+            --arg built_with melange --argjson signed "${SIGNED:-false}" \
+            --arg signed_by traefik-fips.yml \
+            --slurpfile scan scans/traefik-fips.json \
+            '{image: $image, major: "fips", version: $version,
+              tags: ($tags | split(" ")), digest: $digest, built: $built, built_with: $built_with,
+              signed: $signed, signed_by: $signed_by,
+              scan: $scan[0]}' > scans/traefik-fips.json.tmp
+          mv scans/traefik-fips.json.tmp scans/traefik-fips.json
+
+      - uses: actions/upload-artifact@v7
+        if: env.PUBLISH == 'true'
+        with:
+          name: pages-data-traefik-fips
+          path: scans/traefik-fips.json
+
+  pages:
+    # Merge the fresh major:"fips" entry over the live index and redeploy —
+    # traefik.yml's own entry is preserved (different image+major key).
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    needs: [build]
+    permissions:
+      contents: write # push the generated gh-pages branch
+    uses: ./.github/workflows/site.yml
+    with:
+      artifact-pattern: pages-data-traefik-fips
+      ref: ${{ inputs.ref || github.ref }}
