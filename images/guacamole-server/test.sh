@@ -20,7 +20,10 @@ user=$(docker inspect --format '{{.Config.User}}' "$IMAGE")
 # The patched libssh2 must be OUR build, not Wolfi's unpatched r11 (the
 # workflow lock guard proves apko resolved ours; this proves the image
 # really carries it). Expected pkgver derived from the melange config.
+# /lib/apk/db/installed is read directly — the final image has no apk
+# binary (grype reads the same db for the scan).
 LIBSSH2_WANT="$(awk '/^  version:/{v=$2}/^  epoch:/{e=$2}END{print v"-r"e}' images/guacamole-server/melange/libssh2.yaml)"
+rc=0
 docker run --rm --entrypoint /bin/sh -e LIBSSH2_WANT="$LIBSSH2_WANT" "$IMAGE" -ec '
   grep -q "^guacd:[^:]*:1000:1000:" /etc/passwd || exit 1
   grep -q "^guacd:[^:]*:1000:" /etc/group || exit 2
@@ -29,14 +32,15 @@ docker run --rm --entrypoint /bin/sh -e LIBSSH2_WANT="$LIBSSH2_WANT" "$IMAGE" -e
   test -x /usr/bin/docker-entrypoint.sh || exit 5
   for f in rdp ssh telnet vnc kubernetes; do test -e /usr/lib/libguac-client-$f.so || exit 6; done
   find /usr/share/fonts \( -name "*.ttf" -o -name "*.otf" -o -name "*.ttc" \) | grep -q . || exit 7
-  [ "$(apk info -e libssh2 2>/dev/null)" = "$LIBSSH2_WANT" ] || exit 9
+  [ "$(awk -F: "/^P:/{p=\$2}/^V:/{if(p==\"libssh2\")v=\$2}END{print v}" /lib/apk/db/installed)" = "$LIBSSH2_WANT" ] || exit 9
   # guacenc is gone together with the ffmpeg-8.1 payload (see the melange
   # install step). freerdp-3-libs legitimately keeps a minimal ffmpeg pair
   # (libavutil + libswscale, its graphics pipeline) — everything else that
   # only guacenc linked must never appear: regression guard for the dropped
   # CVE block, since apk auto-deps are the only thing keeping ffmpeg out.
   test -z "$(ls /usr/lib/libavcodec* /usr/lib/libavformat* /usr/lib/libavdevice* /usr/lib/libavfilter* /usr/lib/libswresample* 2>/dev/null)" || exit 8' \
-  || fail "guacd accounts, protocol plugins, tools or fonts missing (ffmpeg crept back in, or libssh2 is not our patched build)"
+  || rc=$?
+[ "$rc" -eq 0 ] || fail "guacd accounts, protocol plugins, tools or fonts missing (ffmpeg crept back in, or libssh2 is not our patched build; exit $rc)"
 
 echo "Testing guacd reports v$VERSION (no version drift; guacenc/ffmpeg excluded by design)..."
 # -v, not --version: 1.6.0's getopt string (l:b:p:L:C:K:fv) has no long options.
