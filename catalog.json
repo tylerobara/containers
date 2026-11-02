@@ -443,6 +443,18 @@
       "upstream_url": "https://github.com/keycloak/keycloak",
       "summary": "Keycloak IAM/SSO server, packaged from the upstream release distribution.",
       "description": "Keycloak, packaged from the official Apache-2.0 release distribution — the same artifact upstream's own container image consumes: the sha256-pinned keycloak-<ver>.tar.gz unpacked to /opt/keycloak with kc.sh build (the bundled offline quarkus augmentation) baked in at package time; the maven+node source build stays upstream CI's job. Assembled by apko on Wolfi with the Wolfi openjdk-21 JRE, entrypoint kc.sh + cmd start, nonroot 65532; data/ (H2 bootstrap) and lib/quarkus/ (kc.sh re-augments in place on start-dev and build-option changes) ship 0777 so uid 65532 can write. Wolfi ships only stream-named keycloak-26.5/26.6 packages, so the bare keycloak name resolves to this build trivially; epoch 100 + provider-priority + the workflow lock guard keep it that way."
+    },
+    {
+      "name": "guacamole-server",
+      "display_name": "Apache Guacamole (guacd)",
+      "dir": "guacamole-server",
+      "apko": "guacamole-server.yaml",
+      "workflow": "guacamole-server.yml",
+      "category": "Apps",
+      "primary_package": "guacamole-server",
+      "upstream_url": "https://github.com/apache/guacamole-server",
+      "summary": "Apache Guacamole's guacd proxy daemon (RDP/VNC/SSH/telnet/Kubernetes), built from upstream source.",
+      "description": "The Guacamole proxy daemon (guacd), libguac and all five protocol plugins, built from the sha-pinned upstream release tag by melange (autoreconf; upstream's own --disable-guaclog + deprecated-declarations flags from its guacd Dockerfile) with the protocol libraries linked against Wolfi system packages — FreeRDP 3, libvncclient, libtelnet, libwebsockets, ffmpeg, pulseaudio — instead of upstream's from-source /opt/guacamole stack. Assembled by apko on Wolfi: tini + the upstream docker-entrypoint.sh contract (guacd -f -b 0.0.0.0 -L LOG_LEVEL, deprecated GUACD_LOG_LEVEL still honored), guacd uid/gid 1000, port 4822, dejavu/liberation/noto-cjk fonts for server-side text rendering, netcat for the upstream healthcheck. The build asserts all five protocol plugins exist, so a missing Wolfi -dev package can never silently drop RDP/VNC/... support. Wolfi ships its own guacamole-server, so epoch 100 + provider-priority keep this build winning resolution."
     }
   ]
 }

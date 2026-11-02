@@ -1,0 +1,206 @@
+# Melange build for Apache guacamole-server (github.com/apache/guacamole-server)
+# — the guacd proxy daemon, libguac and the protocol plugins, built from the
+# release tag (autotools artifacts are not committed upstream, so autoreconf
+# -vif like the frr build). Packaged as plain `guacamole-server` so
+# grype/secdb name-match. Wolfi DOES ship guacamole-server (currently
+# 1.6.0-rN, split into libguac + libguac-client-* subpackages), so epoch 100 +
+# provider-priority 100 are what keep OUR package winning resolution — and our
+# version must stay AT OR ABOVE the live Wolfi version (the workflow's lock
+# guard fails loudly if apko ever resolves Wolfi's build instead of ours).
+#
+# Build set = the proven flags from upstream's own guacd Dockerfile
+# (--disable-guaclog + CPPFLAGS=-Wno-error=deprecated-declarations), but the
+# protocol plugins link Wolfi system libraries instead of upstream's
+# from-source /opt/guacamole stack (FreeRDP 3, libvncclient, libtelnet,
+# libwebsockets) — the same approach Wolfi's own build takes. Protocols are
+# auto-detected by configure; the assert step below fails loudly if any of the
+# five (rdp, ssh, telnet, vnc, kubernetes) goes missing, so a Wolfi
+# -dev-package rename can never silently drop RDP/VNC/... support.
+#
+# Bump `version` + `vars.sha256` on each release (upstream publishes NO GitHub
+# releases — tags only; the update-versions bot row filters the tag list for
+# the strict X.Y.Z shape, which drops the 1.6.0-RC* candidates).
+
+package:
+  name: guacamole-server
+  version: 1.6.0
+  epoch: 100
+  description: "Clientless remote desktop gateway (guacd) built from upstream source"
+  copyright:
+    - license: Apache-2.0
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the GitHub release tarball (tag <version>, no v prefix)
+  sha256: 913b05d19beabed4a3066e6e2be3078783048f55c7a9d2e3a012897a8766c245
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      # autotools toolchain (frr-style; configure.ac + m4/ are committed,
+      # configure itself is generated).
+      - autoconf
+      - automake
+      - bash
+      - build-base
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      - libtool
+      - m4
+      - pkgconf
+      # libguac core: the system-library set Wolfi's own build links against.
+      - cairo-dev
+      - ffmpeg-8.1-dev
+      - libjpeg-turbo-dev
+      - libogg-dev
+      - libpng-dev
+      - libvorbis-dev
+      - libwebp-dev
+      - openssl-dev
+      - pango-dev
+      - pulseaudio-dev
+      - util-linux-dev # uuid/uuid.h (configure AC_CHECK_LIB uuid)
+      - zlib-dev
+      # Protocol support (configure auto-detects each): RDP via FreeRDP 3
+      # (freerdp3 .pc; the freerdp2 check comes first but only 3 ships here),
+      # VNC via libvncclient, SSH via libssh2, telnet via libtelnet (which
+      # ships its header + .pc in the main package), Kubernetes via
+      # libwebsockets.
+      - freerdp-3-dev
+      - libssh2-dev
+      - libtelnet
+      - libvncserver-dev
+      - libwebsockets-dev
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/apache/guacamole-server/archive/refs/tags/${{package.version}}.tar.gz" \
+        -o /home/build/guacamole-server.tar.gz
+      echo "${{vars.sha256}}  /home/build/guacamole-server.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf guacamole-server.tar.gz && rm guacamole-server.tar.gz
+
+  - working-directory: /home/build/guacamole-server-${{package.version}}
+    runs: |
+      # autotools artifacts are not committed upstream (upstream's own manual
+      # tells you to run ./bootstrap, which is autoreconf; the frr build does
+      # exactly this).
+      autoreconf -vif
+
+  - working-directory: /home/build/guacamole-server-${{package.version}}
+    runs: |
+      # Official-flag set from upstream's guacd Dockerfile
+      # (GUACAMOLE_SERVER_OPTS): --disable-guaclog + the deprecated-declarations
+      # softening (ffmpeg/freerdp3 headers trip -Werror otherwise). Everything
+      # else is the house prefix set; guacd lands in /usr/sbin, plugins in
+      # /usr/lib.
+      ./configure \
+        --prefix=/usr \
+        --sbindir=/usr/sbin \
+        --localstatedir=/var \
+        --sysconfdir=/etc \
+        --mandir=/usr/share/man \
+        --infodir=/usr/share/info \
+        --disable-guaclog \
+        CPPFLAGS=-Wno-error=deprecated-declarations
+      make -j"$(nproc)"
+
+  - working-directory: /home/build/guacamole-server-${{package.version}}
+    runs: |
+      make install DESTDIR="${{targets.destdir}}"
+      # Build-time artifacts (the frr/postgresql .la/.a prune): guacd dlopens
+      # the protocol plugins, so the libtool archives/static libs only trip
+      # melange's linter.
+      find "${{targets.destdir}}" -name '*.la' -delete
+      find "${{targets.destdir}}" -name '*.a' -delete
+      # The official container's entrypoint (src/guacd-docker/bin/entrypoint.sh),
+      # adopted with one Wolfi adaptation: /opt/guacamole/sbin/guacd ->
+      # /usr/sbin/guacd (prefix=/usr install instead of upstream's
+      # /opt/guacamole relocation).
+      cat > "${{targets.destdir}}/usr/bin/docker-entrypoint.sh" <<'EOF'
+      #!/bin/sh
+      # guacd container startup (upstream apache/guacamole-server contract):
+      # listen on 0.0.0.0:4822 at info level, LOG_LEVEL (GUACD_LOG_LEVEL is the
+      # deprecated name) overridable, extra `docker run` args appended verbatim.
+      # Upstream entrypoint.sh, sha-pinned by tag 1.6.0, path-adapted to
+      # /usr/sbin/guacd.
+      if [ -n "$GUACD_LOG_LEVEL" ]; then
+          echo "WARNING: The GUACD_LOG_LEVEL environment variable has been deprecated in favor of the LOG_LEVEL environment variable. Please migrate your configuration when possible." >&2
+      fi
+
+      exec /usr/sbin/guacd -f -b 0.0.0.0 -L "${LOG_LEVEL:-${GUACD_LOG_LEVEL:-info}}" "$@"
+      EOF
+      chmod 755 "${{targets.destdir}}/usr/bin/docker-entrypoint.sh"
+
+  - runs: |
+      # Verify the build actually produced this version (libguac lives in
+      # destdir only, so point the loader at it — the frr pattern), and that
+      # configure's auto-detection really enabled ALL FIVE protocols: each
+      # protocol silently drops out when its -dev package goes missing from
+      # Wolfi, which a renamed package could do without failing the build.
+      export LD_LIBRARY_PATH="${{targets.destdir}}/usr/lib"
+      # -v, not --version: 1.6.0's conf-args.c is plain getopt("l:b:p:L:C:K:fv")
+      # and --version falls into the usage/error branch.
+      v=$("${{targets.destdir}}/usr/sbin/guacd" -v)
+      echo "$v"
+      echo "$v" | grep -q "version ${{package.version}}" || { echo "wrong version: $v"; exit 1; }
+      test -x "${{targets.destdir}}/usr/sbin/guacd"
+      for p in rdp ssh telnet vnc kubernetes; do
+        test -e "${{targets.destdir}}/usr/lib/libguac-client-$p.so" || { echo "missing protocol plugin: $p"; exit 1; }
+      done
+      # guacenc (the ffmpeg video re-encoder upstream ships; guaclog is
+      # --disable-guaclog'd like the official image) proves ffmpeg landed.
+      test -x "${{targets.destdir}}/usr/bin/guacenc"
+      # The startup contract parses (the boot itself is proven by the test
+      # pipeline below and by images/guacamole-server/test.sh against the final image).
+      sh -n "${{targets.destdir}}/usr/bin/docker-entrypoint.sh"
+
+test:
+  environment:
+    contents:
+      packages:
+        - busybox
+        # The upstream image's own HEALTHCHECK tool (netcat-openbsd), used here
+        # for the TCP probe.
+        - netcat-openbsd
+  pipeline:
+    - runs: |
+        # Boot the INSTALLED package (only runtime deps resolved from indexes —
+        # proves the provider-priority resolution and the freerdp3/ffmpeg/
+        # libwebsockets/... pulls). 1.6.0's option string is l:b:p:L:C:K:fv —
+        # -b binds the host, -l the PORT, -p is the PIDFILE (no -P; the old
+        # 0.9.x-style flags are swapped, per src/guacd/conf-args.c). guacd
+        # daemonizes without -f; pidfile so the probe teardown is exact.
+        guacd -b 127.0.0.1 -l 48223 -p /tmp/guacd-test.pid
+        i=0
+        until nc -z 127.0.0.1 48223; do
+          i=$((i + 1))
+          [ "$i" -gt 30 ] && { echo "guacd did not come up on 48223"; exit 1; }
+          sleep 1
+        done
+        # A handshake-shaped probe is overkill for melange — assert the
+        # listening daemon really is the installed build, then tear down.
+        guacd -v | grep -q "version ${{package.version}}"
+        kill "$(cat /tmp/guacd-test.pid)"
+        # The daemonized server inherits this exec's stdout/stderr pipes, so
+        # melange's runner only returns once it is really gone; wait it out
+        # (valkey's pattern) and force-kill as fallback.
+        i=0
+        while pidof guacd >/dev/null; do
+          i=$((i + 1))
+          [ "$i" -gt 50 ] && { pkill -9 guacd; sleep 1; break; }
+          sleep 0.1
+        done
+        for p in rdp ssh telnet vnc kubernetes; do
+          test -e /usr/lib/libguac-client-$p.so || { echo "installed package lacks $p plugin"; exit 1; }
+        done
+        test -x /usr/sbin/guacd
+        test -x /usr/bin/docker-entrypoint.sh
