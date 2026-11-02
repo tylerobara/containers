@@ -9,6 +9,7 @@ fail() { echo "FAIL: $1"; exit 1; }
 command -v go >/dev/null 2>&1 || fail "go toolchain required on the test host (build-info assertions)"
 
 dyn=$(mktemp -d); chmod 755 "$dyn"
+# shellcheck disable=SC2064
 trap "rm -rf '$dyn' || true" EXIT
 
 echo "Testing traefik reports v$VERSION..."
