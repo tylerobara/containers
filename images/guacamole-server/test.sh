@@ -21,13 +21,19 @@ docker run --rm --entrypoint /bin/sh "$IMAGE" -ec '
   grep -q "^guacd:[^:]*:1000:1000:" /etc/passwd || exit 1
   grep -q "^guacd:[^:]*:1000:" /etc/group || exit 2
   test -x /usr/bin/guacd || exit 3
-  test -x /usr/bin/guacenc || exit 4
+  test ! -e /usr/bin/guacenc || exit 4
   test -x /usr/bin/docker-entrypoint.sh || exit 5
   for f in rdp ssh telnet vnc kubernetes; do test -e /usr/lib/libguac-client-$f.so || exit 6; done
-  find /usr/share/fonts \( -name "*.ttf" -o -name "*.otf" -o -name "*.ttc" \) | grep -q . || exit 7' \
-  || fail "guacd accounts, protocol plugins, tools or fonts missing"
+  find /usr/share/fonts \( -name "*.ttf" -o -name "*.otf" -o -name "*.ttc" \) | grep -q . || exit 7
+  # guacenc is gone together with the ffmpeg-8.1 payload (see the melange
+  # install step). freerdp-3-libs legitimately keeps a minimal ffmpeg pair
+  # (libavutil + libswscale, its graphics pipeline) — everything else that
+  # only guacenc linked must never appear: regression guard for the dropped
+  # CVE block, since apk auto-deps are the only thing keeping ffmpeg out.
+  test -z "$(ls /usr/lib/libavcodec* /usr/lib/libavformat* /usr/lib/libavdevice* /usr/lib/libavfilter* /usr/lib/libswresample* 2>/dev/null)" || exit 8' \
+  || fail "guacd accounts, protocol plugins, tools or fonts missing (or ffmpeg crept back in)"
 
-echo "Testing guacd reports v$VERSION (no version drift, ffmpeg-linked guacenc present)..."
+echo "Testing guacd reports v$VERSION (no version drift; guacenc/ffmpeg excluded by design)..."
 # -v, not --version: 1.6.0's getopt string (l:b:p:L:C:K:fv) has no long options.
 v=$(docker run --rm --entrypoint /usr/bin/guacd "$IMAGE" -v)
 echo "$v"

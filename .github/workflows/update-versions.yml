@@ -822,8 +822,9 @@ jobs:
           # (dist.apache.org, which ships the generated configure — Wolfi's
           # autoconf 2.72 cannot autoreconf this old configure.ac; see the
           # melange header). The build links Wolfi system libraries (FreeRDP
-          # 3, libvncclient, libtelnet, libwebsockets, ffmpeg) rather than
-          # upstream's Dockerfile from-source /opt/guacamole stack. Wolfi ships
+          # 3, libvncclient, libtelnet, libwebsockets; ffmpeg only feeds the
+          # guacenc CLI, which the install step drops so it never ships) rather
+          # than upstream's Dockerfile from-source /opt/guacamole stack. Wolfi ships
           # its own guacamole-server (currently 1.6.0-rN), so the epoch-100
           # build must stay at or above the live Wolfi version; the workflow's
           # lock guard fails loudly if that lead is ever lost. Floating apko

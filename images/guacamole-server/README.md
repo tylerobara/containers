@@ -38,11 +38,18 @@ Same contract as the upstream container:
 ## Differences from guacamole/guacd, on purpose
 
 - Wolfi base with the protocol libraries as **system packages** (FreeRDP 3,
-  libvncclient, libtelnet, libwebsockets, ffmpeg, pulseaudio) instead of
+  libvncclient, libtelnet, libwebsockets, pulseaudio) instead of
   upstream's from-source `/opt/guacamole` stack (which builds FreeRDP 2,
   libvncserver and friends itself) — the approach Wolfi's own
   `guacamole-server` package takes, so CVE patches flow with the daily Wolfi
   rebuild instead of being frozen into a source tree.
+- **No guacenc / no ffmpeg payload in the image**: the ffmpeg-linked recording
+  transcoder CLI is dropped at install (guacd never execs ffmpeg), so the
+  `ffmpeg-8.1-*` tree it pulled in — by far the largest CVE block in the grype
+  scan, and unfixable until Wolfi ships ffmpeg 8.1.3 — never enters the
+  image. The only ffmpeg left is the minimal `libavutil` + `libswscale` pair
+  that Wolfi's `freerdp-3-libs` itself requires; `test.sh` fails if any other
+  ffmpeg library ever appears.
 - FreeRDP **3** (Wolfi ships it; upstream's Dockerfile still defaults to 2 —
   upstream 1.6.0 supports both).
 - tini added as PID 1 (house pattern of every image here): guacd forks one

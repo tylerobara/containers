@@ -62,7 +62,10 @@ environment:
       - libtool
       - m4
       - pkgconf
-      # libguac core: the system-library set Wolfi's own build links against.
+      # libguac core + guacenc: the system-library set Wolfi's own build
+      # links against (ffmpeg only so guacenc compiles and its probes stay
+      # exercised; the install step drops the binary, so ffmpeg never enters
+      # the image).
       - cairo-dev
       - ffmpeg-8.1-dev
       - libjpeg-turbo-dev
@@ -554,6 +557,18 @@ pipeline:
       # melange's linter.
       find "${{targets.destdir}}" -name '*.la' -delete
       find "${{targets.destdir}}" -name '*.a' -delete
+      # Drop the ffmpeg-linked guacenc CLI (the recording transcoder). guacd
+      # never execs ffmpeg — only guacenc links libav* — but shipping it made
+      # apk's auto-deps drag the full ffmpeg-8.1-* library set (libavcodec,
+      # libavformat, libavdevice, ...) into the image, which is exactly the
+      # CVE block grype counted in the first published scan (42 advisories
+      # across 5 libav*/libsw* libraries; all of them fixed only in a Wolfi
+      # ffmpeg this image has no reason to carry at all). Without it, the
+      # only ffmpeg left is the minimal libavutil+libswscale pair that
+      # freerdp-3-libs itself declares. It still builds (the ffmpeg probes
+      # stay exercised); it just doesn't ship.
+      rm -f "${{targets.destdir}}/usr/bin/guacenc" \
+            "${{targets.destdir}}/usr/share/man/man1/guacenc.1"
       # The official container's entrypoint (src/guacd-docker/bin/entrypoint.sh),
       # adopted with one Wolfi adaptation: /opt/guacamole/sbin/guacd ->
       # /usr/bin/guacd (prefix=/usr install instead of upstream's
@@ -589,9 +604,11 @@ pipeline:
       for p in rdp ssh telnet vnc kubernetes; do
         test -e "${{targets.destdir}}/usr/lib/libguac-client-$p.so" || { echo "missing protocol plugin: $p"; exit 1; }
       done
-      # guacenc (the ffmpeg video re-encoder upstream ships; guaclog is
-      # --disable-guaclog'd like the official image) proves ffmpeg landed.
-      test -x "${{targets.destdir}}/usr/bin/guacenc"
+      # guacenc must NOT be in the package (ffmpeg attack surface; see the
+      # install-step rm); guaclog is --disable-guaclog'd like the official
+      # image. Absence is the contract now, so assert it loudly.
+      test ! -e "${{targets.destdir}}/usr/bin/guacenc"
+      test ! -e "${{targets.destdir}}/usr/bin/guaclog"
       # The startup contract parses (the boot itself is proven by the test
       # pipeline below and by images/guacamole-server/test.sh against the final image).
       sh -n "${{targets.destdir}}/usr/bin/docker-entrypoint.sh"
@@ -607,7 +624,7 @@ test:
   pipeline:
     - runs: |
         # Boot the INSTALLED package (only runtime deps resolved from indexes —
-        # proves the provider-priority resolution and the freerdp3/ffmpeg/
+        # proves the provider-priority resolution and the freerdp3/libssh2/
         # libwebsockets/... pulls). 1.6.0's option string is l:b:p:L:C:K:fv —
         # -b binds the host, -l the PORT, -p is the PIDFILE (no -P; the old
         # 0.9.x-style flags are swapped, per src/guacd/conf-args.c). guacd
