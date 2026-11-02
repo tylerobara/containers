@@ -815,11 +815,14 @@ jobs:
           fi
 
           # --- guacamole-server: upstream publishes NO GitHub releases
-          # (releases/latest 404s), so follow the tag list the traefik/
-          # external-secrets way; the strict ^X.Y.Z$ grep drops the
-          # 1.6.0-RC*-style release candidates, and the tags have no v prefix.
-          # The tarball is built against Wolfi system libraries (FreeRDP 3,
-          # libvncclient, libtelnet, libwebsockets, ffmpeg) rather than
+          # (releases/latest 404s), so detect the version from the tag list
+          # the traefik/external-secrets way; the strict ^X.Y.Z$ grep drops
+          # the 1.6.0-RC*-style release candidates, and the tags have no v
+          # prefix. The tarball URL is the OFFICIAL Apache dist artifact
+          # (dist.apache.org, which ships the generated configure — Wolfi's
+          # autoconf 2.72 cannot autoreconf this old configure.ac; see the
+          # melange header). The build links Wolfi system libraries (FreeRDP
+          # 3, libvncclient, libtelnet, libwebsockets, ffmpeg) rather than
           # upstream's Dockerfile from-source /opt/guacamole stack. Wolfi ships
           # its own guacamole-server (currently 1.6.0-rN), so the epoch-100
           # build must stay at or above the live Wolfi version; the workflow's
@@ -834,7 +837,7 @@ jobs:
               FAILED=1
             else
               bump_row guacamole-server "$yaml" "$latest" \
-                "https://github.com/apache/guacamole-server/archive/refs/tags/${latest}.tar.gz" \
+                "https://dist.apache.org/repos/dist/release/guacamole/${latest}/source/guacamole-server-${latest}.tar.gz" \
                 guacamole-server
             fi
           fi

@@ -1,7 +1,13 @@
 # Melange build for Apache guacamole-server (github.com/apache/guacamole-server)
 # — the guacd proxy daemon, libguac and the protocol plugins, built from the
-# release tag (autotools artifacts are not committed upstream, so autoreconf
-# -vif like the frr build). Packaged as plain `guacamole-server` so
+# official Apache dist source tarball (dist.apache.org, sha256 published
+# alongside), which ships the release manager's generated configure. The
+# GitHub tag archive + autoreconf route is DELIBERATELY not used: modern
+# autoconf (Wolfi ships 2.72) rejects this old configure.ac outright —
+# "configure.ac:338: error: undefined or overquoted macro: AC_MSG_WARN" —
+# so autoreconf from the archive cannot build it (PR #99 CI proved this).
+# The autotools build deps stay in the environment anyway as maintainer-mode
+# regeneration insurance. Packaged as plain `guacamole-server` so
 # grype/secdb name-match. Wolfi DOES ship guacamole-server (currently
 # 1.6.0-rN, split into libguac + libguac-client-* subpackages), so epoch 100 +
 # provider-priority 100 are what keep OUR package winning resolution — and our
@@ -32,8 +38,9 @@ package:
     provider-priority: 100
 
 vars:
-  # SHA256 of the GitHub release tarball (tag <version>, no v prefix)
-  sha256: 913b05d19beabed4a3066e6e2be3078783048f55c7a9d2e3a012897a8766c245
+  # SHA256 of the Apache dist source tarball (matches the .sha256 Apache
+  # publishes next to it, verified at release time)
+  sha256: 8bc45675da96d7b6f39728160181e3d4ff3c08f460f6d26de5805b642bf13f2b
 
 environment:
   contents:
@@ -42,8 +49,9 @@ environment:
     keyring:
       - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
     packages:
-      # autotools toolchain (frr-style; configure.ac + m4/ are committed,
-      # configure itself is generated).
+      # Autotools toolchain kept as maintainer-mode insurance (the tarball's
+      # timestamps could make a Makefile rule re-invoke aclocal/automake);
+      # configure itself ships pre-generated, so nothing here autoreconf's.
       - autoconf
       - automake
       - bash
@@ -81,19 +89,14 @@ environment:
 pipeline:
   - runs: |
       mkdir -p /home/build
+      # Official Apache dist tarball (ships the generated configure; see the
+      # header for why the GitHub tag archive can't be autoreconf'd here).
       curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
-        "https://github.com/apache/guacamole-server/archive/refs/tags/${{package.version}}.tar.gz" \
+        "https://dist.apache.org/repos/dist/release/guacamole/${{package.version}}/source/guacamole-server-${{package.version}}.tar.gz" \
         -o /home/build/guacamole-server.tar.gz
       echo "${{vars.sha256}}  /home/build/guacamole-server.tar.gz" | sha256sum -c -
       cd /home/build
       tar xf guacamole-server.tar.gz && rm guacamole-server.tar.gz
-
-  - working-directory: /home/build/guacamole-server-${{package.version}}
-    runs: |
-      # autotools artifacts are not committed upstream (upstream's own manual
-      # tells you to run ./bootstrap, which is autoreconf; the frr build does
-      # exactly this).
-      autoreconf -vif
 
   - working-directory: /home/build/guacamole-server-${{package.version}}
     runs: |

@@ -3,8 +3,8 @@
 [Apache Guacamole](https://guacamole.apache.org)'s proxy daemon — `guacd`,
 `libguac` and all five protocol plugins (**RDP** via FreeRDP 3, **VNC** via
 libvncclient, **SSH** via libssh2, **telnet** via libtelnet, **Kubernetes**
-via libwebsockets) — built from the sha-pinned upstream release tag by
-melange, assembled by apko on Wolfi — no Dockerfile. Drop-in for the official
+via libwebsockets) — built from the sha-pinned official Apache dist source
+tarball by melange, assembled by apko on Wolfi — no Dockerfile. Drop-in for the official
 `guacamole/guacd` container (apache/guacamole-server's own Dockerfile):
 tini + `docker-entrypoint.sh` supervising `guacd`, `guacd` user uid/gid
 **1000**, port **4822**.
