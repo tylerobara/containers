@@ -15,6 +15,12 @@
 #     shipped (guacd never execs ffmpeg; see the melange install step), so
 #     the ffmpeg payload it dragged in is out of the image — only the minimal
 #     libavutil+libswscale pair that freerdp-3-libs itself requires remains.
+#   - libssh2 comes from our own epoch-100 build (see ../melange/libssh2.yaml:
+#     Wolfi's 1.11.1-r11 lacks six High CVE fixes and upstream shipped no
+#     release past 1.11.1), never Wolfi's — apko resolves ours via
+#     provider-priority, the workflow's lock guard + test.sh enforce it, and
+#     the scan gate carries per-CVE ignores that are valid only under that
+#     guard.
 #   - tini added as PID 1 (house pattern, every image here): guacd forks one
 #     worker per connection; tini reaps strays and forwards signals. apko has
 #     no per-entrypoint args, so the whole [tini -- entrypoint] invocation is

@@ -50,6 +50,20 @@ Same contract as the upstream container:
   image. The only ffmpeg left is the minimal `libavutil` + `libswscale` pair
   that Wolfi's `freerdp-3-libs` itself requires; `test.sh` fails if any other
   ffmpeg library ever appears.
+- **libssh2 is built here too (epoch-100)**: the SSH plugin's runtime library,
+  because Wolfi's `libssh2-1.11.1-r11` lacks the fixes for six High CVEs
+  (CVE-2026-58050/51, CVE-2026-66032..66035) and upstream has shipped **no
+  release past 1.11.1**, so no bump can pull them.
+  [`melange/libssh2.yaml`](melange/libssh2.yaml) mirrors Wolfi's own build
+  (tag checkout + its two fixes, so ours is a strict superset of r11) and
+  applies the six upstream fix commits — cherry-picked where they apply to
+  the tag, as OE-core backport patches where the master versions conflict.
+  Grype matches the apk by name/version against NVD's `<= 1.11.1` CPE rule
+  regardless of epoch, so the scan gates on per-CVE ignores in
+  [`grype.yaml`](grype.yaml) instead — honest only because the build's verify
+  step greps each fix's marker line into the source tree, the workflow's
+  libssh2 lock guard fails if Wolfi's unpatched r11 ever wins resolution, and
+  `test.sh` asserts the shipped image carries our pkgver.
 - FreeRDP **3** (Wolfi ships it; upstream's Dockerfile still defaults to 2 —
   upstream 1.6.0 supports both).
 - tini added as PID 1 (house pattern of every image here): guacd forks one
@@ -81,3 +95,8 @@ drops the `-RC` candidates, and opens bump PRs). The melange package keeps
 `libguac-client-*`) — ours must keep winning resolution, and the workflow's
 lock guard fails loudly if apko ever resolves a Wolfi build instead of ours
 (keep the version at or above the live Wolfi version; the bot bump does that).
+
+`melange/libssh2.yaml` is deliberately **not** bot-wired: 1.11.1 is the newest
+upstream release, and bumping when a newer one lands means dropping the
+cherry-picks/patches folded into it — a human call, documented in that file's
+header.
