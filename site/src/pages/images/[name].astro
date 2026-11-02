@@ -1,7 +1,7 @@
 ---
 import Layout from '../../components/Layout.astro';
 import CopyButton from '../../components/CopyButton.astro';
-import { images, dataset, categoryHref, imageHref, href, cosignVerify, GITHUB_URL } from '../../lib/catalog';
+import { images, dataset, categoryHref, imageHref, href, cosignVerify, identityRegexp, OIDC_ISSUER, GITHUB_URL } from '../../lib/catalog';
 
 export function getStaticPaths() {
   return images.map((img) => ({ params: { name: img.slug }, props: { image: img } }));
@@ -14,6 +14,14 @@ const sevOrder = ['critical', 'high', 'medium', 'low', 'negligible', 'unknown'] 
 
 const tagRef = `${image.repo}:${image.version ?? 'latest'}`;
 const pinnedRef = image.digest ? `${tagRef}@${image.digest}` : null;
+// The -fips companion tags are a separate build signed by a different workflow.
+const fipsVerify =
+  image.fips?.signed && image.fips.signedBy && image.fips.tags.length > 0
+    ? `cosign verify \\
+  --certificate-oidc-issuer ${OIDC_ISSUER} \\
+  --certificate-identity-regexp '${identityRegexp(image.fips.signedBy)}' \\
+  ${image.fips.version ? `${image.repo}:${image.fips.version}-fips` : `${image.repo}:${image.fips.tags[0]}`}`
+    : null;
 const pageTitle = `${image.displayName} — container image built from source on Wolfi`;
 const pageDescription = image.description || image.summary;
 const sourceUrl = `${GITHUB_URL}/tree/main/${image.sourceDir}`;
@@ -70,7 +78,7 @@ const schema = [{
     <div class="tabs" role="tablist">
       <button class="tab" role="tab" aria-selected="true" data-tab="overview">Overview</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="specs">Specifications</button>
-      <button class="tab" role="tab" aria-selected="false" data-tab="tags">Tags <span class="muted">({image.tags.length})</span></button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="tags">Tags <span class="muted">({image.tags.length + (image.fips?.tags.length ?? 0)})</span></button>
       <button class="tab" role="tab" aria-selected="false" data-tab="packages">Packages{s?.packagesRequested?.length ? <span class="muted"> ({s.packagesRequested.length})</span> : null}</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="advisories">Advisories{v ? <span class="muted"> ({v.total})</span> : null}</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="provenance">Provenance</button>
@@ -155,7 +163,7 @@ const schema = [{
         <p class="notice warn">No published tags recorded yet. The tag list appears after the image's first publish.</p>
       ) : (
         <>
-          <p class="section-sub">All tags below point at the same build{image.digest ? <> (<code class="kv-mono">{image.digest.slice(0, 19)}…</code>)</> : null}. Pin a digest for an immutable reference.</p>
+          <p class="section-sub">All tags in this table point at the same build{image.digest ? <> (<code class="kv-mono">{image.digest.slice(0, 19)}…</code>)</> : null}. Pin a digest for an immutable reference.</p>
           <table class="data">
             <thead><tr><th>Tag</th><th>Pull</th></tr></thead>
             <tbody>
@@ -167,6 +175,34 @@ const schema = [{
               ))}
             </tbody>
           </table>
+          {image.fips && image.fips.tags.length > 0 && (
+            <>
+              <h2 class="section-title" style="font-size:1.1rem;margin-top:28px">FIPS 140-3 variant</h2>
+              <p class="section-sub">
+                Drop-in <code class="kv-mono">-fips</code> suffix tags for the image above: same repository, binary and
+                flags, built against the CMVP-certified Go cryptographic module. Separate build, so its own
+                digest{image.fips.digest ? <> (<code class="kv-mono">{image.fips.digest.slice(0, 19)}…</code>)</> : null} — pin that independently of the table above.
+                {image.fips.built ? <> Built {image.fips.built}.</> : null}
+              </p>
+              <table class="data">
+                <thead><tr><th>Tag</th><th>Pull</th></tr></thead>
+                <tbody>
+                  {image.fips.tags.map((t) => (
+                    <tr>
+                      <td class="mono">{t}</td>
+                      <td class="mono" style="overflow-wrap:anywhere">{image.repo}:{t}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {fipsVerify && (
+                <>
+                  <p class="small muted" style="margin:14px 0 8px">Signed keyless with cosign by <code class="kv-mono">{image.fips.signedBy}</code> on <code class="kv-mono">main</code>:</p>
+                  <CopyButton code={fipsVerify} />
+                </>
+              )}
+            </>
+          )}
         </>
       )}
     </div>

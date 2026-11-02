@@ -115,7 +115,8 @@ jobs:
             # (same shape as cloudnative-pg's postgresql-minimal-trixie catalogs).
             {
               printf 'apiVersion: postgresql.cnpg.io/v1\nkind: ClusterImageCatalog\nmetadata:\n  name: cnpg-postgres-wolfi\n  labels:\n    images.cnpg.io/family: postgresql\n    images.cnpg.io/type: minimal\n    images.cnpg.io/os: wolfi\n    images.cnpg.io/date: "%s"\n    images.cnpg.io/publisher: tylerobara.github.io\nspec:\n  images:\n' "$(date -u +%Y%m%d)"
-              jq -r 'map(select(.major)) | sort_by(.major)[] | "  - major: \(.major)\n    image: \(.image):\(.version)@\(.digest)"' out/data/index.json
+              # numeric majors only (postgres family); the -fips companion entries (traefik) carry major:"fips"
+              jq -r 'map(select(.major | type == "number")) | sort_by(.major)[] | "  - major: \(.major)\n    image: \(.image):\(.version)@\(.digest)"' out/data/index.json
             } > out/data/cluster-image-catalog.yaml
 
             BUILD_DATE="$(date -u +"%Y-%m-%d %H:%M UTC")"
