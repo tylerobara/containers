@@ -12,19 +12,22 @@
 # guard together form the remediation: the ignore list is only honest while
 # the guard proves our patched build is what shipped.
 #
-#   CVE-2026-58050  publickey list size overflow   cherry-pick 3449752
-#   CVE-2026-58051  publickey uninitialized entry cherry-pick a9758da
-#   CVE-2026-66032  sftp dangling pointer         patch CVE-2026-66032.patch (upstream 5e47761)
-#   CVE-2026-66033  openssl AES-GCM OOB           cherry-pick a2ed82d
-#   CVE-2026-66034  publickey OOB read            cherry-pick a13bb6c
-#   CVE-2026-66035  transport ETM heap overflow   patch CVE-2026-66035.patch (upstream 42e33d8)
+#   CVE-2026-58050  publickey list size overflow  patch CVE-2026-58050.patch (upstream 3449752)
+#   CVE-2026-58051  publickey uninitialized entry  cherry-pick a9758da
+#   CVE-2026-66032  sftp dangling pointer          patch CVE-2026-66032.patch (upstream 5e47761)
+#   CVE-2026-66033  openssl AES-GCM OOB            cherry-pick a2ed82d
+#   CVE-2026-66034  publickey OOB read             patch CVE-2026-66034.patch (upstream a13bb6c)
+#   CVE-2026-66035  transport ETM heap overflow    patch CVE-2026-66035.patch (upstream 42e33d8)
 #
-# The two patch files are the OE-core backports of upstream commits whose
-# master versions conflict against the 1.11.1 tag (post-tag symbol renames);
-# the cherry-picks were verified to apply cleanly. The two patches Wolfi
-# itself carries (fix-CVE-2026-55200, CVE-2025-15661) are kept so this build
-# is a strict superset of r11. Everything else mirrors Wolfi's libssh2.yaml
-# (git-checkout of the tag + its expected-commit, autoreconf, autoconf steps).
+# The four patch files are the OE-core 1.11.1 backports of upstream commits
+# that cannot be cherry-picked against this tag: 5e47761/42e33d8 conflict on
+# post-tag context drift, and a13bb6c/3449752 call ssh2_err(), the post-tag
+# rename of _libssh2_error (compiles as an implicit-declaration error on the
+# tag tree). The four cherry-picks were verified to apply cleanly against
+# the tag. The two patches Wolfi itself carries (fix-CVE-2026-55200,
+# CVE-2025-15661) are kept so this build is a strict superset of r11.
+# Everything else mirrors Wolfi's libssh2.yaml (git-checkout of the tag +
+# its expected-commit, autoreconf, autoconf steps).
 #
 # UPDATE POLICY: intentionally NOT wired into the update-versions bot. When
 # upstream finally ships 1.11.2+, bump version + expected-commit by hand and
@@ -70,18 +73,16 @@ pipeline:
         master/256d04b60d80bf1190e96b0ad1e91b2174d744b1: [CVE-2026-7598]
         master/17626857d20b3c9a1addfa45979dadcee1cd84a4: [CVE-2026-55199]
         master/a2ed82d40964bbc0d64cd717aa0a5a892117d2e6: [CVE-2026-66033]
-        master/a13bb6c773f0d55ad1628cede57e99803cd898d9: [CVE-2026-66034]
-        master/34497525929b9a47f03dfb81887ac896202b7e12: [CVE-2026-58050]
         master/a9758da45a52bc8c630ec9493804d0c6ea30b24a: [CVE-2026-58051]
 
   # fix-CVE-2026-55200 + CVE-2025-15661 are Wolfi's own (see the header);
-  # CVE-2026-66032/66035 are the OE-core 1.11.1 backports linked above.
+  # the CVE-2026-* files are the OE-core 1.11.1 backports linked above.
   # Paths are workspace-relative: melange copies the config dir (its
   # default source-dir) into /home/build preserving layout, so the files
   # live under the libssh2/ subdir next to this yaml.
   - uses: patch
     with:
-      patches: libssh2/fix-CVE-2026-55200.patch libssh2/CVE-2025-15661.patch libssh2/CVE-2026-66032.patch libssh2/CVE-2026-66035.patch
+      patches: libssh2/fix-CVE-2026-55200.patch libssh2/CVE-2025-15661.patch libssh2/CVE-2026-66032.patch libssh2/CVE-2026-66034.patch libssh2/CVE-2026-66035.patch libssh2/CVE-2026-58050.patch
 
   # Proves every CVE fix from the header landed before building: a drifted
   # patch/cherry-pick could otherwise ship an UNPATCHED library while the
@@ -91,7 +92,7 @@ pipeline:
   # the full cherry-pick + patch sequence.
   - runs: |
       grep -q 'EVP_CTRL_GCM_SET_TAG' src/openssl.c || { echo "CVE-2026-66033 (AES-GCM) fix missing"; exit 1; }
-      grep -q 'ListFetch data too short' src/publickey.c || { echo "CVE-2026-66034 (publickey OOB) fix missing"; exit 1; }
+      grep -q 'listFetch_s + comment_len >' src/publickey.c || { echo "CVE-2026-66034 (publickey OOB) fix missing"; exit 1; }
       grep -q 'num_attrs > 1024' src/publickey.c || { echo "CVE-2026-58050 (list cap) fix missing"; exit 1; }
       grep -q 'memset(&list\[keys\], 0' src/publickey.c || { echo "CVE-2026-58051 (init entry) fix missing"; exit 1; }
       grep -q 'total_num < mac_len + 4 + (size_t)blocksize' src/transport.c || { echo "CVE-2026-66035 (ETM) fix missing"; exit 1; }
