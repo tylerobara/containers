@@ -119,32 +119,32 @@ pipeline:
           -X github.com/traefik/traefik/v3/pkg/version.Codename=${{vars.codename}} \
           -X github.com/traefik/traefik/v3/pkg/version.BuildDate=$(date -u +%FT%TZ)" \
         -o traefik ./cmd/traefik
-      install -Dm755 traefik "${{targets.destdir}}/usr/bin/traefik-fips"
+      install -Dm755 traefik "${{targets.destdir}}/usr/bin/traefik"
 
   - runs: |
       # Version stamp check (same as images/traefik).
-      out=$("${{targets.destdir}}/usr/bin/traefik-fips" version)
+      out=$("${{targets.destdir}}/usr/bin/traefik" version)
       echo "$out"
       echo "$out" | grep -q "v${{package.version}}"
       export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.27/bin"
       # FIPS proof: build settings survive -trimpath and -ldflags -w; the
       # binary must carry the validated module and the fips140=on default.
-      bi=$(go version -m "${{targets.destdir}}/usr/bin/traefik-fips")
+      bi=$(go version -m "${{targets.destdir}}/usr/bin/traefik")
       echo "$bi" | grep -q 'build.*GOFIPS140=v1.0.0' \
         || { echo "binary lacks GOFIPS140=v1.0.0 build setting"; exit 1; }
       echo "$bi" | grep -q 'build.*DefaultGODEBUG=fips140=on' \
         || { echo "binary lacks DefaultGODEBUG=fips140=on"; exit 1; }
       # grype reads Go deps from the embedded build info — assert the
       # bumped pins actually landed in the binary.
-      ver=$(go version -m "${{targets.destdir}}/usr/bin/traefik-fips" \
+      ver=$(go version -m "${{targets.destdir}}/usr/bin/traefik" \
         | awk -F'\t' '$3=="golang.org/x/net"{print $4; exit}')
       [ "$(printf '%s\n%s\n' "$ver" "v${{vars.xnet_version}}" | sort -V | head -1)" = "v${{vars.xnet_version}}" ] \
         || { echo "golang.org/x/net is '$ver' in the binary, want >= v${{vars.xnet_version}}"; exit 1; }
-      gjver=$(go version -m "${{targets.destdir}}/usr/bin/traefik-fips" \
+      gjver=$(go version -m "${{targets.destdir}}/usr/bin/traefik" \
         | awk -F'\t' '$3=="github.com/go-jose/go-jose/v4"{print $4; exit}')
       [ "$(printf '%s\n%s\n' "$gjver" "v${{vars.gojose_version}}" | sort -V | head -1)" = "v${{vars.gojose_version}}" ] \
         || { echo "go-jose/v4 is '$gjver' in the binary, want >= v${{vars.gojose_version}}"; exit 1; }
-      kvver=$(go version -m "${{targets.destdir}}/usr/bin/traefik-fips" \
+      kvver=$(go version -m "${{targets.destdir}}/usr/bin/traefik" \
         | awk -F'\t' '$3=="knative.dev/pkg"{print $4; exit}')
       [ "$(printf '%s\n%s\n' "$kvver" "v${{vars.knative_pkg_version}}" | sort -V | head -1)" = "v${{vars.knative_pkg_version}}" ] \
         || { echo "knative.dev/pkg is '$kvver' in the binary, want >= v${{vars.knative_pkg_version}}"; exit 1; }

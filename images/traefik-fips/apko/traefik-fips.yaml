@@ -42,7 +42,9 @@ environment:
   PATH: /usr/sbin:/sbin:/usr/bin:/bin
 
 entrypoint:
-  command: /usr/bin/traefik-fips
-# Same interface as images/traefik (and upstream): ENTRYPOINT binary, no CMD,
-# everything via flags/env. FIPS mode needs no runtime flags — the binary
-# boots with fips140=on baked in; do NOT set GODEBUG=fips140=off (see README).
+  command: /usr/bin/traefik
+# Published as ghcr.io/tylerobara/containers/traefik:<ver>-fips — a drop-in
+# sibling of the plain tags (same binary path, same ENTRYPOINT, no CMD,
+# everything via flags/env, flagd/GitLab/Consul-style -fips suffix). FIPS mode
+# needs no runtime flags — the binary boots with fips140=on baked in; do NOT
+# set GODEBUG=fips140=off (see README).

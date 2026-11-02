@@ -6,8 +6,32 @@
 Cryptographic Module v1.0.0** and boots with `fips140=on` baked in —
 approved-only crypto with zero runtime configuration.
 
-This is research-validated, not (yet) published: no workflow, not in
-`catalog.json`, not signed. See [Next steps](#next-steps).
+Published as `-fips` **suffix tags on the existing traefik image** — drop-in
+siblings of the plain tags (same binary path `/usr/bin/traefik`, same
+ENTRYPOINT, same flag interface), the flagd/GitLab/Consul convention:
+
+```sh
+docker run --rm ghcr.io/tylerobara/containers/traefik:latest-fips version
+docker run --rm ghcr.io/tylerobara/containers/traefik:3.7.17-fips \
+  --entrypoints.web.address=:80 --ping --api.dashboard=false
+```
+
+Tags: `<x.y.z>-fips`, `<x.y>-fips`, `latest-fips`. Built and published by
+[`.github/workflows/traefik-fips.yml`](../../.github/workflows/traefik-fips.yml)
+under the same 0-Low+ grype signing gate as every image here; verify:
+
+```sh
+cosign verify \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github.com/tylerobara/containers/\.github/workflows/traefik-fips\.yml@refs/heads/main$' \
+  ghcr.io/tylerobara/containers/traefik:latest-fips
+```
+
+The melange **package** is named `traefik-fips` (distinct in SBOMs/scans)
+while the in-image binary stays `/usr/bin/traefik` — a `-fips` tag must be a
+drop-in replacement for the plain tag, differing only in its crypto module.
+The site catalog entry stays `traefik`'s (site.yml keys entries on
+image+major; this workflow deliberately emits no pages-data).
 
 ## Why the recipe looks the way it does
 
@@ -130,14 +154,14 @@ nonroot, prod restraint, ping boot):
 3. Traefik's auto-generated default cert (RSA keygen + self-sign) doubles as
    a live exercise of the module's pairwise/keygen self-tests at boot.
 
-## Next steps (to productize)
+## Maintenance
 
-- Copy `.github/workflows/traefik.yml` → `traefik-fips.yml` (same keygen →
-  melange ×2 arch → apko lock/publish → test → grype 0-gate → cosign chain),
-  add the `catalog.json` row so the site/scan pages pick it up, and mirror
-  the `bump-traefik-*` bot PRs onto this config (tarball sha + pins are
-  shared with `images/traefik` by design).
-- Consider publishing `:3.x-fips` tags on the same `traefik` image instead of
-  a separate image name, and pinning whichever module version holds the CMVP
-  certificate when v1.26.0 completes review (it's been pending since
-  2026-04-28 — check before switching).
+- Tarball sha + dependency pins are shared with `images/traefik` by design —
+  bump both together (the update-versions bot scans `images/*/melange/*.yaml`,
+  so both rows get bump PRs; keep `vars.go_version`/`go_sha256_*` matched to
+  the `go-1.27` patch version the build resolves to, or the `fips140.sum`
+  cross-check fails loudly).
+- When module **v1.26.0** completes CMVP review (pending since 2026-04-28),
+  v1.0.0 may eventually be dropped from newer Go releases — switch the pin to
+  the then-certified literal version (check `certified.txt` in the pinned
+  toolchain's `lib/fips140/`; keep using a literal, never the alias).

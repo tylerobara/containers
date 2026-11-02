@@ -1,6 +1,6 @@
 #!/bin/sh
-# Smoke + FIPS test for the Traefik FIPS image.
-# Usage: IMAGE=ghcr.io/.../traefik-fips:3.7.17 VERSION=3.7.17 ./test.sh
+# Smoke + FIPS test for the Traefik FIPS image (traefik:<ver>-fips tags).
+# Usage: IMAGE=ghcr.io/.../traefik:3.7.17-fips VERSION=3.7.17 ./test.sh
 # Needs on the host: docker, go (for `go version -m` build-info assertions).
 set -eu
 : "${IMAGE:?set IMAGE}" "${VERSION:?set VERSION (traefik version, no v)}"
@@ -12,12 +12,12 @@ dyn=$(mktemp -d); chmod 755 "$dyn"
 trap "rm -rf '$dyn' || true" EXIT
 
 echo "Testing traefik reports v$VERSION..."
-docker run --rm --entrypoint /usr/bin/traefik-fips "$IMAGE" version 2>&1 \
+docker run --rm --entrypoint /usr/bin/traefik "$IMAGE" version 2>&1 \
   | grep -q "v$VERSION" || fail "traefik version does not report v$VERSION"
 
-echo "Testing default entrypoint is /usr/bin/traefik-fips..."
+echo "Testing drop-in entrypoint is /usr/bin/traefik (same as the plain tags)..."
 ep=$(docker inspect --format '{{.Config.Entrypoint}}' "$IMAGE")
-[ "$ep" = "[/usr/bin/traefik-fips]" ] || fail "entrypoint is '$ep', expected '[/usr/bin/traefik-fips]'"
+[ "$ep" = "[/usr/bin/traefik]" ] || fail "entrypoint is '$ep', expected '[/usr/bin/traefik]'"
 
 echo "Testing nonroot uid 65532..."
 uid=$(docker inspect --format '{{.Config.User}}' "$IMAGE")
@@ -32,7 +32,7 @@ docker run --rm --entrypoint /bin/sh "$IMAGE" -c '
 echo "Testing FIPS build info (GOFIPS140=v1.0.0 + fips140=on baked in)..."
 cid=$(docker create "$IMAGE")
 bin="$PWD/.traefik-fips.$$.bin"
-docker cp "$cid:/usr/bin/traefik-fips" "$bin" >/dev/null
+docker cp "$cid:/usr/bin/traefik" "$bin" >/dev/null
 docker rm "$cid" >/dev/null
 go version -m "$bin" >"$bin.info"
 grep -q 'GOFIPS140=v1.0.0'               "$bin.info" || fail "binary not built against the CMVP #5247 module snapshot"
