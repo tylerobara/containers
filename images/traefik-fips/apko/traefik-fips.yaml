@@ -1,0 +1,50 @@
+# Traefik FIPS image, assembled by apko (no Dockerfile). The FIPS binary is
+# built by melange (see ../melange/traefik-fips.yaml); everything else is the
+# same Wolfi base as images/traefik.
+#
+# Deliberate non-deviation from the chainguard-base-fips pattern: that base
+# ships a FIPS-validated OpenSSL provider, which matters for native/cgo apps
+# (nginx-fips, postgres-fips). Traefik is a static CGO_ENABLED=0 Go binary —
+# no OpenSSL is linked or called, so a FIPS base would add packages without
+# adding any validated cryptography. The FIPS boundary lives in the compiled-
+# in Go Cryptographic Module (see melange config). Same reasoning the wolfi/
+# chainguard go-fips ecosystem uses.
+
+archs:
+  - x86_64
+  - aarch64
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    # Debug shell only — traefik-fips is a static Go binary. ca-certificates
+    # for upstream TLS (ACME issuers, OCSP, cert chains).
+    - busybox
+    - ca-certificates
+    # Built by melange; supplied via --repository-append at build time.
+    - traefik-fips
+
+accounts:
+  groups:
+    - groupname: traefik
+      gid: 65532
+  users:
+    - username: traefik
+      uid: 65532
+      gid: 65532
+      shell: /bin/false
+  run-as: 65532
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+
+entrypoint:
+  command: /usr/bin/traefik
+# Published as ghcr.io/tylerobara/containers/traefik:<ver>-fips — a drop-in
+# sibling of the plain tags (same binary path, same ENTRYPOINT, no CMD,
+# everything via flags/env, flagd/GitLab/Consul-style -fips suffix). FIPS mode
+# needs no runtime flags — the binary boots with fips140=on baked in; do NOT
+# set GODEBUG=fips140=off (see README).
