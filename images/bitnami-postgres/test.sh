@@ -142,6 +142,13 @@ out=$(docker exec -e PGPASSWORD=Test-Superpass-1 "$cid" psql -U postgres -tAc \
 docker exec -e PGPASSWORD=Test-Superpass-1 "$cid" psql -U postgres -d appdb -qc 'CREATE EXTENSION repmgr;' \
   || { echo "FAIL: CREATE EXTENSION repmgr failed (extension files misplaced?)"; exit 1; }
 
+# contrib modules must ship (core `make` alone omits them): TeslaMate needs
+# cube + earthdistance; pg_trgm/hstore/uuid-ossp are common app dependencies.
+for ext in cube earthdistance pg_trgm hstore "uuid-ossp"; do
+  docker exec -e PGPASSWORD=Test-Superpass-1 "$cid" psql -U postgres -d appdb -qc "CREATE EXTENSION \"$ext\" CASCADE;" \
+    || { echo "FAIL: CREATE EXTENSION $ext failed (contrib not installed?)"; exit 1; }
+done
+
 echo "Testing repmgr compatibility package..."
 docker run --rm --user 1001 --entrypoint /opt/bitnami/repmgr/bin/repmgr "$IMAGE" --version \
   | grep -q 'repmgr' || { echo "FAIL: repmgr --version"; exit 1; }

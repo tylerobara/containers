@@ -114,6 +114,9 @@ pipeline:
         --with-readline \
         --with-system-tzdata=/usr/share/zoneinfo
       make -j"$(nproc)"
+      # contrib (cube, earthdistance, pg_trgm, hstore, ...) is NOT part of the
+      # core `make`; without it TeslaMate and others fail on CREATE EXTENSION.
+      make -C contrib -j"$(nproc)"
 
   - working-directory: /home/build/postgresql-${{package.version}}
     runs: |
@@ -121,6 +124,7 @@ pipeline:
       # DESTDIR) so the bitnami scripts' absolute paths work unmodified; the
       # package tree is assembled from /opt below.
       make install
+      make -C contrib install
       # Drop pure-build artifacts (CNPG rationale): server-side PGXS, static
       # libs, headers, pkgconfig. lib/postgresql/*.so stay — loadable modules.
       rm -rf /opt/bitnami/postgresql/include \
