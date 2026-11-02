@@ -102,9 +102,13 @@ pipeline:
     runs: |
       # Official-flag set from upstream's guacd Dockerfile
       # (GUACAMOLE_SERVER_OPTS): --disable-guaclog + the deprecated-declarations
-      # softening (ffmpeg/freerdp3 headers trip -Werror otherwise). Everything
-      # else is the house prefix set; guacd lands in /usr/sbin, plugins in
-      # /usr/lib.
+      # softening (ffmpeg/freerdp3 headers trip -Werror otherwise), extended
+      # with -Wno-error=discarded-qualifiers for the same toolchain-noise
+      # reason: Wolfi gcc 16 diagnoses memchr-from-const-arg in upstream's
+      # guac_strnstr (string.c) as -Werror=discarded-qualifiers; older
+      # compilers upstream CI used stayed silent. Diagnostics stay on, only
+      # these two escalations are demoted. Everything else is the house prefix
+      # set; guacd lands in /usr/sbin, plugins in /usr/lib.
       ./configure \
         --prefix=/usr \
         --sbindir=/usr/sbin \
@@ -113,7 +117,7 @@ pipeline:
         --mandir=/usr/share/man \
         --infodir=/usr/share/info \
         --disable-guaclog \
-        CPPFLAGS=-Wno-error=deprecated-declarations
+        CPPFLAGS="-Wno-error=deprecated-declarations -Wno-error=discarded-qualifiers"
       # glibc >= 2.43's _GNU_SOURCE block in features.h #undef/#defines
       # _XOPEN_SOURCE 800 before config.h's bare "#define _XOPEN_SOURCE 700"
       # (from AC_DEFINE) is seen, making it a conflicting-redefinition
