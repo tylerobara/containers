@@ -76,9 +76,12 @@ pipeline:
 
   # fix-CVE-2026-55200 + CVE-2025-15661 are Wolfi's own (see the header);
   # CVE-2026-66032/66035 are the OE-core 1.11.1 backports linked above.
+  # Paths are workspace-relative: melange copies the config dir (its
+  # default source-dir) into /home/build preserving layout, so the files
+  # live under the libssh2/ subdir next to this yaml.
   - uses: patch
     with:
-      patches: fix-CVE-2026-55200.patch CVE-2025-15661.patch CVE-2026-66032.patch CVE-2026-66035.patch
+      patches: libssh2/fix-CVE-2026-55200.patch libssh2/CVE-2025-15661.patch libssh2/CVE-2026-66032.patch libssh2/CVE-2026-66035.patch
 
   # Proves every CVE fix from the header landed before building: a drifted
   # patch/cherry-pick could otherwise ship an UNPATCHED library while the
