@@ -23,7 +23,7 @@
 
 package:
   name: k8s-sidecar
-  version: 2.14.1
+  version: 2.14.3
   # Above any future Wolfi re-sync of their stale 2.7.3 package:
   epoch: 100
   description: "Kubernetes sidecar to collect configmaps and secrets as files"
@@ -37,7 +37,7 @@ package:
 
 vars:
   # SHA256 of the GitHub release tarball
-  sha256: 8032c1cb153a992e22d4bee0baf71e3fa5746c439b61865e9884ce8d587377de
+  sha256: 608b689ae052838b1bcd187826791c2c722a9dd9ad8634e9c865864e6f75d55e
 
 environment:
   contents:
