@@ -814,4 +814,29 @@ jobs:
             fi
           fi
 
+          # --- guacamole-server: upstream publishes NO GitHub releases
+          # (releases/latest 404s), so follow the tag list the traefik/
+          # external-secrets way; the strict ^X.Y.Z$ grep drops the
+          # 1.6.0-RC*-style release candidates, and the tags have no v prefix.
+          # The tarball is built against Wolfi system libraries (FreeRDP 3,
+          # libvncclient, libtelnet, libwebsockets, ffmpeg) rather than
+          # upstream's Dockerfile from-source /opt/guacamole stack. Wolfi ships
+          # its own guacamole-server (currently 1.6.0-rN), so the epoch-100
+          # build must stay at or above the live Wolfi version; the workflow's
+          # lock guard fails loudly if that lead is ever lost. Floating apko
+          # line, no PIN_FILE sync. ---
+          if want guacamole-server; then
+            yaml=images/guacamole-server/melange/guacamole-server.yaml
+            latest=$(gh api --paginate repos/apache/guacamole-server/tags --jq '.[].name' \
+              | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+            if [ -z "$latest" ]; then
+              echo "::error::guacamole-server: no release tag found upstream"
+              FAILED=1
+            else
+              bump_row guacamole-server "$yaml" "$latest" \
+                "https://github.com/apache/guacamole-server/archive/refs/tags/${latest}.tar.gz" \
+                guacamole-server
+            fi
+          fi
+
           exit $FAILED
