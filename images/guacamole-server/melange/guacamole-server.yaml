@@ -505,13 +505,14 @@ pipeline:
     runs: |
       # Official-flag set from upstream's guacd Dockerfile
       # (GUACAMOLE_SERVER_OPTS): --disable-guaclog + the deprecated-declarations
-      # softening (ffmpeg/freerdp3 headers trip -Werror otherwise), extended
-      # with -Wno-error=discarded-qualifiers for the same toolchain-noise
-      # reason: Wolfi gcc 16 diagnoses memchr-from-const-arg in upstream's
-      # guac_strnstr (string.c) as -Werror=discarded-qualifiers; older
-      # compilers upstream CI used stayed silent. Diagnostics stay on, only
-      # these two escalations are demoted. Everything else is the house prefix
-      # set; guacd lands in /usr/sbin, plugins in /usr/lib.
+      # softening (ffmpeg/freerdp3 headers trip -Werror otherwise), plus
+      # -Wno-error=discarded-qualifiers (memchr-from-const-arg trips
+      # -Werror=discarded-qualifiers on gcc >= 14's stricter analysis). These
+      # demotions are configure ARGUMENTS, so they land in the AC_CHECK-style
+      # feature probes too — including the FreeRDP probe (configure.ac
+      # injects its own -Werror around it); a probe killed by a warning would
+      # silently drop a protocol. Everything else is the house prefix set;
+      # guacd lands in /usr/sbin, plugins in /usr/lib.
       ./configure \
         --prefix=/usr \
         --sbindir=/usr/sbin \
@@ -531,7 +532,19 @@ pipeline:
       # emitting the define fails loudly here instead of silently.
       sed -i 's/^#define _XOPEN_SOURCE 700$/#define _XOPEN_SOURCE 800/' config.h
       grep -q '^#define _XOPEN_SOURCE 800$' config.h
-      make -j"$(nproc)"
+      # Upstream's per-target -Werror (AM_CFLAGS in every Makefile.am) is only
+      # validated against upstream's own toolchains; Wolfi gcc 16 raises whole
+      # new diagnostic classes on unmodified upstream sources — dead stores
+      # (surface.c 'flushed'), const-discard (string.c memchr) — each one a
+      # fatal build break, and the update-versions bot must not play whack-a-
+      # mole with every future gcc release. CFLAGS is automake's LAST compile
+      # variable, so -Wno-error after CFLAGS demotes the AM_CFLAGS -Werror for
+      # the build (warnings stay visible, real errors stay errors); the
+      # configure-argument demotions above keep the feature probes exact.
+      # Correctness here is guarded by the five-protocol asserts and the
+      # test-pipeline boot, not by upstream's style gate. -O2 -g is autoconf's
+      # own default, passed through so the override loses nothing.
+      make -j"$(nproc)" CFLAGS="-O2 -g -Wno-error"
 
   - working-directory: /home/build/guacamole-server-${{package.version}}
     runs: |
