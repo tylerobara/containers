@@ -512,10 +512,10 @@ pipeline:
       # feature probes too — including the FreeRDP probe (configure.ac
       # injects its own -Werror around it); a probe killed by a warning would
       # silently drop a protocol. Everything else is the house prefix set;
-      # guacd lands in /usr/sbin, plugins in /usr/lib.
+      # guacd lands in /usr/bin (Wolfi is usrmerged; melange lint rejects packaged paths under /usr/sbin), plugins in /usr/lib.
       ./configure \
         --prefix=/usr \
-        --sbindir=/usr/sbin \
+        --sbindir=/usr/bin \
         --localstatedir=/var \
         --sysconfdir=/etc \
         --mandir=/usr/share/man \
@@ -556,7 +556,7 @@ pipeline:
       find "${{targets.destdir}}" -name '*.a' -delete
       # The official container's entrypoint (src/guacd-docker/bin/entrypoint.sh),
       # adopted with one Wolfi adaptation: /opt/guacamole/sbin/guacd ->
-      # /usr/sbin/guacd (prefix=/usr install instead of upstream's
+      # /usr/bin/guacd (prefix=/usr install instead of upstream's
       # /opt/guacamole relocation).
       cat > "${{targets.destdir}}/usr/bin/docker-entrypoint.sh" <<'EOF'
       #!/bin/sh
@@ -564,12 +564,12 @@ pipeline:
       # listen on 0.0.0.0:4822 at info level, LOG_LEVEL (GUACD_LOG_LEVEL is the
       # deprecated name) overridable, extra `docker run` args appended verbatim.
       # Upstream entrypoint.sh, sha-pinned by tag 1.6.0, path-adapted to
-      # /usr/sbin/guacd.
+      # /usr/bin/guacd.
       if [ -n "$GUACD_LOG_LEVEL" ]; then
           echo "WARNING: The GUACD_LOG_LEVEL environment variable has been deprecated in favor of the LOG_LEVEL environment variable. Please migrate your configuration when possible." >&2
       fi
 
-      exec /usr/sbin/guacd -f -b 0.0.0.0 -L "${LOG_LEVEL:-${GUACD_LOG_LEVEL:-info}}" "$@"
+      exec /usr/bin/guacd -f -b 0.0.0.0 -L "${LOG_LEVEL:-${GUACD_LOG_LEVEL:-info}}" "$@"
       EOF
       chmod 755 "${{targets.destdir}}/usr/bin/docker-entrypoint.sh"
 
@@ -582,10 +582,10 @@ pipeline:
       export LD_LIBRARY_PATH="${{targets.destdir}}/usr/lib"
       # -v, not --version: 1.6.0's conf-args.c is plain getopt("l:b:p:L:C:K:fv")
       # and --version falls into the usage/error branch.
-      v=$("${{targets.destdir}}/usr/sbin/guacd" -v)
+      v=$("${{targets.destdir}}/usr/bin/guacd" -v)
       echo "$v"
       echo "$v" | grep -q "version ${{package.version}}" || { echo "wrong version: $v"; exit 1; }
-      test -x "${{targets.destdir}}/usr/sbin/guacd"
+      test -x "${{targets.destdir}}/usr/bin/guacd"
       for p in rdp ssh telnet vnc kubernetes; do
         test -e "${{targets.destdir}}/usr/lib/libguac-client-$p.so" || { echo "missing protocol plugin: $p"; exit 1; }
       done
@@ -635,5 +635,5 @@ test:
         for p in rdp ssh telnet vnc kubernetes; do
           test -e /usr/lib/libguac-client-$p.so || { echo "installed package lacks $p plugin"; exit 1; }
         done
-        test -x /usr/sbin/guacd
+        test -x /usr/bin/guacd
         test -x /usr/bin/docker-entrypoint.sh

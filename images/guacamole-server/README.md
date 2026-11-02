@@ -25,7 +25,7 @@ Same contract as the upstream container:
 - Entrypoint `/sbin/tini -- /usr/bin/docker-entrypoint.sh`, empty default args
   (apko renders this as the entrypoint field + empty `cmd`).
 - The entrypoint (upstream's `entrypoint.sh`, shipped inside the melange
-  package, path-adapted to `/usr/sbin/guacd`) execs
+  package, path-adapted to `/usr/bin/guacd`) execs
   `guacd -f -b 0.0.0.0 -L <level>`: log level from `LOG_LEVEL` (the deprecated
   `GUACD_LOG_LEVEL` still works and warns, like upstream), default `info`.
   Extra `docker run` args are appended to the guacd command line verbatim

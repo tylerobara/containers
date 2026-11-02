@@ -20,7 +20,7 @@ user=$(docker inspect --format '{{.Config.User}}' "$IMAGE")
 docker run --rm --entrypoint /bin/sh "$IMAGE" -ec '
   grep -q "^guacd:[^:]*:1000:1000:" /etc/passwd || exit 1
   grep -q "^guacd:[^:]*:1000:" /etc/group || exit 2
-  test -x /usr/sbin/guacd || exit 3
+  test -x /usr/bin/guacd || exit 3
   test -x /usr/bin/guacenc || exit 4
   test -x /usr/bin/docker-entrypoint.sh || exit 5
   for f in rdp ssh telnet vnc kubernetes; do test -e /usr/lib/libguac-client-$f.so || exit 6; done
@@ -29,7 +29,7 @@ docker run --rm --entrypoint /bin/sh "$IMAGE" -ec '
 
 echo "Testing guacd reports v$VERSION (no version drift, ffmpeg-linked guacenc present)..."
 # -v, not --version: 1.6.0's getopt string (l:b:p:L:C:K:fv) has no long options.
-v=$(docker run --rm --entrypoint /usr/sbin/guacd "$IMAGE" -v)
+v=$(docker run --rm --entrypoint /usr/bin/guacd "$IMAGE" -v)
 echo "$v"
 echo "$v" | grep -q "version $VERSION" || fail "guacd -v is not $VERSION: $v"
 
