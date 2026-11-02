@@ -357,7 +357,8 @@ async function main() {
     const builds = index.filter((b) => b && b.image === repo);
     builds.forEach((b) => matched.add(b));
     // -fips suffix tags ride along as a companion entry keyed major:"fips"
-    // (traefik-fips.yml) — a second tag set on the same page, not its own page.
+    // (traefik.yml's fips matrix leg) — a second tag set on the same page,
+    // not its own page.
     const fips = entry.per_major ? null : (builds.find((b) => b.major === 'fips') || null);
     // per_major images (postgres) get one page per published major, newest first.
     const targets = entry.per_major

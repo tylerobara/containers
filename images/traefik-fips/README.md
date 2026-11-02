@@ -16,21 +16,26 @@ docker run --rm ghcr.io/tylerobara/containers/traefik:3.7.17-fips \
   --entrypoints.web.address=:80 --ping --api.dashboard=false
 ```
 
-Tags: `<x.y.z>-fips`, `<x.y>-fips`, `latest-fips`. Built and published by
-[`.github/workflows/traefik-fips.yml`](../../.github/workflows/traefik-fips.yml)
-under the same 0-Low+ grype signing gate as every image here; verify:
+Tags: `<x.y.z>-fips`, `<x.y>-fips`, `latest-fips`. Built as the `fips` variant
+of the `variant` matrix in
+[`.github/workflows/traefik.yml`](../../.github/workflows/traefik.yml) under
+the same 0-Low+ grype signing gate as every image here. Both variants share
+that workflow's cosign identity; `-fips` crypto provenance is carried by the
+embedded `GOFIPS140=v1.0.0` build info and the distinct `traefik-fips` SBOM
+package (both asserted in the melange pipeline, so a non-FIPS build cannot
+produce the package). Verify:
 
 ```sh
 cosign verify \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github.com/tylerobara/containers/\.github/workflows/traefik-fips\.yml@refs/heads/main$' \
+  --certificate-identity-regexp '^https://github.com/tylerobara/containers/\.github/workflows/traefik\.yml@refs/heads/main$' \
   ghcr.io/tylerobara/containers/traefik:latest-fips
 ```
 
 The melange **package** is named `traefik-fips` (distinct in SBOMs/scans)
 while the in-image binary stays `/usr/bin/traefik` — a `-fips` tag must be a
 drop-in replacement for the plain tag, differing only in its crypto module.
-On the site, this workflow publishes a companion index entry keyed
+On the site, the fips leg publishes a companion index entry keyed
 `major:"fips"` (site.yml keys entries on image+major, so it coexists with
 `traefik.yml`'s `major:null` entry); it renders as the FIPS tag set on
 [`/images/traefik/`](https://tylerobara.github.io/containers/images/traefik/#tags).
