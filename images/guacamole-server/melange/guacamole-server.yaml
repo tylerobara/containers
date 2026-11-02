@@ -559,12 +559,14 @@ pipeline:
       find "${{targets.destdir}}" -name '*.a' -delete
       # Drop the ffmpeg-linked guacenc CLI (the recording transcoder). guacd
       # never execs ffmpeg — only guacenc links libav* — but shipping it made
-      # apk's auto-deps drag the whole ffmpeg-8.1-* runtime tree (plus its
-      # alsa-lib audio backend) into the image, which is exactly the CVE
-      # block grype counted in the first published scan (42 advisories across
-      # 5 libav*/libsw* libraries; all of them fixed only in a Wolfi ffmpeg
-      # this image has no reason to carry at all). It still builds (the
-      # ffmpeg probes stay exercised); it just doesn't ship.
+      # apk's auto-deps drag the full ffmpeg-8.1-* library set (libavcodec,
+      # libavformat, libavdevice, ...) into the image, which is exactly the
+      # CVE block grype counted in the first published scan (42 advisories
+      # across 5 libav*/libsw* libraries; all of them fixed only in a Wolfi
+      # ffmpeg this image has no reason to carry at all). Without it, the
+      # only ffmpeg left is the minimal libavutil+libswscale pair that
+      # freerdp-3-libs itself declares. It still builds (the ffmpeg probes
+      # stay exercised); it just doesn't ship.
       rm -f "${{targets.destdir}}/usr/bin/guacenc" \
             "${{targets.destdir}}/usr/share/man/man1/guacenc.1"
       # The official container's entrypoint (src/guacd-docker/bin/entrypoint.sh),

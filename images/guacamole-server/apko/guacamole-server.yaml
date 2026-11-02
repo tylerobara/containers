@@ -12,8 +12,9 @@
 #     libwebsockets, pulseaudio) are Wolfi system packages instead of
 #     upstream's from-source /opt/guacamole stack — the approach Wolfi's own
 #     guacamole-server package takes. The ffmpeg-linked guacenc CLI is NOT
-#     shipped (guacd never execs ffmpeg; see the melange install step), which
-#     keeps the whole ffmpeg runtime tree out of the image's CVE surface.
+#     shipped (guacd never execs ffmpeg; see the melange install step), so
+#     the ffmpeg payload it dragged in is out of the image — only the minimal
+#     libavutil+libswscale pair that freerdp-3-libs itself requires remains.
 #   - tini added as PID 1 (house pattern, every image here): guacd forks one
 #     worker per connection; tini reaps strays and forwards signals. apko has
 #     no per-entrypoint args, so the whole [tini -- entrypoint] invocation is

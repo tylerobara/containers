@@ -25,10 +25,12 @@ docker run --rm --entrypoint /bin/sh "$IMAGE" -ec '
   test -x /usr/bin/docker-entrypoint.sh || exit 5
   for f in rdp ssh telnet vnc kubernetes; do test -e /usr/lib/libguac-client-$f.so || exit 6; done
   find /usr/share/fonts \( -name "*.ttf" -o -name "*.otf" -o -name "*.ttc" \) | grep -q . || exit 7
-  # ffmpeg left the image together with guacenc (see the melange install
-  # step); its runtime libraries must stay out — this is the CVE-surface
-  # regression guard, so reappearing libav*/libsw* fail the smoke test.
-  test -z "$(ls /usr/lib/libav* /usr/lib/libsw* 2>/dev/null)" || exit 8' \
+  # guacenc is gone together with the ffmpeg-8.1 payload (see the melange
+  # install step). freerdp-3-libs legitimately keeps a minimal ffmpeg pair
+  # (libavutil + libswscale, its graphics pipeline) — everything else that
+  # only guacenc linked must never appear: regression guard for the dropped
+  # CVE block, since apk auto-deps are the only thing keeping ffmpeg out.
+  test -z "$(ls /usr/lib/libavcodec* /usr/lib/libavformat* /usr/lib/libavdevice* /usr/lib/libavfilter* /usr/lib/libswresample* 2>/dev/null)" || exit 8' \
   || fail "guacd accounts, protocol plugins, tools or fonts missing (or ffmpeg crept back in)"
 
 echo "Testing guacd reports v$VERSION (no version drift; guacenc/ffmpeg excluded by design)..."
