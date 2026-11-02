@@ -114,6 +114,16 @@ pipeline:
         --infodir=/usr/share/info \
         --disable-guaclog \
         CPPFLAGS=-Wno-error=deprecated-declarations
+      # glibc >= 2.43's _GNU_SOURCE block in features.h #undef/#defines
+      # _XOPEN_SOURCE 800 before config.h's bare "#define _XOPEN_SOURCE 700"
+      # (from AC_DEFINE) is seen, making it a conflicting-redefinition
+      # warning that upstream's per-target -Werror turns fatal (musl builds,
+      # e.g. upstream's Alpine container, never hit it). Match glibc's own
+      # 800 — the value feature-test selection already used — keeping every
+      # other -Werror escalation intact. Guarded so a configure.ac that stops
+      # emitting the define fails loudly here instead of silently.
+      sed -i 's/^#define _XOPEN_SOURCE 700$/#define _XOPEN_SOURCE 800/' config.h
+      grep -q '^#define _XOPEN_SOURCE 800$' config.h
       make -j"$(nproc)"
 
   - working-directory: /home/build/guacamole-server-${{package.version}}
