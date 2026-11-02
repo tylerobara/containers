@@ -19,7 +19,7 @@
 
 package:
   name: web-check
-  version: 2.3.11
+  version: 2.3.12
   epoch: 102
   description: "Web-Check — all-in-one OSINT tool for analysing any website"
   copyright:
@@ -29,7 +29,7 @@ package:
 
 vars:
   # SHA256 of https://github.com/lissy93/web-check/archive/refs/tags/<version>.tar.gz (bump with version)
-  sha256: 46060ec1db95feffedd72fee50373bcef563962e86da38e70f0d86804768077a
+  sha256: ec69d8b1f27bb8fd6b9e9fa17f66ee5be5a1c2ab617b2f8004eb4359f183fef5
 
 environment:
   contents:
