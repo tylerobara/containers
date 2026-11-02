@@ -1,0 +1,76 @@
+# Apache Guacamole guacd image, assembled by apko (no Dockerfile). The guacd
+# daemon, libguac and the protocol plugins are built from upstream source by
+# melange (see ../melange/guacamole-server.yaml); everything else is Wolfi.
+#
+# Reference contract: the official guacamole/guacd container (apache/
+# guacamole-server's own Dockerfile): docker-entrypoint.sh supervising
+# `guacd -f -b 0.0.0.0 -L <LOG_LEVEL>`, port 4822, guacd user uid/gid 1000,
+# CJK + dejavu/liberation fonts for server-side text rendering, netcat for the
+# healthcheck. Deliberate differences from upstream, on purpose:
+#   - Wolfi busybox + ca-certificates base instead of Alpine + /opt/guacamole
+#     relocation; the protocol libraries (FreeRDP 3, libvncclient, libtelnet,
+#     libwebsockets, ffmpeg, pulseaudio) are Wolfi system packages instead of
+#     upstream's from-source /opt/guacamole stack — the approach Wolfi's own
+#     guacamole-server package takes.
+#   - tini added as PID 1 (house pattern, every image here): guacd forks one
+#     worker per connection; tini reaps strays and forwards signals. apko has
+#     no per-entrypoint args, so the whole [tini -- entrypoint] invocation is
+#     the entrypoint field and the default cmd is empty — extra `docker run`
+#     args replace the cmd and land on the entrypoint, which appends them to
+#     guacd verbatim, exactly like upstream's [entrypoint.sh] + no CMD.
+#   - run-as pinned to guacd (1000), like upstream's `USER guacd`: guacd
+#     listens on 4822 (>1024), so no privilege-drop dance is needed. Mounts
+#     (e.g. the /config/drive file-transfer volumes the Apache Helm chart
+#     mounts) must be writable by uid 1000.
+#   - terminus-font has no Wolfi counterpart and the full font-noto family is
+#     skipped: ttf-dejavu + font-liberation + font-noto-cjk cover upstream's
+#     Latin + CJK server-side rendering set.
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    # busybox: shell for the entrypoint; ca-certificates + tini: the runtime
+    # set; netcat-openbsd: upstream's own HEALTHCHECK tool (nc -z 127.0.0.1
+    # 4822) and our smoke test's port probe.
+    - busybox
+    - ca-certificates
+    - tini
+    - netcat-openbsd
+    # Server-side text rendering fonts (upstream ships dejavu + liberation +
+    # noto-cjk + terminus; see header for the terminus/noto deviation).
+    - font-liberation
+    - font-noto-cjk
+    - ttf-dejavu
+    # Built by melange; supplied via --repository-append at build time.
+    # Floating name (valkey-style): the workflow's lock guard fails loudly if
+    # Wolfi's same-named guacamole-server package ever outranks our epoch-100
+    # build, so a Wolfi takeover can never ship silently — the update-versions
+    # bot bump restores the lead, and no =pin line needs syncing here.
+    - guacamole-server
+
+accounts:
+  groups:
+    - groupname: guacd
+      gid: 1000
+  users:
+    - username: guacd
+      uid: 1000
+      gid: 1000
+      shell: /sbin/nologin
+  # Like upstream's `USER guacd` (uid/gid 1000): guacd binds 4822 unprivileged,
+  # so the container simply starts as guacd — no root start + su-exec here.
+  run-as: 1000
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+  # Upstream's ENV LC_ALL=C.UTF-8 (terminal/tty text rendering).
+  LC_ALL: C.UTF-8
+
+# Whole invocation in the entrypoint (apko whitespace-splits the field); the
+# default cmd is empty like upstream, so an arg override lands on
+# docker-entrypoint.sh and is appended to the guacd command line verbatim.
+entrypoint:
+  command: /sbin/tini -- /usr/bin/docker-entrypoint.sh

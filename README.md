@@ -33,6 +33,7 @@ base. **No Dockerfiles anywhere.**
 | External Secrets Operator (controller/webhook/certcontroller) | `ghcr.io/tylerobara/containers/external-secrets` | [`images/external-secrets/`](images/external-secrets/) |
 | Cloudflare Tunnel (cloudflared) | `ghcr.io/tylerobara/containers/cloudflared` | [`images/cloudflared/`](images/cloudflared/) |
 | Keycloak (IAM/SSO) | `ghcr.io/tylerobara/containers/keycloak` | [`images/keycloak/`](images/keycloak/) |
+| Apache Guacamole (guacd remote-desktop gateway) | `ghcr.io/tylerobara/containers/guacamole-server` | [`images/guacamole-server/`](images/guacamole-server/) |
 
 Catalog + grype scan results: <https://tylerobara.github.io/containers/> — an
 Astro site (`site/`) with a page per image (specs, tags, advisories, cosign
@@ -41,10 +42,10 @@ build/scan data at `data/index.json`. See [`site/README.md`](site/README.md).
 
 ## CI
 
-One workflow per image family — `alpine-k8s.yml`, `bitnami-postgres.yml`, `cert-manager.yml`, `cilium.yml`, `cloudflared.yml`, `cloudnative-pg-operator.yml`, `dokuwiki.yml`, `dozzle.yml`, `external-secrets.yml`, `frr.yml`, `gatus.yml`, `grafana-image-renderer.yml`, `homepage.yml`, `k8s-sidecar.yml`, `keycloak.yml`, `kubernetes-reflector.yml`, `local-path-provisioner.yml`, `metallb.yml`, `openbao.yml`, `os-shell.yml`, `pocket-id.yml`, `postgres.yml`, `traefik.yml`, `flux.yml`, `valkey.yml`, `web-check.yml` — so a change to one image can never rebuild or cancel another.
+One workflow per image family — `alpine-k8s.yml`, `bitnami-postgres.yml`, `cert-manager.yml`, `cilium.yml`, `cloudflared.yml`, `cloudnative-pg-operator.yml`, `dokuwiki.yml`, `dozzle.yml`, `external-secrets.yml`, `frr.yml`, `gatus.yml`, `grafana-image-renderer.yml`, `guacamole-server.yml`, `homepage.yml`, `k8s-sidecar.yml`, `keycloak.yml`, `kubernetes-reflector.yml`, `local-path-provisioner.yml`, `metallb.yml`, `openbao.yml`, `os-shell.yml`, `pocket-id.yml`, `postgres.yml`, `traefik.yml`, `flux.yml`, `valkey.yml`, `web-check.yml` — so a change to one image can never rebuild or cancel another.
 Routing is the native `on.push.paths` filter: a bump PR/push rebuilds **only
 the image whose directory moved**; each workflow's daily schedule rebuilds just
-its own image (fresh Wolfi CVE patches), staggered 06:00/06:05/06:10/06:15/06:20/06:25/06:30/06:35/06:40/06:45/06:50/06:55/07:00/07:05/07:10/07:15/07:20/07:25/07:35/07:40/07:45/07:50/07:55/08:00 UTC.
+its own image (fresh Wolfi CVE patches), staggered 06:00/06:05/06:10/06:15/06:20/06:25/06:30/06:35/06:40/06:45/06:50/06:55/07:00/07:05/07:10/07:15/07:20/07:25/07:35/07:40/07:45/07:50/07:55/08:00/08:05 UTC.
 
 Postgres additionally keeps a `detect-changes` job that turns the diff into its
 per-major matrix. Publish → smoke test → grype → cosign keyless sign **only
@@ -78,7 +79,10 @@ the tag list for that shape and bumps the sha256-pinned release DIST asset
 container builds from, rather than a source archive),
 and cloudflared (date-style `YYYY.M.N` tags with no v prefix,
 e.g. 2026.10.5 — the row still filters the tag list with a strict date-shape
-grep so non-version tags can never hijack the bump) — cilium-envoy follows the pin in
+grep so non-version tags can never hijack the bump),
+and guacamole-server (GitHub TAGS, not releases — upstream publishes no GitHub
+releases at all, so the row takes the highest strict `X.Y.Z` tag, which drops
+the `1.6.0-RC*` candidates) — cilium-envoy follows the pin in
 cilium's own `images/cilium/Dockerfile`, cert-manager's three configs share
 one tarball so they bump together in a single PR, and so do metallb's
 controller + speaker (frr-k8s is its own upstream repo with its own version
@@ -91,7 +95,8 @@ config. Review the PR, then:
    `metallb.yml` / `k8s-sidecar.yml` / `local-path-provisioner.yml` /
    `gatus.yml` / `homepage.yml` / `dozzle.yml` / `kubernetes-reflector.yml` /
    `alpine-k8s.yml` / `frr.yml` / `traefik.yml` / `pocket-id.yml` /
-   `valkey.yml` / `external-secrets.yml` / `cloudflared.yml`) manually
+   `valkey.yml` / `external-secrets.yml` / `cloudflared.yml` /
+   `guacamole-server.yml`) manually
    with `ref = <bump branch>` and **validate_only** checked — builds + scans
    the branch without publishing anything. (Needed because
    GITHUB_TOKEN-authored PRs don't run checks automatically; a GitHub App
