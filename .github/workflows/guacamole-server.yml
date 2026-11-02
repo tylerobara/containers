@@ -107,6 +107,20 @@ jobs:
             --out-dir ./packages \
             --runner docker
 
+      # Patched libssh2 (epoch-100): Wolfi's 1.11.1-r11 lacks the fixes for
+      # six High CVEs and no upstream release newer than 1.11.1 exists, so we
+      # ship the cherry-picked build and let it win resolution from Wolfi
+      # (see melange/libssh2.yaml + the lock guard in the build job below).
+      - name: Build libssh2 (${{ matrix.arch }})
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          ~/go/bin/melange build images/guacamole-server/melange/libssh2.yaml \
+            --arch "$ARCH" \
+            --signing-key melange.rsa \
+            --out-dir ./packages \
+            --runner docker
+
       - uses: actions/upload-artifact@v7
         with:
           name: packages-guacamole-server-${{ matrix.arch }}
@@ -156,6 +170,16 @@ jobs:
           # split ships at 1.6.0-rN)
           if [ "$RESOLVED" != "${VER}-r${EPOCH}" ]; then
             echo "apko resolved guacamole-server as '$RESOLVED', expected '${VER}-r${EPOCH}'"; exit 1
+          fi
+          # Same guard for the patched libssh2: if our epoch-100 build ever
+          # loses resolution to Wolfi's unpatched 1.11.1-r11, the grype ignore
+          # list in images/guacamole-server/grype.yaml would be hiding real
+          # findings — fail the build instead.
+          LVER=$(awk '/^  version:/{print $2; exit}' images/guacamole-server/melange/libssh2.yaml)
+          LEPOCH=$(awk '/^  epoch:/{print $2; exit}' images/guacamole-server/melange/libssh2.yaml)
+          RESOLVED=$(jq -r '.contents.packages[] | select(.name=="libssh2") | .version' guacamole-server.lock.json | head -1)
+          if [ "$RESOLVED" != "${LVER}-r${LEPOCH}" ]; then
+            echo "apko resolved libssh2 as '$RESOLVED', expected '${LVER}-r${LEPOCH}'"; exit 1
           fi
 
       - name: Log in to ghcr
@@ -213,7 +237,9 @@ jobs:
             -v "$PWD/scans:/out" \
             -v "$HOME/.docker:/root/.docker:ro" \
             -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD/images/guacamole-server/grype.yaml:/opt/grype.yaml:ro" \
             ghcr.io/anchore/grype:latest "$GRYPE_SRC" \
+              --config /opt/grype.yaml \
               --output json --file /out/guacamole-server.json || true
           # Same signing gate as every other image here: any Low+ finding blocks.
           LOWPLUS=$(jq '[.matches[] | select(.vulnerability.severity

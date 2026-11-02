@@ -1,0 +1,40 @@
+# Grype config for the guacamole-server scan gate (workflow scan step).
+#
+# These six findings are nvd:cpe matches (NVD "fixed version: unknown",
+# constraint <= 1.11.1) against the apk name/version pair, so they fire even
+# on a build where the vulnerable code is provably patched — Wolfi's secdb
+# has no entry for libssh2 and cannot, since upstream shipped no release past
+# 1.11.1. The image ships OUR patched epoch-100 libssh2 (all six fixes
+# applied: images/guacamole-server/melange/libssh2.yaml), and the workflow's
+# lock guard hard-fails if Wolfi's unpatched 1.11.1-r11 is ever resolved
+# instead — so these ignores hold only while the patched build is what ships.
+#
+# If the libssh2 version/epoch in melange/libssh2.yaml ever changes (e.g. a
+# real 1.11.2 release lands), revisit this file: the ignores may become
+# unnecessary — the scan gate should catch that on its own via the guard.
+matching:
+  ignore:
+    - vulnerability: CVE-2026-58050
+      package:
+        name: libssh2
+        type: apk
+    - vulnerability: CVE-2026-58051
+      package:
+        name: libssh2
+        type: apk
+    - vulnerability: CVE-2026-66032
+      package:
+        name: libssh2
+        type: apk
+    - vulnerability: CVE-2026-66033
+      package:
+        name: libssh2
+        type: apk
+    - vulnerability: CVE-2026-66034
+      package:
+        name: libssh2
+        type: apk
+    - vulnerability: CVE-2026-66035
+      package:
+        name: libssh2
+        type: apk

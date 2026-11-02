@@ -1,0 +1,145 @@
+# libssh2 — our own build of the exact Wolfi package, epoch bumped to 100 so
+# it wins resolution over Wolfi's 1.11.1-r11 (which the image would otherwise
+# pull in as the guacd SSH plugin's runtime library).
+#
+# WHY THIS EXISTS: Wolfi's r11 carries fixes for CVE-2026-7598/55199/55200 and
+# CVE-2025-15661 but NOT the six High CVEs below — libssh2 has published no
+# release past 1.11.1, so there is no bump that fixes them (Debian and
+# OE-core patched 1.11.1 the same way). The grype gate in
+# .github/workflows/guacamole-server.yml counts these per name@version
+# (nvd:cpe match on <= 1.11.1), so the code fix here plus the paired
+# images/guacamole-server/grype.yaml ignores and the workflow's libssh2 lock
+# guard together form the remediation: the ignore list is only honest while
+# the guard proves our patched build is what shipped.
+#
+#   CVE-2026-58050  publickey list size overflow   cherry-pick 3449752
+#   CVE-2026-58051  publickey uninitialized entry cherry-pick a9758da
+#   CVE-2026-66032  sftp dangling pointer         patch CVE-2026-66032.patch (upstream 5e47761)
+#   CVE-2026-66033  openssl AES-GCM OOB           cherry-pick a2ed82d
+#   CVE-2026-66034  publickey OOB read            cherry-pick a13bb6c
+#   CVE-2026-66035  transport ETM heap overflow   patch CVE-2026-66035.patch (upstream 42e33d8)
+#
+# The two patch files are the OE-core backports of upstream commits whose
+# master versions conflict against the 1.11.1 tag (post-tag symbol renames);
+# the cherry-picks were verified to apply cleanly. The two patches Wolfi
+# itself carries (fix-CVE-2026-55200, CVE-2025-15661) are kept so this build
+# is a strict superset of r11. Everything else mirrors Wolfi's libssh2.yaml
+# (git-checkout of the tag + its expected-commit, autoreconf, autoconf steps).
+#
+# UPDATE POLICY: intentionally NOT wired into the update-versions bot. When
+# upstream finally ships 1.11.2+, bump version + expected-commit by hand and
+# drop the cherry-picks/patches folded into the release — a mechanical bump
+# would either conflict or ship fixes twice.
+
+package:
+  name: libssh2
+  version: 1.11.1
+  epoch: 100
+  description: "A library implementing the SSH2 protocol as defined by Internet Drafts"
+  copyright:
+    - license: BSD-3-Clause
+  dependencies:
+    provider-priority: 100
+
+vars:
+  openssl-version: "4.0"
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - autoconf
+      - build-base
+      - busybox
+      - ca-certificates-bundle
+      - glibc-2.44-dev
+      - libtool
+      - openssl-hardened-${{vars.openssl-version}}-dev
+      - wolfi-baselayout
+
+pipeline:
+  - uses: git-checkout
+    with:
+      repository: https://github.com/libssh2/libssh2.git
+      tag: libssh2-${{package.version}}
+      expected-commit: a312b43325e3383c865a87bb1d26cb52e3292641
+      cherry-picks: |
+        master/256d04b60d80bf1190e96b0ad1e91b2174d744b1: [CVE-2026-7598]
+        master/17626857d20b3c9a1addfa45979dadcee1cd84a4: [CVE-2026-55199]
+        master/a2ed82d40964bbc0d64cd717aa0a5a892117d2e6: [CVE-2026-66033]
+        master/a13bb6c773f0d55ad1628cede57e99803cd898d9: [CVE-2026-66034]
+        master/34497525929b9a47f03dfb81887ac896202b7e12: [CVE-2026-58050]
+        master/a9758da45a52bc8c630ec9493804d0c6ea30b24a: [CVE-2026-58051]
+
+  # fix-CVE-2026-55200 + CVE-2025-15661 are Wolfi's own (see the header);
+  # CVE-2026-66032/66035 are the OE-core 1.11.1 backports linked above.
+  - uses: patch
+    with:
+      patches: fix-CVE-2026-55200.patch CVE-2025-15661.patch CVE-2026-66032.patch CVE-2026-66035.patch
+
+  # Proves every CVE fix from the header landed before building: a drifted
+  # patch/cherry-pick could otherwise ship an UNPATCHED library while the
+  # grype ignores hide it (the workflow's libssh2 lock guard pairs with those
+  # ignores, so this is the only independent check of the code). Markers =
+  # lines the fixes add; each verified absent on the bare tag, present after
+  # the full cherry-pick + patch sequence.
+  - runs: |
+      grep -q 'EVP_CTRL_GCM_SET_TAG' src/openssl.c || { echo "CVE-2026-66033 (AES-GCM) fix missing"; exit 1; }
+      grep -q 'ListFetch data too short' src/publickey.c || { echo "CVE-2026-66034 (publickey OOB) fix missing"; exit 1; }
+      grep -q 'num_attrs > 1024' src/publickey.c || { echo "CVE-2026-58050 (list cap) fix missing"; exit 1; }
+      grep -q 'memset(&list\[keys\], 0' src/publickey.c || { echo "CVE-2026-58051 (init entry) fix missing"; exit 1; }
+      grep -q 'total_num < mac_len + 4 + (size_t)blocksize' src/transport.c || { echo "CVE-2026-66035 (ETM) fix missing"; exit 1; }
+      grep -q '^                data = NULL;$' src/sftp.c || { echo "CVE-2026-66032 (dangling data) fix missing"; exit 1; }
+      grep -q 'username_len > UINT32_MAX - 27' src/userauth.c || { echo "CVE-2026-7598 (username_len) fix missing"; exit 1; }
+      grep -q 'get_string(&buf, &name, &name_len)' src/packet.c || { echo "CVE-2026-55199 (EXT_INFO) fix missing"; exit 1; }
+
+  # The tag checkout carries no generated configure (same as Wolfi's build).
+  - runs: autoreconf -vfi
+
+  - uses: autoconf/configure
+
+  - uses: autoconf/make
+
+  - uses: autoconf/make-install
+
+  - uses: strip
+
+subpackages:
+  - name: libssh2-dev
+    description: "headers for libssh2"
+    dependencies:
+      runtime:
+        - openssl-${{vars.openssl-version}}-dev
+    pipeline:
+      - uses: split/dev
+
+test:
+  environment:
+    contents:
+      packages:
+        - build-base
+        - libssh2-dev
+        - pkgconf
+  pipeline:
+    # The upstream test suite needs a live SSH server; this compile-and-run
+    # link check is what Wolfi's own config runs (adapted to plain runs for
+    # melange v0.63's pipeline set).
+    - runs: |
+        set -eu
+        cat > test.c <<'EOF'
+        #include <libssh2.h>
+        #include <stdio.h>
+        int main(void) {
+            if (libssh2_init(0) != 0) {
+                fprintf(stderr, "libssh2_init failed\n");
+                return 1;
+            }
+            libssh2_exit();
+            return 0;
+        }
+        EOF
+        gcc $(pkg-config --cflags libssh2) test.c -o test $(pkg-config --libs libssh2)
+        ./test

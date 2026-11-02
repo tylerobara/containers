@@ -17,7 +17,11 @@ echo "Testing guacd(1000) run-as + accounts + fonts + shipped tools..."
 user=$(docker inspect --format '{{.Config.User}}' "$IMAGE")
 [ "$user" = "guacd" ] || [ "$user" = "1000" ] \
   || fail "run-as is '$user', expected guacd/1000"
-docker run --rm --entrypoint /bin/sh "$IMAGE" -ec '
+# The patched libssh2 must be OUR build, not Wolfi's unpatched r11 (the
+# workflow lock guard proves apko resolved ours; this proves the image
+# really carries it). Expected pkgver derived from the melange config.
+LIBSSH2_WANT="$(awk '/^  version:/{v=$2}/^  epoch:/{e=$2}END{print v"-r"e}' images/guacamole-server/melange/libssh2.yaml)"
+docker run --rm --entrypoint /bin/sh -e LIBSSH2_WANT="$LIBSSH2_WANT" "$IMAGE" -ec '
   grep -q "^guacd:[^:]*:1000:1000:" /etc/passwd || exit 1
   grep -q "^guacd:[^:]*:1000:" /etc/group || exit 2
   test -x /usr/bin/guacd || exit 3
@@ -25,13 +29,14 @@ docker run --rm --entrypoint /bin/sh "$IMAGE" -ec '
   test -x /usr/bin/docker-entrypoint.sh || exit 5
   for f in rdp ssh telnet vnc kubernetes; do test -e /usr/lib/libguac-client-$f.so || exit 6; done
   find /usr/share/fonts \( -name "*.ttf" -o -name "*.otf" -o -name "*.ttc" \) | grep -q . || exit 7
+  [ "$(apk info -e libssh2 2>/dev/null)" = "$LIBSSH2_WANT" ] || exit 9
   # guacenc is gone together with the ffmpeg-8.1 payload (see the melange
   # install step). freerdp-3-libs legitimately keeps a minimal ffmpeg pair
   # (libavutil + libswscale, its graphics pipeline) — everything else that
   # only guacenc linked must never appear: regression guard for the dropped
   # CVE block, since apk auto-deps are the only thing keeping ffmpeg out.
   test -z "$(ls /usr/lib/libavcodec* /usr/lib/libavformat* /usr/lib/libavdevice* /usr/lib/libavfilter* /usr/lib/libswresample* 2>/dev/null)" || exit 8' \
-  || fail "guacd accounts, protocol plugins, tools or fonts missing (or ffmpeg crept back in)"
+  || fail "guacd accounts, protocol plugins, tools or fonts missing (ffmpeg crept back in, or libssh2 is not our patched build)"
 
 echo "Testing guacd reports v$VERSION (no version drift; guacenc/ffmpeg excluded by design)..."
 # -v, not --version: 1.6.0's getopt string (l:b:p:L:C:K:fv) has no long options.
