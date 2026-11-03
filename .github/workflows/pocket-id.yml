@@ -231,9 +231,11 @@ jobs:
           mkdir -p scans
           docker run --rm --user 0:0 \
             -v "$PWD/scans:/out" \
+            -v "$PWD/images/pocket-id/grype-ignores.yaml:/cfg/grype.yaml:ro" \
             -v "$HOME/.docker:/root/.docker:ro" \
             -v /var/run/docker.sock:/var/run/docker.sock \
             ghcr.io/anchore/grype:latest "$GRYPE_SRC" \
+              --config /cfg/grype.yaml \
               --output json --file "/out/$IMG.json" || true
           # Same signing gate as every other image here: any Low+ finding blocks.
           LOWPLUS=$(jq '[.matches[] | select(.vulnerability.severity
