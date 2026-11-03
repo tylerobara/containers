@@ -30,6 +30,7 @@ base. **No Dockerfiles anywhere.**
 | Pocket ID (pocket-id, pocket-id-operator) | `ghcr.io/tylerobara/containers/pocket-id` (+ `-operator`) | [`images/pocket-id/`](images/pocket-id/) |
 | Flux (helm, kustomize, notification, source controllers) | `ghcr.io/tylerobara/containers/helm-controller` (+ `kustomize-controller`, `notification-controller`, `source-controller`) | [`images/flux/`](images/flux/) |
 | Valkey (Redis-compatible key-value store) | `ghcr.io/tylerobara/containers/valkey` | [`images/valkey/`](images/valkey/) |
+| Valkey operator (ValkeyCluster/ValkeyNode) | `ghcr.io/tylerobara/containers/valkey-operator` | [`images/valkey-operator/`](images/valkey-operator/) |
 | External Secrets Operator (controller/webhook/certcontroller) | `ghcr.io/tylerobara/containers/external-secrets` | [`images/external-secrets/`](images/external-secrets/) |
 | Cloudflare Tunnel (cloudflared) | `ghcr.io/tylerobara/containers/cloudflared` | [`images/cloudflared/`](images/cloudflared/) |
 | Keycloak (IAM/SSO) | `ghcr.io/tylerobara/containers/keycloak` | [`images/keycloak/`](images/keycloak/) |
@@ -42,7 +43,7 @@ build/scan data at `data/index.json`. See [`site/README.md`](site/README.md).
 
 ## CI
 
-One workflow per image family — `alpine-k8s.yml`, `bitnami-postgres.yml`, `cert-manager.yml`, `cilium.yml`, `cloudflared.yml`, `cloudnative-pg-operator.yml`, `dokuwiki.yml`, `dozzle.yml`, `external-secrets.yml`, `frr.yml`, `gatus.yml`, `grafana-image-renderer.yml`, `guacamole-server.yml`, `homepage.yml`, `k8s-sidecar.yml`, `keycloak.yml`, `kubernetes-reflector.yml`, `local-path-provisioner.yml`, `metallb.yml`, `openbao.yml`, `os-shell.yml`, `pocket-id.yml`, `postgres.yml`, `traefik.yml`, `flux.yml`, `valkey.yml`, `web-check.yml` — so a change to one image can never rebuild or cancel another.
+One workflow per image family — `alpine-k8s.yml`, `bitnami-postgres.yml`, `cert-manager.yml`, `cilium.yml`, `cloudflared.yml`, `cloudnative-pg-operator.yml`, `dokuwiki.yml`, `dozzle.yml`, `external-secrets.yml`, `frr.yml`, `gatus.yml`, `grafana-image-renderer.yml`, `guacamole-server.yml`, `homepage.yml`, `k8s-sidecar.yml`, `keycloak.yml`, `kubernetes-reflector.yml`, `local-path-provisioner.yml`, `metallb.yml`, `openbao.yml`, `os-shell.yml`, `pocket-id.yml`, `postgres.yml`, `traefik.yml`, `flux.yml`, `valkey.yml`, `valkey-operator.yml`, `web-check.yml` — so a change to one image can never rebuild or cancel another.
 Routing is the native `on.push.paths` filter: a bump PR/push rebuilds **only
 the image whose directory moved**; each workflow's daily schedule rebuilds just
 its own image (fresh Wolfi CVE patches), staggered 06:00/06:05/06:10/06:15/06:20/06:25/06:30/06:35/06:40/06:45/06:50/06:55/07:00/07:05/07:10/07:15/07:20/07:25/07:35/07:40/07:45/07:50/07:55/08:00/08:05 UTC.
