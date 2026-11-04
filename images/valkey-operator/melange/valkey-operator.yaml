@@ -1,0 +1,83 @@
+# Melange build for the Valkey operator (github.com/valkey-io/valkey-operator)
+# — the pocket-id-operator pattern: a standard kubebuilder / controller-runtime
+# manager built from the release tarball with upstream's own build contract
+# (its Dockerfile builder stage): CGO_ENABLED=0 go build -o manager
+# cmd/main.go, VERSION_LDFLAGS stamping the prometheus/common/version vars
+# (its Makefile derives them from the image tag). Built as the ./cmd package
+# dir rather than upstream's cmd/main.go file argument so Go records the
+# module in the binary's build info for grype (see pocket-id-operator's
+# comment). Separate upstream repo + version line from valkey itself, so this
+# config bumps independently (the update-versions bot gives it its own row).
+
+package:
+  name: valkey-operator
+  version: 0.8.0
+  epoch: 100
+  description: "Valkey Kubernetes operator built from upstream source"
+  copyright:
+    - license: Apache-2.0
+  dependencies:
+    provider-priority: 100
+
+vars:
+  # SHA256 of the GitHub release tarball
+  sha256: 3523c3f7210cdb172e4b6558d99caa1d8497588b995661b2fa2e4e9e863cc3de
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      # go.mod wants go 1.26.0 (.go-version 1.26.2); Wolfi go-1.26 covers it.
+      - go-1.26
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/valkey-io/valkey-operator/archive/refs/tags/v${{package.version}}.tar.gz" \
+        -o /home/build/vko.tar.gz
+      echo "${{vars.sha256}}  /home/build/vko.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf vko.tar.gz && rm vko.tar.gz
+
+  - working-directory: /home/build/valkey-operator-${{package.version}}
+    runs: |
+      # No vendor/ in the tarball, so modules resolve from the network (same
+      # as the pocket-id-operator / metallb legs). Upstream's -a (force
+      # rebuild) is a Docker layer-cache artifact, meaningless on a cold
+      # melange build, so it is dropped. Only the Version ldflag is stamped:
+      # Revision/Branch/BuildDate come from git, which the release tarball
+      # has no trace of; prometheus's build-info collector omits the empty
+      # ones, so valkey_operator_build_info still reports the real version.
+      export CGO_ENABLED=0 GOTOOLCHAIN=local
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      go build -trimpath -buildvcs=false \
+        -ldflags "-s -w \
+          -X github.com/prometheus/common/version.Version=${{package.version}}" \
+        -o manager ./cmd
+      install -D -m 0755 manager "${{targets.destdir}}/manager"
+
+  - runs: |
+      # No --version flag upstream, so assert identity two ways: the flag
+      # surface is this repo's main.go (metrics/probe/webhook flags + the
+      # controller-runtime zap flags), and the manager gets past flag parsing
+      # to ctrl.GetConfigOrDie before dying on the missing in-cluster config.
+      out=$("${{targets.destdir}}/manager" --help 2>&1 || true)
+      echo "$out" | grep -q "health-probe-bind-address" \
+        || { echo "/manager does not expose the expected flag surface"; exit 1; }
+      out=$(timeout 60 "${{targets.destdir}}/manager" --metrics-bind-address=0 2>&1 || true)
+      echo "$out"
+      echo "$out" | grep -qiE "in-cluster|no configuration has been provided|unable to start manager" \
+        || { echo "/manager never reached its API-server step"; exit 1; }
+      # grype reads Go deps from the embedded build info — assert the build
+      # really is this module (and not a stale/foreign binary).
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      go version -m "${{targets.destdir}}/manager" \
+        | awk -F'\t' '$2=="mod" && $3=="github.com/valkey-io/valkey-operator"{f=1} END{exit !f}' \
+        || { echo "binary build info lacks the valkey-operator module"; exit 1; }

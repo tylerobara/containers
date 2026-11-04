@@ -1,0 +1,40 @@
+# Valkey operator image, assembled by apko (no Dockerfile).
+# The manager binary itself is built from upstream source by melange
+# (see ../melange/valkey-operator.yaml); everything else is Wolfi.
+#
+# Reference: the Distroless-based final stage of the upstream Dockerfile
+# (github.com/valkey-io/valkey-operator/blob/main/Dockerfile): static
+# /manager, USER 65532, ENTRYPOINT ["/manager"]. We keep the same entrypoint
+# and uid so the helm chart / kustomize manifests are drop-in compatible, on
+# a busybox+ca-certs Wolfi base instead.
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    # Debug shell only — the operator is a static Go binary and shells out
+    # to nothing. ca-certificates for the k8s API + webhook TLS.
+    - busybox
+    - ca-certificates
+    # Built by melange; supplied via --repository-append at build time.
+    - valkey-operator
+
+accounts:
+  groups:
+    - groupname: nonroot
+      gid: 65532
+  users:
+    - username: nonroot
+      uid: 65532
+      gid: 65532
+      shell: /bin/false
+  # Upstream runs as the distroless nonroot user.
+  run-as: 65532
+
+environment:
+  PATH: /usr/sbin:/sbin:/usr/bin:/bin
+
+entrypoint:
+  command: /manager

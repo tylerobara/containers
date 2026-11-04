@@ -421,6 +421,18 @@
       "description": "Valkey, the Redis-compatible key-value store, built from the upstream release tarball by melange (bundled jemalloc + Lua, TLS on) and assembled by apko on Wolfi. Drop-in for the official valkey/valkey container: tini + docker-entrypoint.sh, valkey user 999, /data, port 6379."
     },
     {
+      "name": "valkey-operator",
+      "display_name": "Valkey operator",
+      "dir": "valkey-operator",
+      "apko": "valkey-operator.yaml",
+      "workflow": "valkey-operator.yml",
+      "category": "Kubernetes & Networking",
+      "primary_package": "valkey-operator",
+      "upstream_url": "https://github.com/valkey-io/valkey-operator",
+      "summary": "Valkey operator (ValkeyCluster/ValkeyNode), built from upstream source.",
+      "description": "The Valkey Kubernetes operator that reconciles ValkeyCluster/ValkeyNode CRDs into clusters, compiled from the upstream release tarball by melange (static kubebuilder manager, prometheus version ldflag stamped) and assembled by apko on Wolfi. Same /manager entrypoint and nonroot uid 65532 as upstream's distroless image, so the helm chart is drop-in."
+    },
+    {
       "name": "cloudflared",
       "display_name": "Cloudflare Tunnel",
       "dir": "cloudflared",
