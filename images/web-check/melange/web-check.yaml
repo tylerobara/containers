@@ -20,7 +20,7 @@
 package:
   name: web-check
   version: 2.3.12
-  epoch: 102
+  epoch: 103
   description: "Web-Check — all-in-one OSINT tool for analysing any website"
   copyright:
     - license: MIT
@@ -140,6 +140,23 @@ pipeline:
         "$D/app/node_modules/chromium/node_modules/extract-zip" \
         "$D/app/node_modules/basic-ftp"
 
+      # r103 (2.3.12 pulled newly-flagged transitives into the SAME class of
+      # dead browser-install chains — single consumer each, all browser-side
+      # per upstream yarn.lock): puppeteer-core@19.7.5 -> rimraf@4.4.0 ->
+      # glob@9.3.5 -> minimatch@8.0.7, and chromium@3.0.3 -> rimraf@2.7.1 ->
+      # glob@7.2.3 -> minimatch@3.1.5. Prune the flagged copies by exact
+      # version (a version bump that moves them out of the advisory ranges
+      # makes this a harmless no-op; the grype gate stays the real guard).
+      for pv in "rimraf 4.4.0" "rimraf 2.7.1" "glob 9.3.5" \
+                "minimatch 8.0.7" "minimatch 3.1.5"; do
+        set -- $pv
+        find "$D/app/node_modules" -type d -name "$1" | while read -r d; do
+          if grep -q "\"version\": \"$2\"" "$d/package.json" 2>/dev/null; then
+            echo "pruning dead $1@$2: $d"; rm -rf "$d"
+          fi
+        done
+      done
+
       # dumb-init PID 1 shebang + fixed CMD (house pattern; upstream uses
       # tini — same job). server.js reads $PORT (default 3000) and binds all
       # interfaces, so no HOSTNAME probe is needed (unlike homepage).
@@ -196,6 +213,16 @@ pipeline:
           || { echo "$zd not at patched 4.6.6"; exit 1; }
       done
       [ -d "$D/app/node_modules/zod" ] || { echo "top-level zod missing"; exit 1; }
+      # r103: no flagged copy of the pruned browser-chain packages may
+      # survive; unflagged glob@7.2.3/13 + minimatch@10 copies legitimately
+      # stay (their consumers are live), so assert on exact flagged versions.
+      for d in $(find "$D/app/node_modules" -type d \( -name glob -o -name minimatch -o -name rimraf \)); do
+        v=$(grep -m1 '"version"' "$d/package.json" 2>/dev/null)
+        case "$d:$v" in
+          *glob*'"9.3.5"'*|*minimatch*'"3.1.5"'*|*minimatch*'"8.0.7"'*|*rimraf*'"4.4.0"'*|*rimraf*'"2.7.1"'*)
+            echo "flagged dead-chain copy survived prune: $d $v"; exit 1 ;;
+        esac
+      done
       # entrypoint sanity (openbao precedent)
       test -x "$D/entrypoint.sh"
       sh -n "$D/entrypoint.sh"
