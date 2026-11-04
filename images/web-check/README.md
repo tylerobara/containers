@@ -68,6 +68,14 @@ lockfile ever declared (toml, node-forge, the old pins) as if installed.
 No findings are ignored to reach zero, and the installed node_modules tree
 is scanned in full.
 
+The 2.3.12 bump re-opened the gate (3 Medium, new advisories): `glob@9.3.5`
+(GHSA-3g3m-2fjr-6pw4) and `minimatch@3.1.5/8.0.7` (GHSA-g3hv-75wg-m249).
+All three sit in dead browser-install chains with single browser-side
+consumers (upstream yarn.lock: puppeteer-core→rimraf@4→glob@9→minimatch@8;
+npm chromium→rimraf@2→glob@7→minimatch@3) — r103 prunes those flagged
+copies exactly like extract-zip/basic-ftp, verified unreachable by the
+boot rehearsal's full-route `ready:true` gate.
+
 ## Updating
 
 `version` + `vars.sha256` in `melange/web-check.yaml` (tarball URL
