@@ -85,7 +85,6 @@ contents:
     - libpcre2-8-0
     - libuuid
     - libcom_err
-    - sqlite-libs
     - gdbm
 
     # Terminal
