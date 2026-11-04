@@ -24,12 +24,15 @@ package:
 vars:
   # SHA256 of the GitHub release tarball (shared with metallb-speaker)
   sha256: c61cce2272a8416f6eca558b6375646ccca98a83d8833e21359eaa03ed1676a3
-  # Upstream 0.16.1 pins vulnerable Go modules (grype Critical/High in
+  # Upstream 0.16.1 pinned vulnerable Go modules (grype Critical/High in
   # x/net <0.60.0; High in grpc <1.83.1/1.83.2 (GHSA-2v4p-qf9q-27wj,
   # GHSA-vp52-pcj8-j9qc); Low GHSA-8wmf-6v46-5gfg in otel <=1.44.0); we
-  # `go get` them up to the patched releases before compiling. go get only
-  # raises requirements (MVS never downgrades), so once upstream ships >=
-  # these the bumps are no-ops — retire the pins then.
+  # FLOOR them to the patched releases before compiling — see bump_floor
+  # in the build step. A bare `go get mod@ver` is a selection, not a
+  # floor: pinning grpc@1.83.2 on 0.16.2 downgraded upstream's own 1.84.0
+  # and cascaded a frr-k8s 0.0.27->0.0.26 downgrade (no as-path-prepend
+  # API, compile fail). 0.16.2 ships >= every floor, so these are pure
+  # no-ops now; retire them if upstream ever drops one further still.
   xnet_version: 0.60.0
   otel_version: 1.45.0
   grpc_version: 1.83.2
@@ -64,14 +67,24 @@ pipeline:
       # No vendor/ in the tarball, so modules resolve from the network.
       export CGO_ENABLED=0 GOTOOLCHAIN=local
       export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
-      # Raise the vulnerable dep pins (see vars); no-ops once upstream
-      # ships >= these. (Only `go build` gets build flags — `go get`
-      # rejects them; upstream passes no GOFLAGS at all.)
-      go get golang.org/x/net@v${{vars.xnet_version}} \
-        go.opentelemetry.io/otel/sdk@v${{vars.otel_version}} \
-        go.opentelemetry.io/otel/exporters/otlp/otlptrace@v${{vars.otel_version}} \
-        go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v${{vars.otel_version}} \
-        google.golang.org/grpc@v${{vars.grpc_version}}
+      # Floor the vulnerable dep pins (see vars); each go get only fires
+      # when go.mod sits BELOW the floor, so upstream's own newer pins
+      # survive (a bare go get@ver downgrades — see vars). (Only `go
+      # build` gets build flags — `go get` rejects them; upstream passes
+      # no GOFLAGS at all.)
+      bump_floor() { # bump_floor <module> <fixed-version-no-v>
+        cur=$(awk -v m="$1" '$1==m && $2 ~ /^v/ {print $2; exit}' go.mod)
+        [ -n "$cur" ] || return 0
+        if [ "$cur" != "v$2" ] && [ "$(printf '%s\nv%s\n' "$cur" "$2" | sort -V | head -1)" = "$cur" ]; then
+          echo "build-side floor: $1 $cur -> v$2"
+          go get "$1@v$2"
+        fi
+      }
+      bump_floor golang.org/x/net ${{vars.xnet_version}}
+      bump_floor go.opentelemetry.io/otel/sdk ${{vars.otel_version}}
+      bump_floor go.opentelemetry.io/otel/exporters/otlp/otlptrace ${{vars.otel_version}}
+      bump_floor go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc ${{vars.otel_version}}
+      bump_floor google.golang.org/grpc ${{vars.grpc_version}}
       go build -o metallb-controller ./controller
       install -D -m 0755 metallb-controller "${{targets.destdir}}/controller"
 

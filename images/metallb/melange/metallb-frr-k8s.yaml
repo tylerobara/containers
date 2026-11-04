@@ -64,10 +64,19 @@ pipeline:
       # No vendor/ in the tarball, so modules resolve from the network.
       export CGO_ENABLED=0 GOTOOLCHAIN=local
       export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
-      # Raise the vulnerable x/net pin (see vars); a no-op once upstream
-      # ships >= it. (Only `go build` gets build flags — `go get` rejects
-      # them; upstream passes no GOFLAGS at all.)
-      go get golang.org/x/net@v${{vars.xnet_version}}
+      # Floor the vulnerable x/net pin (see vars): go get only fires when
+      # go.mod sits BELOW the floor, so upstream's own newer pins survive
+      # (a bare go get@ver downgrades). (Only `go build` gets build flags
+      # — `go get` rejects them; upstream passes no GOFLAGS at all.)
+      bump_floor() { # bump_floor <module> <fixed-version-no-v>
+        cur=$(awk -v m="$1" '$1==m && $2 ~ /^v/ {print $2; exit}' go.mod)
+        [ -n "$cur" ] || return 0
+        if [ "$cur" != "v$2" ] && [ "$(printf '%s\nv%s\n' "$cur" "$2" | sort -V | head -1)" = "$cur" ]; then
+          echo "build-side floor: $1 $cur -> v$2"
+          go get "$1@v$2"
+        fi
+      }
+      bump_floor golang.org/x/net ${{vars.xnet_version}}
       D="${{targets.destdir}}"
       go build -o frr-k8s ./cmd/frr-k8s-controller
       install -D -m 0755 frr-k8s "$D/frr-k8s"
