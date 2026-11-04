@@ -75,7 +75,7 @@ pipeline:
         fi
       }
       bump_floor golang.org/x/net 0.60.0
-      bump_floor google.golang.org/grpc 1.83.1
+      bump_floor google.golang.org/grpc 1.83.2
       bump_floor go.opentelemetry.io/otel/exporters/otlp/otlptrace 1.45.0
       bump_floor go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc 1.45.0
       bump_floor go.opentelemetry.io/otel/sdk 1.45.0
@@ -112,7 +112,7 @@ pipeline:
           || { echo "$1 is '${v:-absent}' in the binary, want >= v$2"; exit 1; }
       }
       assert_min golang.org/x/net 0.60.0
-      assert_min google.golang.org/grpc 1.83.1
+      assert_min google.golang.org/grpc 1.83.2
       assert_min go.opentelemetry.io/otel/exporters/otlp/otlptrace 1.45.0
       assert_min go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc 1.45.0
       assert_min go.opentelemetry.io/otel/sdk 1.45.0
