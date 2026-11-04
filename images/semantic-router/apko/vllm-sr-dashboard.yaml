@@ -1,0 +1,68 @@
+# vLLM Semantic Router Dashboard image, assembled by apko (no Dockerfile).
+# The whole /app tree + vendored venv are built from upstream source by
+# melange (see ../melange/vllm-sr-dashboard.yaml); everything else is Wolfi.
+#
+# Reference contract: the final stage of the upstream dashboard Dockerfile
+# (github.com/vllm-project/semantic-router, dashboard/backend/Dockerfile):
+# python3.11-slim runtime with ca-certificates/curl/docker.io/git/gosu,
+# ENTRYPOINT /app/entrypoint.sh + CMD the dashboard-backend flags on :8700,
+# nonroot 65532 via gosu after root permission prep. Deliberate differences:
+#   - Start as root with run-as NOT pinned, like upstream (valkey pattern):
+#     entrypoint.sh probes/fixes ownership then gosu's to nonroot 65532, and
+#     it has its own degraded-feature path for arbitrary-uid runs. `shadow`
+#     supplies the groupadd/usermod/getent the root path calls, `gosu` the
+#     uid drop. Wolfi docker-cli + git replace debian's docker.io + git;
+#     curl/wget from upstream's runtime set are debug-only and left out.
+#   - The venv lives at /opt/vllm-sr-dashboard-venv (upstream's VIRTUAL_ENV
+#     path) with PATH + PYTHONPATH + VIRTUAL_ENV baked like its ENV lines.
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    # busybox: shell for the entrypoint + smoke; ca-certificates: upstream
+    # API calls; git + docker-cli + gosu + shadow: upstream runtime tools
+    # (see header); python-3.11: the venv interpreter + entrypoint helper.
+    - busybox
+    - ca-certificates
+    - git
+    - docker-cli
+    - gosu
+    - shadow
+    # posix-libc-utils: `getent`, like valkey's image. entrypoint.sh looks up
+    # the group owning each state dir before gosu-ing; without it the lookup
+    # comes back empty and it tries groupadd on the already-existing gid.
+    - posix-libc-utils
+    - python-3.11
+    # Built by melange; supplied via --repository-append at build time.
+    # Floating name (gatus-style): the workflow's lock guard fails loudly if
+    # a same-named Wolfi package ever outranks our epoch-100 build.
+    - vllm-sr-dashboard
+
+accounts:
+  groups:
+    - groupname: nonroot
+      gid: 65532
+  users:
+    - username: nonroot
+      uid: 65532
+      gid: 65532
+      shell: /usr/sbin/nologin
+  # Upstream runs entrypoint.sh as root and gosu-drops to nonroot 65532.
+
+environment:
+  PATH: /opt/vllm-sr-dashboard-venv/bin:/usr/local/bin:/usr/sbin:/sbin:/usr/bin:/bin
+  PYTHONPATH: /app
+  VIRTUAL_ENV: /opt/vllm-sr-dashboard-venv
+
+entrypoint:
+  command: /app/entrypoint.sh
+
+cmd: "/app/dashboard-backend -port=8700 -static=/app/frontend -config=/app/config/config.yaml"
+
+# Upstream's final stage sets WORKDIR /app, and the backend creates its
+# auth-db / workflow-store dirs RELATIVE to the cwd ("data/..."), which the
+# entrypoint group-preps at /app/data before gosu.
+work-dir: /app

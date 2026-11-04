@@ -1,0 +1,260 @@
+# Melange build for the vLLM Semantic Router Dashboard image
+# (github.com/vllm-project/semantic-router, dashboard/ subtree) — the repo's
+# four build stages from the release tarball, no Dockerfile:
+#   1. GOOS=js GOARCH=wasm compile of dashboard/wasm/main_wasm.go (the DSL
+#      signal compiler the frontend runs) + wasm_exec.js from GOROOT;
+#   2. Vite frontend (npm ci + npm run build) and the wizmap Svelte app,
+#      embedded at frontend/embedded/wizmap like upstream;
+#   3. CGO Go backend (mattn/go-sqlite3 pins CGO on) built over the upstream
+#      package whitelist — the exact src/semantic-router pkg set the
+#      Dockerfile copies, which is what keeps the Rust/onnx bindings out of
+#      the build graph — with the handlers.dashboardStatusVersion ldflag;
+#   4. the /app tree (backend binary, frontend dist, cli python, config,
+#      skills, entrypoint scripts) plus the vendored pip venv at
+#      /opt/vllm-sr-dashboard-venv (k8s-sidecar pattern: built with pip,
+#      pip/setuptools stripped afterwards; upstream keeps pip).
+# Image version == the repo's vX.Y.Z release tag; upstream's release
+# automation stamps it into the status ldflag, so we assert it equals the
+# pyproject version the backend's default would have derived from.
+#
+# Bump `version` + `vars.sha256` on each release (the update-versions bot
+# handles it; releases/latest is a plain vX.Y.Z tag). The router image
+# (vllm-sr) needs Rust-nightly bindings + a torch model-export stage and is
+# tracked separately (issue #111), not built here.
+
+package:
+  name: vllm-sr-dashboard
+  version: 0.4.0
+  epoch: 100
+  description: "vLLM Semantic Router dashboard built from upstream source"
+  copyright:
+    - license: Apache-2.0
+  dependencies:
+    provider-priority: 100
+    runtime:
+      # Interpreter for the vendored venv; matches the apko runtime package.
+      - python-3.11
+
+vars:
+  # SHA256 of the GitHub release tarball
+  sha256: 5bb9e22e9377c5e68ff209187e710effbf529dc9a9d6bc1efaa278c0a00737df
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - busybox
+      - ca-certificates-bundle
+      - curl
+      - git
+      # go.mod wants go 1.25.0 (upstream builds with golang:1.25);
+      # Wolfi go-1.26 covers it.
+      - go-1.26
+      # CGO for mattn/go-sqlite3 in the backend, + the C-extension fallback
+      # the venv deps may need (Wolfi is glibc-based).
+      - gcc
+      - glibc-dev
+      # Upstream builds both web apps on node:20.
+      - nodejs-20
+      - npm
+      # Upstream's dashboard runtime is python:3.11-slim; stay on 3.11.
+      - python-3.11
+      - py3-pip
+      - python-3.11-dev
+
+pipeline:
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/vllm-project/semantic-router/archive/refs/tags/v${{package.version}}.tar.gz" \
+        -o /home/build/semrouter.tar.gz
+      echo "${{vars.sha256}}  /home/build/semrouter.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf semrouter.tar.gz && rm semrouter.tar.gz
+
+  - working-directory: /home/build/semantic-router-${{package.version}}
+    runs: |
+      # The release tag must be the version line the backend's status banner
+      # (and the bot) expects: pyproject version == tag.
+      grep -qx "version = \"${{package.version}}\"" src/vllm-sr/pyproject.toml \
+        || { echo "pyproject version does not match tag ${{package.version}}"; exit 1; }
+
+  - working-directory: /home/build/semantic-router-${{package.version}}/src/semantic-router
+    runs: |
+      # Stage 1: the DSL compiler WASM asset, upstream's exact command
+      # (file-argument build from the semantic-router module dir; the
+      # ../../-binding replace targets resolve to their real dirs in the
+      # full tarball — they never enter the wasm build graph, no stubs).
+      export CGO_ENABLED=0 GOTOOLCHAIN=local
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      mkdir -p /home/build/wasm-out
+      GOOS=js GOARCH=wasm go build -buildvcs=false -ldflags="-s -w" \
+        -o /home/build/wasm-out/signal-compiler.wasm \
+        ../../dashboard/wasm/main_wasm.go
+      # wasm_exec.js moved misc/ -> lib/ in Go 1.24; try both like upstream.
+      cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" /home/build/wasm-out/ 2>/dev/null \
+        || cp "$(go env GOROOT)/misc/wasm/wasm_exec.js" /home/build/wasm-out/
+      [ -s /home/build/wasm-out/signal-compiler.wasm ] \
+        || { echo "signal-compiler.wasm is empty"; exit 1; }
+
+  - working-directory: /home/build/semantic-router-${{package.version}}
+    runs: |
+      # Stage 2a: Vite frontend. Upstream builds it from a pruned workspace
+      # where the schema + model catalog sit at their repo-root paths
+      # (vite.config reads them from there), with the WASM assets injected
+      # into public/ before the build.
+      SR=/home/build/semantic-router-${{package.version}}
+      WS=/home/build/workspace
+      rm -rf "$WS"
+      mkdir -p "$WS/dashboard/frontend" \
+        "$WS/src/semantic-router/pkg/configschema" \
+        "$WS/website/static/model-catalog"
+      cp -a "$SR"/dashboard/frontend/package.json \
+            "$SR"/dashboard/frontend/package-lock.json \
+            "$SR"/dashboard/frontend/tsconfig.json \
+            "$SR"/dashboard/frontend/tsconfig.node.json \
+            "$SR"/dashboard/frontend/vite.config.ts \
+            "$SR"/dashboard/frontend/index.html \
+            "$SR"/dashboard/frontend/src \
+            "$SR"/dashboard/frontend/public \
+            "$WS"/dashboard/frontend/
+      cp "$SR"/src/semantic-router/pkg/configschema/router-config-v0.3.schema.json \
+        "$WS"/src/semantic-router/pkg/configschema/
+      cp "$SR"/website/static/model-catalog/catalog.json \
+        "$WS"/website/static/model-catalog/
+      cp /home/build/wasm-out/signal-compiler.wasm \
+        /home/build/wasm-out/wasm_exec.js \
+        "$WS"/dashboard/frontend/public/
+      cd "$WS"/dashboard/frontend
+      # Upstream's lockfile bakes registry.npmmirror.com resolved URLs; npm ci
+      # honours those and melange's npm refuses "remote" tarball fetches
+      # (EALLOWREMOTE). Rewrite to the official registry — same artifacts,
+      # same integrity hashes — which is also what upstream's own
+      # `npm config set registry` intends.
+      sed -i 's#https://registry\.npmmirror\.com#https://registry.npmjs.org#g' package-lock.json
+      npm ci --include=dev
+      npm run build
+      [ -s dist/index.html ] || { echo "frontend build produced no index.html"; exit 1; }
+
+  - working-directory: /home/build/semantic-router-${{package.version}}/dashboard/wizmap
+    runs: |
+      # Stage 2b: the wizmap Svelte app, embedded under the frontend.
+      # Same lockfile mirror rewrite as the frontend stage.
+      sed -i 's#https://registry\.npmmirror\.com#https://registry.npmjs.org#g' package-lock.json
+      npm ci --include=dev
+      npm run build -- --outDir /home/build/wizmap-dist
+
+  - working-directory: /home/build/semantic-router-${{package.version}}
+    runs: |
+      # Stage 3: the Go backend. CGO is mandatory (mattn/go-sqlite3). Built
+      # over upstream's package whitelist, not the whole module: that copy
+      # list is exactly what keeps pkg/cli and the Rust-binding importers
+      # out of the build graph, so it is reproduced file-for-file.
+      SR=/home/build/semantic-router-${{package.version}}
+      APP=/home/build/backend-app
+      rm -rf "$APP"
+      mkdir -p "$APP/src/semantic-router/pkg" "$APP/src/vllm-sr" "$APP/dashboard"
+      cp -a "$SR"/src/semantic-router/go.mod "$SR"/src/semantic-router/go.sum \
+        "$APP"/src/semantic-router/
+      for p in catalog config configschema dsl fallback headers llmprotocol \
+               modelinventory observability startupstatus; do
+        cp -a "$SR"/src/semantic-router/pkg/"$p" "$APP"/src/semantic-router/pkg/
+      done
+      mkdir -p "$APP"/src/semantic-router/pkg/k8s "$APP"/src/semantic-router/pkg/routerreplay
+      cp -a "$SR"/src/semantic-router/pkg/k8s/configwriter "$APP"/src/semantic-router/pkg/k8s/
+      cp -a "$SR"/src/semantic-router/pkg/routerreplay/redaction "$APP"/src/semantic-router/pkg/routerreplay/
+      cp "$SR"/src/vllm-sr/pyproject.toml "$APP"/src/vllm-sr/
+      cp -a "$SR"/dashboard/backend "$APP"/dashboard/backend
+      cd "$APP"/dashboard/backend
+      export CGO_ENABLED=1 GOTOOLCHAIN=local
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      go mod download
+      # Upstream stamps handlers.dashboardStatusVersion with the release tag
+      # (its default is the pyproject version + "-dev.container"); the status
+      # endpoint must report the real version, same rule as the Go stamps
+      # elsewhere in this repo.
+      # Built as the package dir, not upstream's main.go file argument:
+      # file-argument builds embed path=command-line-arguments and hide the
+      # module from the build info grype reads (same trap as the
+      # pocket-id-operator comment documents).
+      go build -buildvcs=false \
+        -ldflags="-w -s -X github.com/vllm-project/semantic-router/dashboard/backend/handlers.dashboardStatusVersion=${{package.version}}" \
+        -o /home/build/dashboard-backend .
+      # grype reads Go deps from the embedded build info — assert the build
+      # really is this module.
+      go version -m /home/build/dashboard-backend \
+        | awk -F'\t' '$2=="mod" && $3=="github.com/vllm-project/semantic-router/dashboard/backend"{f=1} END{exit !f}' \
+        || { echo "binary build info lacks the dashboard/backend module"; exit 1; }
+
+  - runs: |
+      # Stage 4a: vendored venv, upstream's requirements.txt (click, pyyaml,
+      # jinja2, requests, jsonschema, pydantic, typing-extensions,
+      # huggingface_hub — all pure-python wheels against Wolfi 3.11).
+      python3.11 -m venv /opt/vllm-sr-dashboard-venv
+      /opt/vllm-sr-dashboard-venv/bin/python -c 'import sys; assert sys.version_info[:2] == (3, 11), sys.version'
+      /opt/vllm-sr-dashboard-venv/bin/pip install --no-cache-dir --upgrade pip
+      /opt/vllm-sr-dashboard-venv/bin/pip install --no-cache-dir \
+        -r /home/build/semantic-router-${{package.version}}/src/vllm-sr/requirements.txt
+      find /opt/vllm-sr-dashboard-venv \
+        \( -type d -a \( -name test -o -name tests \) \) \
+        -o \( -type f -a \( -name '*.pyc' -o -name '*.pyo' \) \) \
+        -exec rm -rf '{}' +
+      # pip/setuptools only ever built the venv — drop them (k8s-sidecar).
+      rm -rf /opt/vllm-sr-dashboard-venv/bin/pip* \
+             /opt/vllm-sr-dashboard-venv/lib/python*/site-packages/pip* \
+             /opt/vllm-sr-dashboard-venv/lib/python*/site-packages/setuptools* \
+             /opt/vllm-sr-dashboard-venv/lib/python*/site-packages/pkg_resources*
+
+  - runs: |
+      # Stage 4b: assemble the /app tree exactly as upstream's final stage
+      # lays it (paths, modes, ownership), so the entrypoint + cli see
+      # identical layout. The backend takes -static/-config paths from the
+      # image cmd, and cwd from apko's work-dir: /app (its "data/" dirs are
+      # created relative to it).
+      SR=/home/build/semantic-router-${{package.version}}
+      mkdir -p /app/config /app/skills /app/frontend/embedded /app/data \
+        /app/cli/config_schema
+      install -Dm755 /home/build/dashboard-backend /app/dashboard-backend
+      mkdir -p /usr/local/bin
+      cp /app/dashboard-backend /usr/local/bin/dashboard-backend
+      cp -a /home/build/workspace/dashboard/frontend/dist/. /app/frontend/
+      cp -a /home/build/wizmap-dist/. /app/frontend/embedded/wizmap/
+      cp "$SR"/src/vllm-sr/requirements.txt /app/requirements.txt
+      install -m0444 "$SR"/src/vllm-sr/pyproject.toml /app/pyproject.toml
+      cp -a "$SR"/src/vllm-sr/cli/. /app/cli/
+      cp "$SR"/src/semantic-router/pkg/configschema/router-config-v0.3.schema.json \
+        /app/cli/config_schema/
+      cp -a "$SR"/config/recipes/built-in/. /app/cli/model_assets/
+      install -m755 "$SR"/src/vllm-sr/start-dashboard.sh /app/start-dashboard.sh
+      install -m0644 "$SR"/src/vllm-sr/cli/templates/tools_db.json /app/config/tools_db.json
+      cp -a "$SR"/config/knowledge_bases /app/config/knowledge_bases
+      install -m0644 "$SR"/dashboard/backend/config/openclaw-skills.json /app/config/openclaw-skills.json
+      cp -a "$SR"/dashboard/backend/skillpacks/. /app/skills/
+      install -m755 "$SR"/dashboard/backend/entrypoint.sh /app/entrypoint.sh
+      install -m755 "$SR"/dashboard/backend/entrypoint_permissions.py /app/entrypoint_permissions.py
+
+      # Upstream's permission posture: public read-only assets, /app/data
+      # group-root 0770 owned by the nonroot uid the entrypoint gosu-drops to.
+      chown -R root:root /app/cli /app/config /app/skills /app/frontend
+      find /app/cli -type d -exec chmod 0555 {} +
+      find /app/cli -type f -exec chmod 0444 {} +
+      find /app/config /app/skills -type d -exec chmod 0755 {} +
+      find /app/config /app/skills -type f -exec chmod 0644 {} +
+      find /app/frontend -type d -exec chmod 0755 {} +
+      find /app/frontend -type f -exec chmod 0644 {} +
+      chown 65532:0 /app/data && chmod 0770 /app/data
+
+      # Upstream's own build-time smoke (its Dockerfile RUN): the catalog
+      # exporter must import under the venv interpreter with /app on the
+      # path. test.sh re-runs it as uid 65532 and hits /healthz live.
+      cd /tmp && PYTHONPATH=/app /opt/vllm-sr-dashboard-venv/bin/python3 \
+        -m cli.model_catalog_export >/dev/null
+
+  - runs: |
+      mkdir -p "${{targets.destdir}}/opt" "${{targets.destdir}}/usr/local/bin"
+      cp -a /app "${{targets.destdir}}/app"
+      cp -a /opt/vllm-sr-dashboard-venv "${{targets.destdir}}/opt/"
+      cp /usr/local/bin/dashboard-backend "${{targets.destdir}}/usr/local/bin/"
