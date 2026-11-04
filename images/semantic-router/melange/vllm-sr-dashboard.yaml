@@ -25,7 +25,7 @@
 package:
   name: vllm-sr-dashboard
   version: 0.4.0
-  epoch: 100
+  epoch: 101
   description: "vLLM Semantic Router dashboard built from upstream source"
   copyright:
     - license: Apache-2.0
@@ -237,7 +237,7 @@ pipeline:
       install -m755 "$SR"/dashboard/backend/entrypoint_permissions.py /app/entrypoint_permissions.py
 
       # Upstream's permission posture: public read-only assets, /app/data
-      # group-root 0770 owned by the nonroot uid the entrypoint gosu-drops to.
+      # group-writable for the nonroot uid the entrypoint gosu-drops to.
       chown -R root:root /app/cli /app/config /app/skills /app/frontend
       find /app/cli -type d -exec chmod 0555 {} +
       find /app/cli -type f -exec chmod 0444 {} +
@@ -245,13 +245,20 @@ pipeline:
       find /app/config /app/skills -type f -exec chmod 0644 {} +
       find /app/frontend -type d -exec chmod 0755 {} +
       find /app/frontend -type f -exec chmod 0644 {} +
-      chown 65532:0 /app/data && chmod 0770 /app/data
 
       # Upstream's own build-time smoke (its Dockerfile RUN): the catalog
       # exporter must import under the venv interpreter with /app on the
       # path. test.sh re-runs it as uid 65532 and hits /healthz live.
       cd /tmp && PYTHONPATH=/app /opt/vllm-sr-dashboard-venv/bin/python3 \
         -m cli.model_catalog_export >/dev/null
+
+      # /app/data ships world-readable 0755 root:root, NOT upstream's baked
+      # 0770 65532:0: melange's host-side xattr scan runs as the CI runner
+      # user and cannot traverse the baked mode. The entrypoint's
+      # prepare-tree /app-data chgrp + fchmod(mode|S_IRGRP|S_IWGRP) restores
+      # the writable posture as root on every boot before gosu (verified
+      # against entrypoint_permissions.py), so runtime is identical.
+      chown root:root /app/data && chmod 0755 /app/data
 
   - runs: |
       mkdir -p "${{targets.destdir}}/opt" "${{targets.destdir}}/usr/local/bin"
