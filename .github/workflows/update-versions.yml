@@ -760,6 +760,22 @@ jobs:
             fi
           fi
 
+          # --- vllm-sr-dashboard: vllm-project/semantic-router release train
+          # (image version == the repo's vX.Y.Z tag, asserted equal to the
+          # src/vllm-sr/pyproject.toml version in the melange pipeline);
+          # releases/latest is a plain vX.Y.Z tag. The vllm-sr router image
+          # from the same repo is NOT bumped here — heavier build, issue #111. ---
+          if want vllm-sr-dashboard; then
+            latest=$(gh api repos/vllm-project/semantic-router/releases/latest --jq '.tag_name | ltrimstr("v")')
+            if [ -z "$latest" ]; then
+              echo "::error::vllm-sr-dashboard: no release found upstream"
+              FAILED=1
+            else
+              bump_row vllm-sr-dashboard images/semantic-router/melange/vllm-sr-dashboard.yaml "$latest" \
+                "https://github.com/vllm-project/semantic-router/archive/refs/tags/v${latest}.tar.gz" vllm-sr-dashboard
+            fi
+          fi
+
           # --- external-secrets: releases/latest returns the CHART release
           # (tag helm-chart-X.Y.Z), NOT the operator's, so take the highest
           # plain vX.Y.Z tag the traefik way — the strict regex drops the
