@@ -57,6 +57,28 @@ pipeline:
       # ones, so valkey_operator_build_info still reports the real version.
       export CGO_ENABLED=0 GOTOOLCHAIN=local
       export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      # Build-side dependency floors: the v0.8.0 tarball transitively pins
+      # golang.org/x/net v0.57.0 (GO-2026-660x: 4 High + 1 Critical),
+      # google.golang.org/grpc v1.82.1 (2 High) and the otel otlptrace/
+      # otlptracegrpc/sdk trio v1.44.0 (Low) — all fixed upstream, and the
+      # grype sign gate blocks on any Low+ finding. Raise to the fixed
+      # versions before compiling (MVS only ever moves up; each bump applies
+      # only when go.mod sits BELOW the floor, so a future upstream release
+      # that already carries the fix passes through untouched). Verified
+      # against the binary's build info below.
+      bump_floor() { # bump_floor <module> <fixed-version-no-v>
+        cur=$(awk -v m="$1" '$1==m && $2 ~ /^v/ {print $2; exit}' go.mod)
+        [ -n "$cur" ] || return 0
+        if [ "$cur" != "v$2" ] && [ "$(printf '%s\nv%s\n' "$cur" "$2" | sort -V | head -1)" = "$cur" ]; then
+          echo "build-side floor: $1 $cur -> v$2"
+          go get "$1@v$2"
+        fi
+      }
+      bump_floor golang.org/x/net 0.60.0
+      bump_floor google.golang.org/grpc 1.83.1
+      bump_floor go.opentelemetry.io/otel/exporters/otlp/otlptrace 1.45.0
+      bump_floor go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc 1.45.0
+      bump_floor go.opentelemetry.io/otel/sdk 1.45.0
       go build -trimpath -buildvcs=false \
         -ldflags "-s -w \
           -X github.com/prometheus/common/version.Version=${{package.version}}" \
@@ -81,3 +103,16 @@ pipeline:
       go version -m "${{targets.destdir}}/manager" \
         | awk -F'\t' '$2=="mod" && $3=="github.com/valkey-io/valkey-operator"{f=1} END{exit !f}' \
         || { echo "binary build info lacks the valkey-operator module"; exit 1; }
+      # ...and the dependency floors actually landed in the binary (the same
+      # grype reads its Go findings from).
+      assert_min() { # assert_min <module> <min-version-no-v>
+        v=$(go version -m "${{targets.destdir}}/manager" \
+            | awk -F'\t' -v m="$1" '($2=="dep"||$2=="mod") && $3==m {print $4; exit}')
+        [ -n "$v" ] && [ "$(printf '%s\nv%s\n' "$v" "$2" | sort -V | head -1)" = "v$2" ] \
+          || { echo "$1 is '${v:-absent}' in the binary, want >= v$2"; exit 1; }
+      }
+      assert_min golang.org/x/net 0.60.0
+      assert_min google.golang.org/grpc 1.83.1
+      assert_min go.opentelemetry.io/otel/exporters/otlp/otlptrace 1.45.0
+      assert_min go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc 1.45.0
+      assert_min go.opentelemetry.io/otel/sdk 1.45.0
