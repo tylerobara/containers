@@ -37,7 +37,7 @@
 
 package:
   name: keycloak
-  version: 26.8.1
+  version: 26.8.2
   epoch: 102
   description: "Keycloak IAM/SSO server (upstream release distribution)"
   copyright:
@@ -47,7 +47,7 @@ package:
 
 vars:
   # SHA256 of the GitHub release dist tarball (tag <version>, no v prefix)
-  sha256: 4e2740b181faa2ea623a1c2ecf00855935311e546046e2f857615a47ed24cbe8
+  sha256: dd124787283918bc597628887168333465ee2a811a389e0003569e52be7e487f
   # Bundled vs patched jars (CVE remediations, see header): on an upstream
   # bump that changes a bundled jar, the guards in the swap step fail
   # loudly — re-verify whether the patch is still needed and re-pin both.
