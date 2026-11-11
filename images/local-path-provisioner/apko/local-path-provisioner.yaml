@@ -21,7 +21,7 @@ contents:
     # API-server TLS connection. (The provisioner's helper pods run their own
     # busybox image — HELPER_IMAGE flag — that is a separate image entirely.)
     - busybox
-    - ca-certificates
+    - ca-certificates-bundle
     # Built by melange; supplied via --repository-append at build time.
     - local-path-provisioner
 

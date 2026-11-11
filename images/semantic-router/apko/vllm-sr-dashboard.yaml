@@ -26,7 +26,7 @@ contents:
     # API calls; git + docker-cli + gosu + shadow: upstream runtime tools
     # (see header); python-3.11: the venv interpreter + entrypoint helper.
     - busybox
-    - ca-certificates
+    - ca-certificates-bundle
     - git
     - docker-cli
     - gosu

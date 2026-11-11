@@ -31,7 +31,7 @@ contents:
     # Debug shell only — the binary is static Go. ca-certificates for the
     # outbound TLS to the Cloudflare edge the whole tunnel runs on.
     - busybox
-    - ca-certificates
+    - ca-certificates-bundle
     # Built by melange; supplied via --repository-append at build time.
     # Floating (no =pin), like the valkey/external-secrets rows — Wolfi ships
     # its own cloudflared package, so the workflow's lock guard is what proves

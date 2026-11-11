@@ -22,7 +22,7 @@ contents:
     # Debug shell only — gatus is a static Go binary. ca-certificates for the
     # HTTPS/SMTP/dns/whois endpoint checks it exists to run.
     - busybox
-    - ca-certificates
+    - ca-certificates-bundle
     # Built by melange; supplied via --repository-append at build time.
     - gatus
 

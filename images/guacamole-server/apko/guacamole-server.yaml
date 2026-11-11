@@ -45,7 +45,7 @@ contents:
     # set; netcat-openbsd: upstream's own HEALTHCHECK tool (nc -z 127.0.0.1
     # 4822) and our smoke test's port probe.
     - busybox
-    - ca-certificates
+    - ca-certificates-bundle
     - tini
     - netcat-openbsd
     # Server-side text rendering fonts (upstream ships dejavu + liberation +

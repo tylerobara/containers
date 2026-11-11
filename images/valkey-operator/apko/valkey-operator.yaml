@@ -17,7 +17,7 @@ contents:
     # Debug shell only — the operator is a static Go binary and shells out
     # to nothing. ca-certificates for the k8s API + webhook TLS.
     - busybox
-    - ca-certificates
+    - ca-certificates-bundle
     # Built by melange; supplied via --repository-append at build time.
     - valkey-operator
 

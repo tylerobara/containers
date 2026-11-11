@@ -28,7 +28,7 @@ contents:
     - wolfi-baselayout
     # outbound TLS for the API widgets (same reason upstream runs the app on
     # the node image's ca-certificates)
-    - ca-certificates
+    - ca-certificates-bundle
     # PID 1 reaping (entrypoint shebang) + root->PUID drop helper (upstream
     # runner stage apk-adds su-exec for exactly this)
     - dumb-init

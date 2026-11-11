@@ -16,7 +16,7 @@ contents:
     # Debug shell only — the binary is static Go. ca-certificates for the
     # webhook client + API server TLS.
     - busybox
-    - ca-certificates
+    - ca-certificates-bundle
     # Built by melange; supplied via --repository-append at build time.
     - metallb-controller
 

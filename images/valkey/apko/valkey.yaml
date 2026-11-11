@@ -38,7 +38,7 @@ contents:
     # busybox: shell + find for the entrypoint; ca-certificates + tzdata +
     # tini: the upstream runtime set; su-exec: the uid drop (see header).
     - busybox
-    - ca-certificates
+    - ca-certificates-bundle
     - tzdata
     - tini
     - su-exec

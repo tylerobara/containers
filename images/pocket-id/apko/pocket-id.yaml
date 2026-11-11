@@ -20,7 +20,7 @@ contents:
     # ca-certificates for the outbound TLS it does: OIDC/SAML IdP fetches,
     # SMTP, S3, webhooks and the optional icon CDN.
     - busybox
-    - ca-certificates
+    - ca-certificates-bundle
     # Built by melange; supplied via --repository-append at build time.
     - pocket-id
 

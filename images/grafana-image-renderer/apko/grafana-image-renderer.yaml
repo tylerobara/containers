@@ -27,7 +27,7 @@ contents:
     # /etc/os-release + world-writable /tmp 1777 (chromium profile dirs are
     # made with os.MkdirTemp under TMPDIR=/tmp)
     - wolfi-baselayout
-    - ca-certificates
+    - ca-certificates-bundle
     # PID 1 for the entrypoint wrapper (zombie reaping for chromium children)
     - tini
     # the renderer's browser; pulls its own gtk/nss/mesa/pulse deps

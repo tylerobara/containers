@@ -24,7 +24,7 @@ contents:
     # /etc/os-release + the world-writable base dirs (/tmp 1777 for PHP
     # sessions + the httpd pidfile)
     - wolfi-baselayout
-    - ca-certificates
+    - ca-certificates-bundle
     # PID 1 reaping (entrypoint shebang) + root->33 drop helper
     - dumb-init
     - su-exec
