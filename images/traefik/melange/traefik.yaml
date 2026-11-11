@@ -47,6 +47,10 @@ vars:
   xnet_version: 0.62.0
   gojose_version: 4.1.6
   knative_pkg_version: 0.0.0-20260531000007-52dbd5ece63f
+  # Select knative.dev/networking explicitly (v3.7.17 go.mod's own pin): the
+  # pkg raise re-resolves the module graph, and `go get` prunes networking
+  # (the knative provider's imports) unless something pins it.
+  knative_networking_version: 0.0.0-20251217020127-11890a5dabea
   # Release codename stamped by upstream's release CI (release.yaml).
   codename: langres
 
@@ -83,7 +87,8 @@ pipeline:
       # rejects them; upstream passes no GOFLAGS at all.)
       go get golang.org/x/net@v${{vars.xnet_version}} \
         github.com/go-jose/go-jose/v4@v${{vars.gojose_version}} \
-        knative.dev/pkg@v${{vars.knative_pkg_version}}
+        knative.dev/pkg@v${{vars.knative_pkg_version}} \
+        knative.dev/networking@v${{vars.knative_networking_version}}
       go build -trimpath -buildvcs=false \
         -ldflags "-s -w \
           -X github.com/traefik/traefik/v3/pkg/version.Version=v${{package.version}} \

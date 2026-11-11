@@ -41,6 +41,10 @@ vars:
   xnet_version: 0.62.0
   gojose_version: 4.1.6
   knative_pkg_version: 0.0.0-20260531000007-52dbd5ece63f
+  # Select knative.dev/networking explicitly (v3.7.17 go.mod's own pin): the
+  # pkg raise re-resolves the module graph, and `go get` prunes networking
+  # (the knative provider's imports) unless something pins it.
+  knative_networking_version: 0.0.0-20251217020127-11890a5dabea
   codename: langres
   # Official Go toolchain tarballs (sha256 from https://go.dev/dl/?mode=json).
   # The Wolfi go-1.27 binary ships /usr/lib/go/lib/fips140/ with the
@@ -109,7 +113,8 @@ pipeline:
       # ships >= these.
       go get golang.org/x/net@v${{vars.xnet_version}} \
         github.com/go-jose/go-jose/v4@v${{vars.gojose_version}} \
-        knative.dev/pkg@v${{vars.knative_pkg_version}}
+        knative.dev/pkg@v${{vars.knative_pkg_version}} \
+        knative.dev/networking@v${{vars.knative_networking_version}}
       # -w but NOT -s: Chainguard's go-fips guidance keeps the symbol table
       # (helps grype/govulncheck symbol-level Go analysis and FIPS-module
       # verification); only DWARF is dropped.
