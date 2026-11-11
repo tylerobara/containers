@@ -18,7 +18,7 @@ contents:
     # /bin/sh + coreutils (Wolfi's bash alone leaves the image without a
     # /bin/sh — same reason os-shell ships busybox)
     - busybox
-    - ca-certificates
+    - ca-certificates-bundle
     - bash
     - curl
     - git

@@ -25,7 +25,7 @@ contents:
     # busybox here is built without the nc applet, and `nc -z` is our
     # wait-for-port replacement — ship the real thing (OpenBSD netcat).
     - netcat-openbsd
-    - ca-certificates
+    - ca-certificates-bundle
     # bitnami's os-shell scripts assume bash; busybox sh alone would break
     # everyone's `command: ["bash", "-c", ...]` init containers.
     - bash

@@ -15,7 +15,7 @@ contents:
     - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
   packages:
     - busybox
-    - ca-certificates
+    - ca-certificates-bundle
     # envoy is linked against glibc (libc/libm + libatomic shipped inside
     # the cilium-envoy package itself).
     - glibc

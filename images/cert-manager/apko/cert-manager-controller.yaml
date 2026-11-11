@@ -17,7 +17,7 @@ contents:
     # Debug shell only — the binary is static Go. ca-certificates for the
     # ACME/Issuers' outbound TLS and webhook CA pinning.
     - busybox
-    - ca-certificates
+    - ca-certificates-bundle
     # Built by melange; supplied via --repository-append at build time.
     - cert-manager-controller
 

@@ -41,7 +41,7 @@ contents:
     - kmod
     - jq
     - util-linux
-    - ca-certificates
+    - ca-certificates-bundle
     # the bundled cilium-envoy is linked against glibc (libc/libm;
     # libatomic ships inside the cilium-envoy package)
     - glibc

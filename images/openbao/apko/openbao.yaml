@@ -24,7 +24,7 @@ contents:
     # Debug shell only — bao is a static Go binary. ca-certificates for
     # upstream TLS (ACME, OIDC issuers, SMTP), tzdata-free: it speaks UTC.
     - busybox
-    - ca-certificates
+    - ca-certificates-bundle
     # Upstream release entrypoint needs these: dumb-init (its shebang, PID 1
     # zombie reaping) and su-exec (root→openbao drop when started as uid 0).
     - dumb-init

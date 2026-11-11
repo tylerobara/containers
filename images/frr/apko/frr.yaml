@@ -25,7 +25,7 @@ contents:
     # iproute2 + python-3.11: the runtime deps of the melange package;
     # ca-certificates for RPKI TLS; tini: PID-1 init, like upstream.
     - busybox
-    - ca-certificates
+    - ca-certificates-bundle
     - bash
     - iproute2
     - python-3.11

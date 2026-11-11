@@ -27,7 +27,7 @@ contents:
     # icu + libstdc++ are the system libs the self-contained .NET runtime
     # probes/links against (Wolfi's dotnet-10 depends on the same).
     - busybox
-    - ca-certificates
+    - ca-certificates-bundle
     - icu
     - libstdc++
     # .NET's crypto shim (libSystem.Security.Cryptography.Native.OpenSsl)

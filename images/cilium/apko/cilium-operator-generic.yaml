@@ -16,7 +16,7 @@ contents:
     - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
   packages:
     - busybox
-    - ca-certificates
+    - ca-certificates-bundle
     - gops
     # Built by melange; supplied via --repository-append at build time.
     - cilium-operator-generic

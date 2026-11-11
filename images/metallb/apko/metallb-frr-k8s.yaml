@@ -24,7 +24,7 @@ contents:
     # /bin/sh + cp for the chart's cp-reloader/cp-metrics/cp-frr-status init
     # containers; ca-certificates for the daemon's API connections.
     - busybox
-    - ca-certificates
+    - ca-certificates-bundle
     # Built by melange; supplied via --repository-append at build time.
     - metallb-frr-k8s
 

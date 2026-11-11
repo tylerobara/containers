@@ -19,7 +19,7 @@ contents:
     # OCI/Helm/HTTPS transports the sources speak. git mirrors upstream's
     # image (it shells out to git for kustomize remote bases).
     - busybox
-    - ca-certificates
+    - ca-certificates-bundle
     - git
     # Built by melange; supplied via --repository-append at build time.
     - kustomize-controller

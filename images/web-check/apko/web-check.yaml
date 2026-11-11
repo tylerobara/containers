@@ -31,7 +31,7 @@ contents:
     - wolfi-baselayout
     # outbound TLS for the ~30 API checks (dns/ssl/http lookups) — same role
     # the ca-certificates inside upstream's node image plays
-    - ca-certificates
+    - ca-certificates-bundle
     # PID 1 reaping (entrypoint shebang; upstream's tini equivalent)
     - dumb-init
     # runtime matching the melange build env (../melange/web-check.yaml pins

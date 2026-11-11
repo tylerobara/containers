@@ -21,7 +21,7 @@ contents:
     # ca-certificates for registry/remote-endpoint TLS; no tzdata: the
     # binary imports time/tzdata (embedded zoneinfo).
     - busybox
-    - ca-certificates
+    - ca-certificates-bundle
     # Built by melange; supplied via --repository-append at build time.
     - dozzle
 

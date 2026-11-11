@@ -23,7 +23,7 @@ contents:
     # Debug shell only — traefik-fips is a static Go binary. ca-certificates
     # for upstream TLS (ACME issuers, OCSP, cert chains).
     - busybox
-    - ca-certificates
+    - ca-certificates-bundle
     # Built by melange; supplied via --repository-append at build time.
     - traefik-fips
 

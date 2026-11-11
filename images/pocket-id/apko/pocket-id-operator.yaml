@@ -16,7 +16,7 @@ contents:
     # k8s API, the Pocket ID admin API it reconciles against, and the logo
     # reachability probes it runs per OIDC client.
     - busybox
-    - ca-certificates
+    - ca-certificates-bundle
     # Built by melange; supplied via --repository-append at build time.
     - pocket-id-operator
 
