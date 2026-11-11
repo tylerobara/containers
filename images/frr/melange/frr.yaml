@@ -48,7 +48,10 @@ environment:
       - ca-certificates-bundle
       - curl
       - elfutils-dev
-      - flex
+      # flex 2.6.5's generated scanners use __has_cpp_attribute(fallthrough),
+      # which FRR's lib/compiler.h `fallthrough` macro breaks; drop the guard
+      # once upstream frr fixes it.
+      - flex<2.6.5
       - git
       - json-c-dev
       - libcap-dev
