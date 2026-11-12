@@ -21,7 +21,7 @@
 package:
   name: homepage
   version: 2.8.0
-  epoch: 103
+  epoch: 104
   description: "Homepage — a self-hosted application dashboard for your services wall"
   copyright:
     - license: Apache-2.0
@@ -93,7 +93,12 @@ pipeline:
       # follow-redirects security patch (same mechanism, same deal): the
       # upstream 2.7.0 lock pins 1.16.1 — GHSA-mrwp-f3q8-3g9p (High,
       # cross-realm redirects discard sensitiveHeaders and let custom
-      # credentials follow), fixed in 1.16.2. All guards below write a single
+      # credentials follow), fixed in 1.16.2.
+      # fast-xml-parser security patch (same mechanism, same deal): the
+      # upstream 2.8.0 lock pins 5.8.0 (via gamedig) — GHSA-474x-hrwr-fgx4
+      # (Low, quadratic CPU on unterminated stop-node tags, range <=5.11.2),
+      # fixed in 5.12.0; same-major override, verified to resolve with
+      # pnpm 12 install --lockfile-only. All guards below write a single
       # combined "overrides:" block (a duplicate key would break
       # pnpm-workspace.yaml).
       ov=""
@@ -112,6 +117,11 @@ pipeline:
         echo "patching follow-redirects $fr_cur -> 1.16.2 (1 advisory)"
         ov="${ov}  follow-redirects: 1.16.2\n"
       fi
+      fxp_cur=$(grep -m1 -oE '^  fast-xml-parser@[0-9]+\.[0-9]+\.[0-9]+' pnpm-lock.yaml | cut -d@ -f2)
+      if [ "$(printf '%s\n%s\n' "$fxp_cur" 5.12.0 | sort -V | head -1)" = "$fxp_cur" ] && [ "$fxp_cur" != "5.12.0" ]; then
+        echo "patching fast-xml-parser $fxp_cur -> 5.12.0 (1 advisory)"
+        ov="${ov}  fast-xml-parser: 5.12.0\n"
+      fi
       if [ -n "$ov" ]; then
         printf "overrides:\n$ov" >> pnpm-workspace.yaml
         pnpm install --lockfile-only
@@ -126,6 +136,9 @@ pipeline:
       fr_final=$(grep -m1 -oE '^  follow-redirects@[0-9]+\.[0-9]+\.[0-9]+' pnpm-lock.yaml | cut -d@ -f2)
       [ "$(printf '%s\n%s\n' "$fr_final" 1.16.2 | sort -V | head -1)" = "1.16.2" ] \
         || { echo "follow-redirects $fr_final still below the 1.16.2 fix"; exit 1; }
+      fxp_final=$(grep -m1 -oE '^  fast-xml-parser@[0-9]+\.[0-9]+\.[0-9]+' pnpm-lock.yaml | cut -d@ -f2)
+      [ "$(printf '%s\n%s\n' "$fxp_final" 5.12.0 | sort -V | head -1)" = "5.12.0" ] \
+        || { echo "fast-xml-parser $fxp_final still below the 5.12.0 fix"; exit 1; }
       NEXT_TELEMETRY_DISABLED=1 \
       NEXT_PUBLIC_BUILDTIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
       NEXT_PUBLIC_VERSION=v${{package.version}} \
