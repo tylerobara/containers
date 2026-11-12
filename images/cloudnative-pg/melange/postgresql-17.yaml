@@ -10,7 +10,7 @@
 
 package:
   name: postgresql-17
-  version: 17.11
+  version: 17.12
   epoch: 100
   description: "PostgreSQL 17 built from PGDG source for CloudNativePG images"
   copyright:
@@ -20,7 +20,7 @@ package:
 
 vars:
   # SHA256 of the PGDG source tarball
-  sha256: dd27f2b3c59e73ed14aa3324901242bf69a032a6347805f274e6260322d42979
+  sha256: 9cf136a703d8ee2f83465c43be4e9e8e7930c82b0bfba13be7e2537be769ac55
 
 environment:
   contents:
