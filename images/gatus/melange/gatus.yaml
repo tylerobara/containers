@@ -36,24 +36,24 @@ vars:
   # x/net <0.60.0; High in grpc <1.83.1/1.83.2 (GHSA-2v4p-qf9q-27wj,
   # GHSA-vp52-pcj8-j9qc); Low GHSA-8wmf-6v46-5gfg in otel <=1.44.0; x/crypto
   # 0.57.0 covers CVE-2026-39821, the same floor Wolfi's own gatus build
-  # bumped to for its -r4; x/net 0.62.0 additionally requires crypto >=0.58);
+  # bumped to for its -r4; x/net 0.60.0 additionally requires crypto >=0.57);
   # we `go get` them up to the patched releases before compiling. go get only
   # raises requirements (MVS never downgrades), so once upstream ships >=
   # these the bumps are no-ops — retire the pins then. go-jose/v4 joins the
   # list for GHSA-mgcc-cww5-fp2q / CVE-2026-116587 (High, JWK RSA parse DoS;
   # advisory published Oct 27 after our 5.37.0 publish, fixed only in 4.1.6,
   # which no gatus release ships yet — same override as openbao/pocket-id).
-  # GO-2026-5932 (x/crypto openpgp, Unknown) flipped from "no known fixed
-  # version" to fixed at a 0.58.1 pre-release commit; 0.58.0 still matches
-  # it, so pin 0.59.0, the newest release above that boundary. crypto
-  # 0.59.0 requires x/net >=0.62.0, and go get refuses to silently amend
-  # an explicit selection (hard-fails "requires x/net@v0.62.0, not
-  # v0.60.0"), so xnet_version tracks that requirement exactly — net
-  # 0.62.0's own requirements (crypto >=0.58.0) stay consistent.
-  # GO-2026-6888 (Critical, brotli crafted-zstd
-  # panic) is fixed in 1.2.7; its go.mod is unchanged across 1.2.1->1.2.7.
-  xnet_version: 0.62.0
-  xcrypto_version: 0.59.0
+  # which no gatus release ships yet — same override as openbao/pocket-id).
+  # The Unknown x/crypto GO-2026-5932 stays: its "fixed" version is the
+  # 0.58.1-0.2026... commit that DELETES x/crypto/openpgp, and gatus's
+  # transitive go-github/v48 still imports it (git_commits.go) — past
+  # 0.58.x the build breaks and gatus cannot migrate majors without a
+  # source change. Unknown does not trip the signing gate, so we sit at
+  # 0.57.0 (fixes the High CVE-2026-39821) and eat the Unknown match.
+  # GO-2026-6888 (Critical, brotli crafted-zstd panic) is fixed in 1.2.7;
+  # its go.mod is unchanged across 1.2.1->1.2.7.
+  xnet_version: 0.60.0
+  xcrypto_version: 0.57.0
   brotli_version: 1.2.7
   otel_version: 1.45.0
   grpc_version: 1.83.2
