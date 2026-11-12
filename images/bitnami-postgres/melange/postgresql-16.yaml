@@ -18,7 +18,7 @@
 
 package:
   name: postgresql-16
-  version: 16.15
+  version: 16.16
   epoch: 100
   description: "PostgreSQL 16 built from PGDG source with the Bitnami OSS script layout"
   copyright:
@@ -32,7 +32,7 @@ package:
 
 vars:
   # SHA256 of the PGDG source tarball
-  sha256: c1575341fa7bd40f5274ea465b34390f4dc64cdd0770af327005caaeb9f6b7ed
+  sha256: 9d5cd8633043b75740d5d59749c6b7365e6aeb53c47098b1a5e80bb18f87881a
   # bitnami/containers commit + tarball SHA256 of the pinned script tree
   bitnami_commit: 0191828691ccfad53afb58d918ce2dd3105e1f6b
   bitnami_sha256: 3e4d2c6f855f5306da1c8bf4c1bc8e4674ea7eb7a285837837cda6df9029f87a
