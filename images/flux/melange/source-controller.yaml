@@ -15,7 +15,7 @@
 package:
   name: source-controller
   version: 1.10.1
-  epoch: 100
+  epoch: 101
   description: "Flux source-controller built from upstream source"
   copyright:
     - license: Apache-2.0
@@ -28,6 +28,18 @@ vars:
   # Flag unique to this controller among the flux four; the verify step
   # greps it out of the flag dump to prove the right main package was built.
   ident_flag: helm-index-max-size
+  # Transitive-dep floors the upstream lock does not carry yet, applied with
+  # `go get` before the build and asserted from the embedded build info
+  # below (same mechanism as gatus/traefik).
+  #
+  # klauspost/compress: GO-2026-6865 (High), fixed in 1.20.2; upstream
+  # 1.10.1 still selects 1.20.1.
+  klauspost_compress_version: 1.20.2
+  # The other current match, GO-2026-6225 in
+  # github.com/chrismellard/docker-credential-acr-env, has NO fix version
+  # and the repo is archived (last commit Mar 2023) — it arrives through
+  # the Azure credential chain in fluxcd/pkg/auth. Its Unknown severity
+  # does not trip the 0-Low+ signing gate, so nothing to pin here.
 
 environment:
   contents:
@@ -64,6 +76,10 @@ pipeline:
       # `main.go` — same single-file main package, but the package-form
       # build stamps the module path into the build info grype reads.
       #   CGO_ENABLED=0 xx-go build -trimpath -a -o source-controller main.go
+      # Pre-build floor: klauspost/compress only (see vars; zero-dependency
+      # module, pure version lift — verified to resolve and compile against
+      # the 1.10.1 tarball with go 1.27).
+      go get github.com/klauspost/compress@v${{vars.klauspost_compress_version}}
       go build -trimpath -a -o source-controller .
       install -D -m 0755 source-controller \
         "${{targets.destdir}}/usr/bin/source-controller"
@@ -86,3 +102,8 @@ pipeline:
       export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.27/bin"
       go version -m "${{targets.destdir}}/usr/bin/source-controller" \
         | awk -F'\t' '$3=="github.com/fluxcd/source-controller"{f=1} END{exit !f}'
+      # the floor must actually be in the shipped binary (a pin that
+      # silently drops from the graph would re-introduce the finding)
+      go version -m "${{targets.destdir}}/usr/bin/source-controller" \
+        | awk -F'\t' -v want="v${{vars.klauspost_compress_version}}" \
+            '$3=="github.com/klauspost/compress"{got=$4} END{exit (got == want ? 0 : 1)}'
