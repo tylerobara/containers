@@ -18,7 +18,7 @@
 
 package:
   name: postgresql-15
-  version: 15.19
+  version: 15.20
   epoch: 100
   description: "PostgreSQL 15 built from PGDG source with the Bitnami OSS script layout"
   copyright:
@@ -32,7 +32,7 @@ package:
 
 vars:
   # SHA256 of the PGDG source tarball
-  sha256: e1a64a87a46b825b88c082e4518161a47aab53c45694964f8ba1df28f7859f89
+  sha256: 30e65cbbb771a39b553ed2df7e65622e65647aed55dbc19bd0fe853ff0a08442
   # bitnami/containers commit + tarball SHA256 of the pinned script tree
   bitnami_commit: e7699df4c94f9182f739df15c56a8959f980000b
   bitnami_sha256: c18218bb3339cc66f7e5d97159011e9321f0a2a85592904418262c36ff6545a3
