@@ -15,9 +15,11 @@ echo "Testing the manager starts and reaches its API-server step..."
 # No --version flag upstream; the bare run dies on the missing in-cluster
 # config right after flag parsing + logger setup, which is how far a manager
 # with nothing to talk to gets.
-# --default-valkey-image is required since 0.9.0 (validated pre-GetConfigOrDie).
+# --default-{valkey,exporter}-image are required since 0.9.0 (non-empty
+# checks, validated pre-GetConfigOrDie).
 docker run --rm --entrypoint /manager "$IMAGE" --metrics-bind-address=0 \
-  --default-valkey-image=ghcr.io/valkey-io/valkey:8 2>&1 \
+  --default-valkey-image=ghcr.io/valkey-io/valkey:8 \
+  --default-exporter-image=docker.io/oliver006/redis_exporter:v1.66.0 2>&1 \
   | grep -qiE "in-cluster|no configuration has been provided|unable to start manager" \
   || fail "/manager never reached its API-server step"
 
