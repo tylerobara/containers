@@ -30,9 +30,11 @@ echo "Testing version anchor: installed apk is exactly ${VERSION}-r100..."
 # installed apk is exactly our melange package at the pinned version — fail
 # loudly on 'unknown' or any mismatch (a Wolfi-index external-secrets apk
 # does not exist, so any other pkgver means resolution went wrong).
-# No shell in the image: read the apk db from the host side.
+# No shell in the image: read the apk db from the host side. docker export
+# stores real paths, so the db is under usr/lib (the in-container /lib is a
+# merged-usr symlink); accept both spellings.
 cid=$(docker create "$IMAGE")
-db=$(docker export "$cid" | tar -xO lib/apk/db/installed 2>/dev/null || true)
+db=$(docker export "$cid" | tar -xO usr/lib/apk/db/installed lib/apk/db/installed 2>/dev/null || true)
 docker rm "$cid" >/dev/null
 echo "$db" | grep -q '^P:external-secrets$' \
   || fail "external-secrets apk not installed"
