@@ -10,7 +10,7 @@
 
 package:
   name: postgresql-16
-  version: 16.15
+  version: 16.16
   epoch: 100
   description: "PostgreSQL 16 built from PGDG source for CloudNativePG images"
   copyright:
@@ -20,7 +20,7 @@ package:
 
 vars:
   # SHA256 of the PGDG source tarball
-  sha256: c1575341fa7bd40f5274ea465b34390f4dc64cdd0770af327005caaeb9f6b7ed
+  sha256: 9d5cd8633043b75740d5d59749c6b7365e6aeb53c47098b1a5e80bb18f87881a
 
 environment:
   contents:
