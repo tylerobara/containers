@@ -11,7 +11,7 @@
 
 package:
   name: valkey-operator
-  version: 0.8.0
+  version: 0.9.0
   epoch: 100
   description: "Valkey Kubernetes operator built from upstream source"
   copyright:
@@ -21,7 +21,7 @@ package:
 
 vars:
   # SHA256 of the GitHub release tarball
-  sha256: 3523c3f7210cdb172e4b6558d99caa1d8497588b995661b2fa2e4e9e863cc3de
+  sha256: 0d9bcf83ac3b2b73d59a4c68db822c77c2ae0af364d61415104110874e33936a
 
 environment:
   contents:
@@ -93,7 +93,12 @@ pipeline:
       out=$("${{targets.destdir}}/manager" --help 2>&1 || true)
       echo "$out" | grep -q "health-probe-bind-address" \
         || { echo "/manager does not expose the expected flag surface"; exit 1; }
-      out=$(timeout 60 "${{targets.destdir}}/manager" --metrics-bind-address=0 2>&1 || true)
+      # 0.9.0 added --default-valkey-image and --default-exporter-image as
+      # required flags (non-empty check), validated before GetConfigOrDie —
+      # pass valid refs to reach the in-cluster step.
+      out=$(timeout 60 "${{targets.destdir}}/manager" --metrics-bind-address=0 \
+        --default-valkey-image=ghcr.io/valkey-io/valkey:8 \
+        --default-exporter-image=docker.io/oliver006/redis_exporter:v1.66.0 2>&1 || true)
       echo "$out"
       echo "$out" | grep -qiE "in-cluster|no configuration has been provided|unable to start manager" \
         || { echo "/manager never reached its API-server step"; exit 1; }
