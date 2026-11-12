@@ -6,7 +6,8 @@
 # (github.com/amir20/dozzle/blob/main/Dockerfile): static binary + CA certs,
 # entrypoint is the binary with no args = the web server on :8080.
 # Differences from upstream, on purpose:
-#   - busybox+ca-certs Wolfi base instead of bare scratch (debug shell)
+#   - ca-certs-bundle-only Wolfi base instead of bare scratch (no debug
+#     shell: busybox dropped — glibc-linked, sign gate 0-Low+)
 #   - nonroot 65532 instead of root
 #   - the server reads the container runtime socket (mount
 #     /var/run/docker.sock or use --remote-host/--remote-agent)
@@ -18,9 +19,10 @@ contents:
     - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
   packages:
     # Debug shell only — dozzle is a static Go binary with the UI embedded.
-    # ca-certificates for registry/remote-endpoint TLS; no tzdata: the
+    # No debug shell: Wolfi busybox is glibc-linked (so:libc.so.6) and glibc
+    # is the fleet's unpatched 0-Low+ blocker; the binary is static Go.
+    # ca-certificates-bundle for registry/remote-endpoint TLS; no tzdata: the
     # binary imports time/tzdata (embedded zoneinfo).
-    - busybox
     - ca-certificates-bundle
     # Built by melange; supplied via --repository-append at build time.
     - dozzle

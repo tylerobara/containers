@@ -4,9 +4,9 @@
 # Dockerfile (static CGO_ENABLED=0 binary -> distroless base-debian13 nonroot,
 # USER 65532:65532, ENTRYPOINT ["cloudflared", "--no-autoupdate"],
 # CMD ["version"]), with these deliberate deviations:
-#   - busybox+ca-certs Wolfi base instead of the distroless glibc base (the
-#     binary is static so glibc is dead weight; busybox buys the repo-wide
-#     debug shell, and no apk-tools ships in prod)
+#   - ca-certs-bundle-only Wolfi base instead of the distroless glibc base
+#     (the binary is static so glibc is dead weight; even the debug shell is
+#     gone: busybox is glibc-linked, and no apk-tools ships in prod)
 #   - /usr/bin/cloudflared (FHS) instead of /usr/local/bin, with a named
 #     65532 user/group block instead of distroless' implicit nonroot — same
 #     numeric uid:gid upstream pins (their comment: Kubernetes needs numeric
@@ -28,9 +28,10 @@ contents:
   keyring:
     - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
   packages:
-    # Debug shell only — the binary is static Go. ca-certificates for the
-    # outbound TLS to the Cloudflare edge the whole tunnel runs on.
-    - busybox
+    # No debug shell: Wolfi busybox is glibc-linked (so:libc.so.6) and glibc
+    # is the fleet's unpatched 0-Low+ blocker; the binary is static Go.
+    # ca-certificates-bundle for the outbound TLS to the Cloudflare edge the
+    # whole tunnel runs on.
     - ca-certificates-bundle
     # Built by melange; supplied via --repository-append at build time.
     # Floating (no =pin), like the valkey/external-secrets rows — Wolfi ships

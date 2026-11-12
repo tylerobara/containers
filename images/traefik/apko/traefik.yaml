@@ -5,7 +5,8 @@
 # Reference: upstream's release Dockerfile (github.com/traefik/traefik/blob/
 # main/Dockerfile): static binary + alpine, ENTRYPOINT ["/traefik"], no CMD.
 # Differences from upstream, on purpose:
-#   - busybox+ca-certs Wolfi base instead of alpine (no apk-tools at runtime)
+#   - ca-certs-bundle-only Wolfi base instead of alpine (no shell, no
+#     apk-tools at runtime: busybox dropped — glibc-linked, sign gate 0-Low+)
 #   - binary at /usr/bin/traefik (FHS) instead of /traefik; upstream's image
 #     entrypoint is the plain binary anyway, so a direct /usr/bin/traefik
 #     entrypoint is the same contract
@@ -23,9 +24,10 @@ contents:
   keyring:
     - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
   packages:
-    # Debug shell only — traefik is a static Go binary. ca-certificates for
-    # upstream TLS (ACME issuers, OCSP, cert chains).
-    - busybox
+    # No debug shell: Wolfi busybox is glibc-linked (so:libc.so.6) and glibc
+    # is the fleet's unpatched 0-Low+ blocker; traefik is static Go.
+    # ca-certificates-bundle for upstream TLS (ACME issuers, OCSP, cert
+    # chains).
     - ca-certificates-bundle
     # Built by melange; supplied via --repository-append at build time.
     - traefik

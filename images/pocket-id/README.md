@@ -68,8 +68,9 @@ pocket-id-operator both do — it mounts its PVC at `/app/data`) or run with
 
 ### Deliberate differences from upstream
 
-- **distroless → busybox-on-Wolfi** base: same single static binary, plus
-  `/bin/sh` for debugging and Wolfi `ca-certificates`. Binary lives at
+- **distroless → Wolfi** base: same single static binary plus Wolfi
+  `ca-certificates-bundle` (the operator image is shell-free too — Wolfi
+  busybox is glibc-linked and the sign gate is 0-Low+). Binary lives at
   `/usr/bin/pocket-id`, not `/app/pocket-id`.
 - **No `entrypoint.sh`**: upstream's alpine variant only uses it to chown
   `/app/data` and re-exec as `PUID`/`PGID` (needs root + `su-exec`). The

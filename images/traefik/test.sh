@@ -18,11 +18,11 @@ echo "Testing nonroot uid 65532..."
 uid=$(docker inspect --format '{{.Config.User}}' "$IMAGE")
 [ "$uid" = "65532" ] || fail "run-as is '$uid', expected '65532'"
 
-echo "Testing prod restraint: busybox shell only, no bash/apk-tools..."
-docker run --rm --entrypoint /bin/sh "$IMAGE" -c '
-  command -v bash >/dev/null 2>&1 && exit 1
-  command -v apk  >/dev/null 2>&1 && exit 1
-  exit 0' || fail "bash or apk-tools present in prod image"
+echo "Testing distroless posture: no shell at all..."
+for p in /bin/sh /bin/bash /usr/bin/apk; do
+  docker run --rm --entrypoint "$p" "$IMAGE" true >/dev/null 2>&1 \
+    && fail "$p present in prod image" || true
+done
 
 echo "Testing provider-less boot with --ping (/ping on :8080)..."
 # Same as the minilab ingress posture (no k8s provider needed for this):

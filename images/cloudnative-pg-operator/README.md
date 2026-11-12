@@ -9,8 +9,9 @@ The manager binary is compiled from the upstream release tarball by melange
 grype/CPE identify it.
 
 Mirrors the operator's upstream Distroless image: static `/manager` entrypoint,
-`nonroot` uid/gid **65532**, `ca-certificates`, plus busybox for debugging
-(~78 MB total). Manifests from upstream are drop-in — just point
+`nonroot` uid/gid **65532**, and `ca-certificates-bundle` — no shell
+(Wolfi busybox is glibc-linked and the sign gate is 0-Low+; ~78 MB total).
+Manifests from upstream are drop-in — just point
 `image:`/`imageCatalogRef` at our registry.
 
 ## Tags

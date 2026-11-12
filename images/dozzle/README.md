@@ -6,7 +6,8 @@ Wolfi's bun, matching upstream's pinned bun 1.4.2; Go binary via go-1.27,
 web UI embedded), assembled by apko on Wolfi — no Dockerfile. Mirrors
 upstream's image contract (static binary, entrypoint starts the server on
 :8080, bundled CA certs) with two deliberate deviations: nonroot uid 65532
-and a busybox debug shell instead of bare scratch.
+and a shell-free ca-certificates-bundle base instead of bare scratch
+(Wolfi busybox is glibc-linked and the sign gate is 0-Low+).
 
 ```
 docker run --rm -p 127.0.0.1:8080:8080 \

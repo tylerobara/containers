@@ -7,6 +7,8 @@ set -eu
 fail() { echo "FAIL: $1"; exit 1; }
 
 echo "Testing dozzle reports v$VERSION..."
+# Also proves /data exists and is writable: dozzle's internal/profile init()
+# mkdirs ./data (=/data) on EVERY run and fatals on EACCES — even --version.
 docker run --rm --entrypoint /usr/bin/dozzle "$IMAGE" --version 2>&1 \
   | grep -q "$VERSION" || fail "dozzle --version does not report $VERSION"
 
@@ -16,18 +18,11 @@ ep=$(docker inspect --format '{{.Config.Entrypoint}}' "$IMAGE")
 user=$(docker inspect --format '{{.Config.User}}' "$IMAGE")
 [ "$user" = "65532" ] || fail "run-as is '$user', expected '65532'"
 
-echo "Testing prod restraint: busybox shell only, no bash/apk-tools..."
-docker run --rm --entrypoint /bin/sh "$IMAGE" -c '
-  command -v bash >/dev/null 2>&1 && exit 1
-  command -v apk  >/dev/null 2>&1 && exit 1
-  exit 0' || fail "bash or apk-tools present in prod image"
-
-echo "Testing /data exists and is writable by the daemon user..."
-# dozzle's internal/profile init() mkdirs ./data (=/data) on EVERY run and
-# fatals on EACCES — a non-writable /data bricks even `--version`.
-docker run --rm --entrypoint /bin/sh "$IMAGE" -c \
-  'test -d /data && touch /data/.w && rm /data/.w' \
-  || fail "/data missing or not writable by uid 65532"
+echo "Testing distroless posture: no shell at all..."
+for p in /bin/sh /bin/bash /usr/bin/apk; do
+  docker run --rm --entrypoint "$p" "$IMAGE" true >/dev/null 2>&1 \
+    && fail "$p present in prod image" || true
+done
 
 echo "Testing the server comes up on :8080 (UI + healthcheck)..."
 # The server dies without a container runtime ("Could not connect to any

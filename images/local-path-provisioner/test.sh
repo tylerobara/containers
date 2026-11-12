@@ -6,8 +6,11 @@ set -eu
 
 fail() { echo "FAIL: $1"; exit 1; }
 
-docker run --rm --entrypoint /bin/sh "$IMAGE" -c 'command -v apk >/dev/null && exit 1; exit 0' \
-  || fail "apk-tools present in prod image"
+# No debug shell (static Go, glibc-free): direct-exec must fail.
+for p in /bin/sh /bin/bash /usr/bin/apk; do
+  docker run --rm --entrypoint "$p" "$IMAGE" true >/dev/null 2>&1 \
+    && fail "$p present in prod image" || true
+done
 
 echo "Testing --version reports v$VERSION..."
 # Upstream has no startup banner and no `version` subcommand (that panics);

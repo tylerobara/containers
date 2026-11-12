@@ -57,9 +57,10 @@ comes from the command line, exactly as upstream's docs run it. Runs as uid
   v4.1.6); the build raises it with `go get` and the verify step asserts the
   bump in the embedded build info — the gatus `*_version` pin pattern,
   retire once upstream ships >= 4.1.6.
-- **busybox+ca-certs Wolfi base** instead of upstream's distroless glibc base,
-  and `/usr/bin` (FHS) instead of `/usr/local/bin` — the repo-wide
-  conventions; the binary content is the same static build.
+- **bundle-only, shell-free Wolfi base** (Wolfi busybox is glibc-linked and
+  the sign gate is 0-Low+) instead of upstream's distroless glibc base,
+  and `/usr/bin` (FHS) instead of `/usr/local/bin`; the binary content is
+  the same static build.
 
 ## Signing
 

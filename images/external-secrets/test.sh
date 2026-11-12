@@ -15,11 +15,11 @@ echo "Testing nonroot uid 65534 (upstream USER 65534)..."
 uid=$(docker inspect --format '{{.Config.User}}' "$IMAGE")
 [ "$uid" = "65534" ] || fail "run-as is '$uid', expected '65534'"
 
-echo "Testing prod restraint: busybox shell only, no bash/apk-tools..."
-docker run --rm --entrypoint /bin/sh "$IMAGE" -c '
-  command -v bash >/dev/null 2>&1 && exit 1
-  command -v apk  >/dev/null 2>&1 && exit 1
-  exit 0' || fail "bash or apk-tools present in prod image"
+echo "Testing distroless posture: no shell at all..."
+for p in /bin/sh /bin/bash /usr/bin/apk; do
+  docker run --rm --entrypoint "$p" "$IMAGE" true >/dev/null 2>&1 \
+    && fail "$p present in prod image" || true
+done
 
 echo "Testing version anchor: installed apk is exactly ${VERSION}-r100..."
 # Upstream stamps NOTHING into the binary (the Makefile passes no ldflags, the
@@ -30,10 +30,15 @@ echo "Testing version anchor: installed apk is exactly ${VERSION}-r100..."
 # installed apk is exactly our melange package at the pinned version — fail
 # loudly on 'unknown' or any mismatch (a Wolfi-index external-secrets apk
 # does not exist, so any other pkgver means resolution went wrong).
-docker run --rm --entrypoint /bin/sh "$IMAGE" -ec "
-  grep -q '^P:external-secrets\$' /lib/apk/db/installed \
-    || { echo 'external-secrets apk not installed'; exit 1; }
-  awk '/^P:external-secrets\$/{getline; ok=(\$0==\"V:${VERSION}-r100\"); print \$0; exit !ok}' /lib/apk/db/installed" \
+# No shell in the image: read the apk db from the host side. docker export
+# stores real paths, so the db is under usr/lib (the in-container /lib is a
+# merged-usr symlink); accept both spellings.
+cid=$(docker create "$IMAGE")
+db=$(docker export "$cid" | tar -xO usr/lib/apk/db/installed lib/apk/db/installed 2>/dev/null || true)
+docker rm "$cid" >/dev/null
+echo "$db" | grep -q '^P:external-secrets$' \
+  || fail "external-secrets apk not installed"
+[ "$(echo "$db" | grep -A1 '^P:external-secrets$' | tail -1)" = "V:${VERSION}-r100" ] \
   || fail "installed apk is not exactly external-secrets ${VERSION}-r100"
 
 echo "Testing controller reaches its in-cluster config step..."
