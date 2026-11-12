@@ -7,8 +7,10 @@ tarballs by **melange** with upstream's exact build contracts
 upstream's release-visible `dev`/`dev` so the startup banners match
 byte-for-byte) and assembled by **apko** on Wolfi — no Dockerfile anywhere.
 Upstream ships the same static binaries on `distroless/static` (frr-k8s on a
-busybox base); here every image is busybox + ca-certificates, the repo's
-one-debug-shell convention.
+busybox base); here every image rides wolfi-baselayout +
+ca-certificates-bundle — controller with no shell at all (busybox is
+glibc-linked and would block signing), speaker/frr-k8s with the busybox
+shell their `frr-reloader.sh` flow needs.
 
 | Image | Upstream | Built | Contents |
 |---|---|---|---|
@@ -68,10 +70,12 @@ reports zero Low+ findings — see the Pages catalog for current state.)
 
 ## Deliberate differences from upstream
 
-- **distroless → busybox-on-Wolfi** base: same static Go binaries, plus
-  `/bin/sh` for debugging and Wolfi `ca-certificates`. The frr-k8s image's
-  `/bin/sh` + `cp` are load-bearing (the chart's `cp-reloader`/`cp-metrics`/
-  `cp-frr-status` init containers run them from this image).
+- **distroless → Wolfi** base: same static Go binaries plus Wolfi
+  `ca-certificates-bundle`. Speaker and frr-k8s carry the busybox shell
+  because its `/bin/sh` + `cp` are load-bearing (the chart's `cp-reloader`/
+  `cp-metrics`/`cp-frr-status` init containers run them from these images);
+  the controller ships shell-free — Wolfi busybox is glibc-linked and the
+  sign gate is 0-Low+.
 - **Vulnerable Go deps are raised** before compiling (`go get` of the
   patched releases; `vars.xnet_version`/`vars.otel_version`/`vars.grpc_version`
   in the configs): upstream 0.16.1 pins `golang.org/x/net v0.53.0` (Critical/

@@ -9,8 +9,8 @@ tarball by **melange** with upstream's exact build contract
 `0.0.1` default) and assembled by **apko** on Wolfi — no Dockerfile anywhere.
 Upstream ships the same static binary on `scratch`
 ([`package/Dockerfile`](https://github.com/rancher/local-path-provisioner/blob/v0.0.37/package/Dockerfile));
-here the base is busybox + Wolfi `ca-certificates`, the repo's
-one-debug-shell convention.
+here the base is shell-free: wolfi-baselayout + Wolfi
+`ca-certificates-bundle` (busybox is glibc-linked and would block signing).
 
 | Image | Upstream | Built | Contents |
 |---|---|---|---|
@@ -44,8 +44,9 @@ reports zero Low+ findings — see the Pages catalog for current state.)
 
 ## Deliberate differences from upstream
 
-- **scratch → busybox-on-Wolfi base**: same static Go binary, plus `/bin/sh`
-  for debugging and Wolfi `ca-certificates`. The provisioner itself never
+- **scratch → bundle-only Wolfi base**: same static Go binary plus Wolfi
+  `ca-certificates-bundle`, no shell (the 0-Low+ sign gate drops the
+  glibc-linked busybox). The provisioner itself never
   shells out — the volume work happens in helper pods that pull their own
   busybox image (`--helper-image` / the chart's `helperImage` values, left at
   upstream's default here).

@@ -52,8 +52,10 @@ reports zero Low+ findings — see the Pages catalog for current state.)
 
 ## Deliberate differences from upstream
 
-- **alpine → busybox-on-Wolfi** base: same single static binary per image,
-  plus `/bin/sh` for debugging and Wolfi `ca-certificates`.
+- **alpine → Wolfi** base: same single static binary per image plus Wolfi
+  `ca-certificates-bundle`. helm- and notification-controller ship with no
+  shell (Wolfi busybox is glibc-linked and the sign gate is 0-Low+);
+  kustomize-/source-controller keep it (kustomize shells out to `git`).
 - **kustomize-controller gets `git`** (upstream ships it for kustomize remote
   bases) but **not `tini`/`gnupg`/`openssh-client`**: the binary is PID 1
   directly (fine under Kubernetes; tini only reaped zombies for git/sops side

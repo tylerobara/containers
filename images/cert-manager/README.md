@@ -6,8 +6,8 @@ upstream release tarball by **melange** with upstream's exact build contract
 pkg/util.AppVersion=… -X pkg/util.AppGitCommit=…`, per `make/00_mod.mk`) and
 assembled by **apko** on Wolfi — no Dockerfile anywhere. Upstream ships the
 same static binary on `distroless/static` (`hack/containers/Containerfile.*`);
-here the base is busybox + ca-certificates (the repo's one-debug-shell
-convention).
+here the base is shell-free: wolfi-baselayout + ca-certificates-bundle
+(Wolfi busybox is glibc-linked and would block signing).
 
 | Image | Upstream | Built | Contents |
 |---|---|---|---|
@@ -53,9 +53,9 @@ reports zero Low+ findings — see the Pages catalog for current state.)
 
 ## Deliberate differences from upstream
 
-- **distroless → busybox-on-Wolfi** base: same single static binary per
-  image, plus `/bin/sh` for debugging and Wolfi `ca-certificates`. No apt or
-  distroless scaffolding.
+- **distroless → bundle-only Wolfi** base: same single static binary per
+  image, no shell and no apt (the 0-Low+ sign gate drops the glibc-linked
+  busybox). No distroless scaffolding.
 - **The chart's other two images stay upstream** (out of scope here): the
   `startupapicheck` helm-hook Job and the `acmesolver` spawned for ACME
   dns01 self-checks still pull `quay.io/jetstack/...` — same static Go

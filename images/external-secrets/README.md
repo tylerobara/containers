@@ -48,8 +48,9 @@ governs actual deployments.
 - **Network module resolution**: the release tarball has no `vendor/`, and
   the root go.mod local-replaces its ~118 apis/providers/generators
   submodules; same pattern as the cert-manager/cilium builds.
-- **Wolfi busybox debug shell** instead of upstream's distroless scratch base,
-  and `/usr/bin` (FHS) instead of `/bin` — the repo-wide conventions; binary
+- **bundle-only, shell-free Wolfi base** (Wolfi busybox is glibc-linked and
+  the sign gate is 0-Low+) instead of upstream's distroless scratch base,
+  and `/usr/bin` (FHS) instead of `/bin`; binary
   content (`CGO_ENABLED=0 go build -tags all_providers`, all providers/
   generators compiled in like upstream's release) and uid 65534 match upstream.
 
