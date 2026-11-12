@@ -11,7 +11,7 @@
 
 package:
   name: grafana-image-renderer
-  version: 5.12.10
+  version: 5.12.11
   epoch: 100
   description: "Grafana image rendering service backed by headless Chromium"
   copyright:
@@ -21,7 +21,7 @@ package:
 
 vars:
   # SHA256 of the GitHub release tarball
-  sha256: e7ca34ff88578a7dad36710a344cb61ff60b1fd4e3c6e4134d63f5de623c1d04
+  sha256: 242aa5bfc0aec9e67e1ad83e549413d64c52033afc1f0a9e0615ef3818087d30
 
 environment:
   contents:
