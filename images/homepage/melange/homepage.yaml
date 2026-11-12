@@ -20,7 +20,7 @@
 
 package:
   name: homepage
-  version: 2.7.0
+  version: 2.8.0
   epoch: 103
   description: "Homepage — a self-hosted application dashboard for your services wall"
   copyright:
@@ -30,7 +30,7 @@ package:
 
 vars:
   # SHA256 of https://github.com/gethomepage/homepage/archive/refs/tags/v<version>.tar.gz (bump with version)
-  sha256: 53c6a72da2242d81233248d04f777425da37560f6fc3a37d6cab387b3d61b5f4
+  sha256: 60df1f229ac236f0cbc572654f7f766ff55082c24a9a2f083dd850ef64a00ccb
 
 environment:
   contents:
