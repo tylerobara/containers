@@ -93,7 +93,10 @@ pipeline:
       out=$("${{targets.destdir}}/manager" --help 2>&1 || true)
       echo "$out" | grep -q "health-probe-bind-address" \
         || { echo "/manager does not expose the expected flag surface"; exit 1; }
-      out=$(timeout 60 "${{targets.destdir}}/manager" --metrics-bind-address=0 2>&1 || true)
+      # 0.9.0 added --default-valkey-image as a required flag, validated
+      # before GetConfigOrDie — pass a valid ref to reach the in-cluster step.
+      out=$(timeout 60 "${{targets.destdir}}/manager" --metrics-bind-address=0 \
+        --default-valkey-image=ghcr.io/valkey-io/valkey:8 2>&1 || true)
       echo "$out"
       echo "$out" | grep -qiE "in-cluster|no configuration has been provided|unable to start manager" \
         || { echo "/manager never reached its API-server step"; exit 1; }
