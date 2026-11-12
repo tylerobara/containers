@@ -22,7 +22,7 @@
 package:
   name: gatus
   version: 5.38.0
-  epoch: 101
+  epoch: 102
   description: "Gatus health monitor and status page built from upstream source"
   copyright:
     - license: Apache-2.0
@@ -43,11 +43,18 @@ vars:
   # list for GHSA-mgcc-cww5-fp2q / CVE-2026-116587 (High, JWK RSA parse DoS;
   # advisory published Oct 27 after our 5.37.0 publish, fixed only in 4.1.6,
   # which no gatus release ships yet — same override as openbao/pocket-id).
-  # The Unknown x/crypto GO-2026-5932 stays: it is an "openpgp is unsafe by
-  # design, no known fixed version" advisory — every x/crypto version matches
-  # it, so no bump clears it, and Unknown does not trip the signing gate.
+  # which no gatus release ships yet — same override as openbao/pocket-id).
+  # The Unknown x/crypto GO-2026-5932 stays: its "fixed" version is the
+  # 0.58.1-0.2026... commit that DELETES x/crypto/openpgp, and gatus's
+  # transitive go-github/v48 still imports it (git_commits.go) — past
+  # 0.58.x the build breaks and gatus cannot migrate majors without a
+  # source change. Unknown does not trip the signing gate, so we sit at
+  # 0.57.0 (fixes the High CVE-2026-39821) and eat the Unknown match.
+  # GO-2026-6888 (Critical, brotli crafted-zstd panic) is fixed in 1.2.7;
+  # its go.mod is unchanged across 1.2.1->1.2.7.
   xnet_version: 0.60.0
   xcrypto_version: 0.57.0
+  brotli_version: 1.2.7
   otel_version: 1.45.0
   grpc_version: 1.83.2
   gojose_version: 4.1.6
@@ -92,7 +99,8 @@ pipeline:
         go.opentelemetry.io/otel@v${{vars.otel_version}} \
         go.opentelemetry.io/otel/metric@v${{vars.otel_version}} \
         go.opentelemetry.io/otel/trace@v${{vars.otel_version}} \
-        github.com/go-jose/go-jose/v4@v${{vars.gojose_version}}
+        github.com/go-jose/go-jose/v4@v${{vars.gojose_version}} \
+        github.com/andybalholm/brotli@v${{vars.brotli_version}}
       go build -trimpath -buildvcs=false -o gatus .
       install -Dm755 gatus "${{targets.destdir}}/usr/bin/gatus"
       # Upstream's scratch image bakes the repo-root config.yaml as the live
@@ -119,7 +127,8 @@ pipeline:
            "go.opentelemetry.io/otel/metric v${{vars.otel_version}}" \
            "go.opentelemetry.io/otel/trace v${{vars.otel_version}}" \
            "google.golang.org/grpc v${{vars.grpc_version}}" \
-           "github.com/go-jose/go-jose/v4 v${{vars.gojose_version}}"; do
+           "github.com/go-jose/go-jose/v4 v${{vars.gojose_version}}" \
+           "github.com/andybalholm/brotli v${{vars.brotli_version}}"; do
          set -- $spec
          ver=$(go version -m "${{targets.destdir}}/usr/bin/gatus" \
            | awk -F'\t' -v m="$1" '$3==m{print $4; exit}')
