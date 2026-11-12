@@ -2,8 +2,8 @@
 # built from the upstream release tarball by melange (see
 # ../melange/notification-controller.yaml); everything else is Wolfi. Mirrors
 # upstream's alpine + single-static-binary image (its Dockerfile copies the
-# binary onto alpine with ca-certificates), with the repo-wide busybox debug
-# shell instead of a bare alpine base.
+# binary onto alpine with ca-certificates), on a shell-less base (busybox
+# dropped: glibc-linked, 0-Low+ sign gate).
 #
 # The flux controllers' HelmRelease/HelmChart CRDs and the install-time
 # securityContext govern the containers at deploy time; 65532 only governs
@@ -15,9 +15,10 @@ contents:
   keyring:
     - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
   packages:
-    # Debug shell only — the binary is static Go. ca-certificates for the
-    # OCI/Helm/HTTPS transports the sources speak.
-    - busybox
+    # No debug shell: Wolfi busybox is glibc-linked (so:libc.so.6) and glibc
+    # is the fleet's unpatched 0-Low+ blocker; the binary is static Go.
+    # ca-certificates-bundle for the OCI/Helm/HTTPS transports the sources
+    # speak.
     - ca-certificates-bundle
     # Built by melange; supplied via --repository-append at build time.
     - notification-controller

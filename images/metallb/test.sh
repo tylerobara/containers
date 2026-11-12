@@ -10,8 +10,19 @@ TARGET="${1:?usage: test.sh controller|speaker|frr-k8s}"
 
 fail() { echo "FAIL: $1"; exit 1; }
 
-docker run --rm --entrypoint /bin/sh "$IMAGE" -c 'command -v apk >/dev/null && exit 1; exit 0' \
-  || fail "apk-tools present in prod image"
+if [ "$TARGET" = controller ]; then
+  # The controller image ships no shell at all (static Go, glibc-free);
+  # direct-exec must fail on every shell/package path.
+  for p in /bin/sh /bin/bash /usr/bin/apk; do
+    docker run --rm --entrypoint "$p" "$IMAGE" true >/dev/null 2>&1 \
+      && fail "$p present in prod image" || true
+  done
+else
+  # speaker/frr-k8s keep the busybox shell: they ship frr-reloader.sh for
+  # the chart's shared-volume flow. apk-tools must still be absent.
+  docker run --rm --entrypoint /bin/sh "$IMAGE" -c 'command -v apk >/dev/null && exit 1; exit 0' \
+    || fail "apk-tools present in prod image"
+fi
 
 case "$TARGET" in
 controller)

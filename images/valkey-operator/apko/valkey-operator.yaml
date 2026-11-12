@@ -6,7 +6,8 @@
 # (github.com/valkey-io/valkey-operator/blob/main/Dockerfile): static
 # /manager, USER 65532, ENTRYPOINT ["/manager"]. We keep the same entrypoint
 # and uid so the helm chart / kustomize manifests are drop-in compatible, on
-# a busybox+ca-certs Wolfi base instead.
+# a ca-certs-bundle-only Wolfi base instead (no debug shell: busybox is
+# glibc-linked and the sign gate is 0-Low+).
 
 contents:
   repositories:
@@ -14,9 +15,10 @@ contents:
   keyring:
     - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
   packages:
-    # Debug shell only — the operator is a static Go binary and shells out
-    # to nothing. ca-certificates for the k8s API + webhook TLS.
-    - busybox
+    # No debug shell: Wolfi busybox is glibc-linked (so:libc.so.6) and glibc
+    # is the fleet's unpatched 0-Low+ blocker; the operator is a static Go
+    # binary and shells out to nothing. ca-certificates-bundle for the k8s
+    # API + webhook TLS.
     - ca-certificates-bundle
     # Built by melange; supplied via --repository-append at build time.
     - valkey-operator

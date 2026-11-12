@@ -9,8 +9,16 @@ TARGET="${1:?usage: test.sh pocket-id|pocket-id-operator}"
 
 fail() { echo "FAIL: $1"; exit 1; }
 
-docker run --rm --entrypoint /bin/sh "$IMAGE" -c 'command -v apk >/dev/null && exit 1; exit 0' \
-  || fail "apk-tools present in prod image"
+if [ "$TARGET" = pocket-id-operator ]; then
+  # No debug shell (static Go, glibc-free): direct-exec must fail.
+  for p in /bin/sh /bin/bash /usr/bin/apk; do
+    docker run --rm --entrypoint "$p" "$IMAGE" true >/dev/null 2>&1 \
+      && fail "$p present in prod image" || true
+  done
+else
+  docker run --rm --entrypoint /bin/sh "$IMAGE" -c 'command -v apk >/dev/null && exit 1; exit 0' \
+    || fail "apk-tools present in prod image"
+fi
 
 case "$TARGET" in
 pocket-id)

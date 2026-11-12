@@ -20,9 +20,10 @@ contents:
   keyring:
     - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
   packages:
-    # Debug shell only — traefik-fips is a static Go binary. ca-certificates
-    # for upstream TLS (ACME issuers, OCSP, cert chains).
-    - busybox
+    # No debug shell: Wolfi busybox is glibc-linked (so:libc.so.6) and glibc
+    # is the fleet's unpatched 0-Low+ blocker; traefik-fips is static Go.
+    # ca-certificates-bundle for upstream TLS (ACME issuers, OCSP, cert
+    # chains).
     - ca-certificates-bundle
     # Built by melange; supplied via --repository-append at build time.
     - traefik-fips

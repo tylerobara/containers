@@ -24,11 +24,11 @@ echo "Testing nonroot uid 65532..."
 uid=$(docker inspect --format '{{.Config.User}}' "$IMAGE")
 [ "$uid" = "65532" ] || fail "run-as is '$uid', expected '65532'"
 
-echo "Testing prod restraint: busybox shell only, no bash/apk-tools..."
-docker run --rm --entrypoint /bin/sh "$IMAGE" -c '
-  command -v bash >/dev/null 2>&1 && exit 1
-  command -v apk  >/dev/null 2>&1 && exit 1
-  exit 0' || fail "bash or apk-tools present in prod image"
+echo "Testing distroless posture: no shell at all..."
+for p in /bin/sh /bin/bash /usr/bin/apk; do
+  docker run --rm --entrypoint "$p" "$IMAGE" true >/dev/null 2>&1 \
+    && fail "$p present in prod image" || true
+done
 
 echo "Testing FIPS build info (GOFIPS140=v1.0.0 + fips140=on baked in)..."
 cid=$(docker create "$IMAGE")
@@ -59,7 +59,7 @@ echo "Testing FIPS TLS boundary on websecure (approved suites accepted, non-appr
 # TLS terminates in the compiled-in Go module's FIPS mode: crypto/tls only
 # negotiates FIPS-approved versions/ciphersuites (equivalent of fipsonly).
 # Client is OpenSSL from a wolfi container sharing traefik's netns (the prod
-# image is deliberately static/busybox-only).
+# image is deliberately static and shell-less).
 cat >"$dyn/tls.yml" <<'EOF'
 http:
   routers:

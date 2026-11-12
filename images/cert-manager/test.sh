@@ -14,8 +14,12 @@ case "$TARGET" in
   *) fail "unknown target '$TARGET'" ;;
 esac
 
-docker run --rm --entrypoint /bin/sh "$IMAGE" -c 'command -v apk >/dev/null && exit 1; exit 0' \
-  || fail "apk-tools present in prod image"
+# No debug shell (static Go, glibc-free): direct-exec must fail on every
+# shell/package path.
+for p in /bin/sh /bin/bash /usr/bin/apk; do
+  docker run --rm --entrypoint "$p" "$IMAGE" true >/dev/null 2>&1 \
+    && fail "$p present in prod image" || true
+done
 
 echo "Testing $BIN startup banner reports v$VERSION..."
 # No --version flag upstream; the banner prints before the binary dies on

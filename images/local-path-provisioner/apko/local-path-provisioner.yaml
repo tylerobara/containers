@@ -2,7 +2,8 @@
 # is built from the upstream release tarball by melange (see
 # ../melange/local-path-provisioner.yaml); everything else is Wolfi. Mirrors
 # upstream's scratch image (package/Dockerfile: /usr/bin/local-path-provisioner
-# + ca-certificates, no shell) with the repo-wide busybox debug shell on top.
+# + ca-certificates, no shell) — we match it shell-free (busybox dropped:
+# glibc-linked, 0-Low+ sign gate).
 #
 # run-as 65532 is deliberate: upstream's scratch base has no user at all and
 # the helm chart's deployment sets no runAsUser, so containerd would otherwise
@@ -20,7 +21,8 @@ contents:
     # Debug shell + the coreutils/sh helpers; ca-certificates for the
     # API-server TLS connection. (The provisioner's helper pods run their own
     # busybox image — HELPER_IMAGE flag — that is a separate image entirely.)
-    - busybox
+    # No debug shell: Wolfi busybox is glibc-linked (so:libc.so.6) and glibc
+    # is the fleet's unpatched 0-Low+ blocker; the binary is static Go.
     - ca-certificates-bundle
     # Built by melange; supplied via --repository-append at build time.
     - local-path-provisioner

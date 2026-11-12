@@ -2,7 +2,8 @@
 # built from the upstream release tarball by melange (see
 # ../melange/metallb-controller.yaml); everything else is Wolfi. Mirrors
 # upstream's distroless/static + /controller image (controller/Dockerfile),
-# with the repo-wide busybox debug shell instead of a bare scratch base.
+# on a shell-less base (no debug shell: Wolfi busybox is glibc-linked and
+# the sign gate is 0-Low+).
 #
 # No run-as: upstream runs user 0 and the helm chart grants the deployment's
 # securityContext at deploy time, so root here is parity, not sloppiness.
@@ -13,9 +14,9 @@ contents:
   keyring:
     - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
   packages:
-    # Debug shell only — the binary is static Go. ca-certificates for the
-    # webhook client + API server TLS.
-    - busybox
+    # No debug shell: Wolfi busybox is glibc-linked (so:libc.so.6) and glibc
+    # is the fleet's unpatched 0-Low+ blocker; the binary is static Go.
+    # ca-certificates-bundle for the webhook client + API server TLS.
     - ca-certificates-bundle
     # Built by melange; supplied via --repository-append at build time.
     - metallb-controller

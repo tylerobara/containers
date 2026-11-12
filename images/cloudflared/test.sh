@@ -20,21 +20,24 @@ echo "Testing nonroot uid 65532 (upstream USER 65532:65532, distroless nonroot).
 uid=$(docker inspect --format '{{.Config.User}}' "$IMAGE")
 [ "$uid" = "65532" ] || fail "run-as is '$uid', expected '65532'"
 
-echo "Testing prod restraint: busybox shell only, no bash/apk-tools..."
-docker run --rm --entrypoint /bin/sh "$IMAGE" -c '
-  command -v bash >/dev/null 2>&1 && exit 1
-  command -v apk  >/dev/null 2>&1 && exit 1
-  exit 0' || fail "bash or apk-tools present in prod image"
+echo "Testing distroless posture: no shell at all..."
+for p in /bin/sh /bin/bash /usr/bin/apk; do
+  docker run --rm --entrypoint "$p" "$IMAGE" true >/dev/null 2>&1 \
+    && fail "$p present in prod image" || true
+done
 
 echo "Testing version anchor: installed apk is exactly ${VERSION}-r100..."
 # Wolfi DOES ship a cloudflared package, so this check is load-bearing: if the
 # epoch-100/provider-priority ever loses resolution, the installed pkgver reads
 # as Wolfi's 2026.x.y-rN here (the workflow's lock guard asserts the same
 # thing pre-publish; gatus/valkey precedent).
-docker run --rm --network none --entrypoint /bin/sh "$IMAGE" -ec "
-  grep -q '^P:cloudflared\$' /lib/apk/db/installed \
-    || { echo 'cloudflared apk not installed'; exit 1; }
-  awk '/^P:cloudflared\$/{getline; ok=(\$0==\"V:${VERSION}-r100\"); print \$0; exit !ok}' /lib/apk/db/installed" \
+# No shell in the image: read the apk db from the host side.
+cid=$(docker create "$IMAGE")
+db=$(docker export "$cid" | tar -xO lib/apk/db/installed 2>/dev/null || true)
+docker rm "$cid" >/dev/null
+echo "$db" | grep -q '^P:cloudflared$' \
+  || fail "cloudflared apk not installed"
+[ "$(echo "$db" | grep -A1 '^P:cloudflared$' | tail -1)" = "V:${VERSION}-r100" ] \
   || fail "installed apk is not exactly cloudflared ${VERSION}-r100"
 
 echo "Testing --version prints exactly ${VERSION} (the ldflag stamp, no DEV/unknown)..."
