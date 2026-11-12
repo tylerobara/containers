@@ -46,6 +46,16 @@ cosign verify \
 (Only digest-pinned references are signed, and only when the daily grype scan
 reports zero Low+ findings — see the Pages catalog for current state.)
 
+The one scan exception is `GO-2026-5932` — Go's "golang.org/x/crypto/openpgp is
+unmaintained/unsafe by design" advisory (no CVE, so grype grades it Unknown and
+it never gates signing). openpgp reaches the binary as dead weight through
+golang-migrate's GitHub source driver → `go-github/v39`, which pocket-id never
+calls, and no x/crypto release takes it: the "fixed in" version is only the
+commit that carved openpgp into its own deprecated module, where grype flags it
+again with no fix at all. Excluded by that exact ID + package through
+[`grype-ignores.yaml`](grype-ignores.yaml); the scan and the sign gate are
+otherwise unmodified.
+
 ### Running it
 
 `docker run` with an encryption key is enough for a first boot (SQLite is pure

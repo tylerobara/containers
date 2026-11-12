@@ -1,0 +1,33 @@
+# Grype scan exceptions for the pocket-id image — maintainer-reviewed, not a
+# scan loosening: the scan + sign-only-when-0-Low+ gate run unmodified
+# (pocket-id.yml scan step, mounted as /cfg/grype.yaml), and ONLY the exact
+# vulnerability IDs below are excluded, per-ID.
+# Schema note: grype's ignore list is TOP-LEVEL (same as keycloak's
+# grype-ignores.yaml); nesting it under `match:` is silently ignored.
+ignore:
+  # GO-2026-5932 is not a CVE: it is Go's "golang.org/x/crypto/openpgp is
+  # unmaintained and unsafe by design" advisory (no CVSS, so grype reports
+  # Unknown and it never touched the signing gate). It matches the go-module
+  # package golang.org/x/crypto v0.58.0, which pocket-id pins in
+  # backend/go.mod for bcrypt/hkdf/chacha20poly1305; the openpgp subtree is
+  # linked in only as dead weight:
+  #   migrate/v4/source/github -> google/go-github/v39 -> x/crypto/openpgp
+  # (pocket-id migrates from embedded resources, never from GitHub, so no
+  # openpgp code path is reachable).
+  #
+  # There is no upgrade that takes this. The "Fixed in" version grype shows
+  # (0.58.1-0.20261009181718-2f1f834330b2) is not a patch — it is the commit
+  # that carved openpgp out into its own deprecated module. Checked against
+  # grype 0.121.1 with that build: the same GO-2026-5932 still fires, now on
+  # golang.org/x/crypto/openpgp v0.1.0-deprecated with NO fix version, and
+  # the build breaks until go.mod gains that module by hand, since
+  # go-github/v39's openpgp import stops resolving from the parent module.
+  #
+  # Remove this entry when upstream's backend/go.mod stops pulling
+  # go-github/v39 (golang-migrate's GitHub source driver) — the finding then
+  # cannot match at all; the daily scan gate will show that on its own.
+  - vulnerability: GO-2026-5932
+    package:
+      name: golang.org/x/crypto
+      type: go-module
+    reason: "unmaintained-package advisory, no CVE and no fix release; x/crypto/openpgp is linked only via golang-migrate's GitHub source driver -> go-github/v39 GPG verification, unreachable for pocket-id (maintainer-reviewed, verified against grype 0.121.1)"
