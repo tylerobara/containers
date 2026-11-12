@@ -23,7 +23,7 @@
 package:
   name: cilium
   version: 1.20.4
-  epoch: 100
+  epoch: 101
   description: "Cilium CNI (cilium-agent + tooling), built from upstream source"
   copyright:
     - license: Apache-2.0
@@ -36,6 +36,11 @@ vars:
   # images/runtime/build-cni.sh pins containernetworking/plugins v1.9.1
   cni_version: "1.9.1"
   cni_sha256: 34bd82d47e981940751619c9cc44c095bb90bfcaf8d71865cbb822c37690a764
+  # Vendored floors for the scanned Go deps (see swap step): GO-2026-6865
+  # (klauspost/compress zstd panic, High) and GHSA-358w-w75h-x6rx
+  # (gopacket, Medium). Keep in step with the anchors in the swap step.
+  compress_version: "1.20.2"
+  gopacket_version: "1.7.2"
 
 environment:
   contents:
@@ -69,6 +74,37 @@ pipeline:
       cd /home/build
       tar xf cilium.tar.gz && rm cilium.tar.gz
       tar xf cni.tar.gz && rm cni.tar.gz
+
+  - working-directory: /home/build/cilium-${{package.version}}
+    runs: |
+      # Vendored floors for the scanned Go deps. `go get` would break
+      # vendor consistency, so swap the trees by hand: module-cache copy
+      # (sumdb-verified by go mod download) + the two modules.txt stamps.
+      # Both moves are dependency-neutral — compress 1.20.2 requires
+      # nothing; gopacket 1.7.2's requires (netlink v1.1.0, netns
+      # 20211101, x/net 0.55.0, x/sys 0.45.0) all sit below cilium's
+      # vendored stamps and its imports need no package beyond them.
+      # Anchors fail loudly if upstream's vendored versions move.
+      export GOTOOLCHAIN=local
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      swap() {
+        mod=$1 old=$2 new=$3 newgo=$4
+        grep -q "^# $mod $old$" vendor/modules.txt \
+          || { echo "vendor/modules.txt no longer pins $mod $old; revisit this patch"; exit 1; }
+        go mod download "$mod@$new"
+        rm -rf "vendor/$mod"
+        cp -R "$(go env GOMODCACHE)/$mod@$new" "vendor/$mod"
+        chmod -R u+w "vendor/$mod"
+        go mod edit -require="$mod@$new"
+        awk -v mod="$mod" -v old="$old" -v new="$new" -v newgo="$newgo" '
+          $0 == "# " mod " " old { print "# " mod " " new; hit=1; next }
+          hit && /^## explicit; go / { sub(/go .*/, "go " newgo); hit=0; print; next }
+          hit { hit=0 }
+          { print }' vendor/modules.txt > vendor/modules.txt.tmp \
+          && mv vendor/modules.txt.tmp vendor/modules.txt
+      }
+      swap github.com/klauspost/compress v1.18.7 "v${{vars.compress_version}}" 1.25
+      swap github.com/gopacket/gopacket v1.6.1 "v${{vars.gopacket_version}}" 1.25.0
 
   - working-directory: /home/build/cilium-${{package.version}}
     runs: |
@@ -125,6 +161,16 @@ pipeline:
       "$D/usr/bin/cilium-agent" --version | grep -q "${{package.version}}"
       # cilium-cni prints its banner on stderr
       "$D/opt/cni/bin/cilium-cni" --version 2>&1 | grep -q "${{package.version}}"
+      # grype reads Go deps from the embedded build info — fail loudly if
+      # the vendored floors didn't land in the agent binary.
+      export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
+      for spec in "github.com/klauspost/compress:v${{vars.compress_version}}" \
+                  "github.com/gopacket/gopacket:v${{vars.gopacket_version}}"; do
+        mod=${spec%:*}; want=${spec##*:}
+        got=$(go version -m "$D/usr/bin/cilium-agent" \
+          | awk -F'\t' -v m="$mod" '$3==m{print $4; exit}')
+        [ "$got" = "$want" ] || { echo "$mod is '$got' in the binary, want $want"; exit 1; }
+      done
       for b in cilium-dbg cilium cilium-bugtool cilium-agent cilium-health \
                cilium-health-responder cilium-mount cilium-sysctlfix \
                cilium-envoy-bootstrap-locality hubble; do
