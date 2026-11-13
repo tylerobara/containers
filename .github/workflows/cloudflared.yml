@@ -227,12 +227,19 @@ jobs:
         run: |
           DIGEST=$(docker buildx imagetools inspect "$CF_REF" \
             --format '{{json .Manifest}}' | jq -r .digest)
-          docker run --rm --user 0:0 \
+          for i in 1 2 3; do
+          if docker run --rm --user 0:0 \
             -v "$HOME/.docker:/root/.docker:ro" \
             -e DOCKER_CONFIG=/root/.docker \
             -e GITHUB_ACTIONS \
             -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-            ghcr.io/sigstore/cosign/cosign:latest sign --yes "$CF_REF@$DIGEST"
+            ghcr.io/sigstore/cosign/cosign:latest sign --yes "$CF_REF@$DIGEST"; then
+
+            break
+          fi
+          [ "$i" = 3 ] && { echo "cosign sign failed after 3 attempts (rekor blip?)"; exit 1; }
+          echo "cosign sign attempt $i failed; retrying in 15s"; sleep 15
+          done
           echo "SIGNED=true" >> "$GITHUB_ENV"
 
       - name: Build pages data
