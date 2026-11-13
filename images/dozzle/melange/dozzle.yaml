@@ -13,7 +13,7 @@
 
 package:
   name: dozzle
-  version: 11.4.2
+  version: 11.4.3
   epoch: 101
   description: "Dozzle container log UI built from upstream source"
   copyright:
@@ -23,7 +23,7 @@ package:
 
 vars:
   # SHA256 of the GitHub release tarball
-  sha256: c2f06bad10799ce7250247e2dcea4d2c5d8492b19c3bf0e9400f5eaa5281a408
+  sha256: b581af07672b2f00ea671fd890b3c421b6f6e6af86c67895319c8d0676612f3d
 
 environment:
   contents:
