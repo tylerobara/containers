@@ -15,7 +15,7 @@
 package:
   name: openbao
   version: 2.7.2
-  epoch: 104
+  epoch: 105
   description: "OpenBao secrets management built from upstream source"
   copyright:
     - license: MPL-2.0
@@ -96,13 +96,34 @@ pipeline:
       # Residual kept honest: go-jose/v3 v3.0.5 is UNFIXABLE by us — the
       # jwt credential pulls it via github.com/hashicorp/cap/jwt, whose
       # latest release and main still import v3 (go mod why); no patched v3
-      # exists. That one High stays, so this image REMAINS unsigned (gate =
-      # 0 Low+) until hashicorp/cap moves. Nothing here may touch it.
+      # exists (module archived, advisories patched=null). Its 1 High +
+      # 2 Medium stay, so this image REMAINS UNSIGNED (gate = 0 Low+) until
+      # hashicorp/cap moves. Nothing here may touch it.
       gijose_cur=$(awk '$1=="github.com/go-jose/go-jose/v4"{print $2; exit}' go.mod)
       if [ -z "$gijose_cur" ] || { [ "$gijose_cur" != "v4.1.6" ] && [ "$(printf '%s\n%s\n' "$gijose_cur" v4.1.6 | sort -V | head -1)" = "$gijose_cur" ]; }; then
         echo "patching go-jose/v4 ${gijose_cur:-unpinned} -> v4.1.6 (GHSA-mgcc-cww5-fp2q)"
         go get github.com/go-jose/go-jose/v4@v4.1.6
       fi
+      # Floors for the other scanned Go deps (go get is a selection, not a
+      # floor, so each fires only while go.mod sits below — metallb's
+      # bump_floor): klauspost/compress 1.20.2 for GO-2026-6865 (High, zstd
+      # panic; same floor as cilium) and the otel family 1.47.0 for
+      # GHSA-q7gw-24fr-5p69 (Medium, sdk/trace). otel main is selected
+      # explicitly so go get records the 1.47-new otel/log module's go.sum
+      # entries; -mod=mod on the build below is the safety net for any
+      # other module the re-resolve newly pulls in.
+      bump_floor() { # bump_floor <module> <fixed-version-no-v>
+        cur=$(awk -v m="$1" '$1==m && $2 ~ /^v/ {print $2; exit}' go.mod)
+        [ -n "$cur" ] || return 0
+        if [ "$cur" != "v$2" ] && [ "$(printf '%s\nv%s\n' "$cur" "$2" | sort -V | head -1)" = "$cur" ]; then
+          echo "build-side floor: $1 $cur -> v$2"
+          go get "$1@v$2"
+        fi
+      }
+      bump_floor github.com/klauspost/compress 1.20.2
+      bump_floor go.opentelemetry.io/otel 1.47.0
+      bump_floor go.opentelemetry.io/otel/sdk 1.47.0
+      bump_floor go.opentelemetry.io/otel/trace 1.47.0
       mkdir -p internal/http/web_ui  # Makefile's static-assets-dir
       # Bootstrap the exact pnpm pinned in ui/package.json packageManager
       # (Wolfi pnpm is node-22+, see env comment; upstream CI runs this same
@@ -121,7 +142,7 @@ pipeline:
       # build without it self-reports the dev default "2.0.0-HEAD").
       # VersionMetadata is the sanctioned downstream knob (no leading v:
       # "v" + version would double the v in `bao version`).
-      go build -trimpath -buildvcs=false -tags "openbao ui" \
+      go build -mod=mod -trimpath -buildvcs=false -tags "openbao ui" \
         -ldflags "-s -w \
           -X github.com/openbao/openbao/v2/internal/version.fullVersion=${{package.version}} \
           -X github.com/openbao/openbao/v2/internal/version.VersionMetadata=wolfi \
@@ -137,6 +158,15 @@ pipeline:
         | awk '$2=="github.com/go-jose/go-jose/v4"{print $3; exit}')
       [ "$gijose_bin" = "v4.1.6" ] \
         || { echo "shipped bao embeds go-jose/v4 '${gijose_bin:-none}', want exactly v4.1.6 (GHSA-mgcc-cww5-fp2q)"; exit 1; }
+      for spec in "github.com/klauspost/compress v1.20.2" \
+                  "go.opentelemetry.io/otel/sdk v1.47.0" \
+                  "go.opentelemetry.io/otel/trace v1.47.0"; do
+        set -- $spec
+        got=$(go version -m "${{targets.destdir}}/usr/bin/bao" \
+          | awk -v m="$1" '$2==m{print $3; exit}')
+        [ "$(printf '%s\n%s\n' "$got" "$2" | sort -V | head -1)" = "$2" ] \
+          || { echo "shipped bao embeds $1 '${got:-none}', want >= $2"; exit 1; }
+      done
       # Upstream ships a vault compat symlink.
       ln -sfn bao "${{targets.destdir}}/usr/bin/vault"
       # The official openbao Helm chart hardcodes this path in its server
