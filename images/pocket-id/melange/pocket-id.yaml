@@ -17,7 +17,7 @@
 
 package:
   name: pocket-id
-  version: 2.19.2
+  version: 2.19.3
   epoch: 101
   description: "Pocket ID passkey OIDC provider built from upstream source"
   copyright:
@@ -27,7 +27,7 @@ package:
 
 vars:
   # SHA256 of the GitHub release tarball
-  sha256: 2a6cf4776e23fc660cce7fcf3ed1c16c50ea542046c533f5be5c1fd310e74752
+  sha256: ee2525db7061b355deb5f12eb6c15465faf7e7b5fffd7b9915919d40cd8af54c
 
 environment:
   contents:
