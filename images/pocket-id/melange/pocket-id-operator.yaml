@@ -15,7 +15,7 @@
 package:
   name: pocket-id-operator
   version: 0.16.2
-  epoch: 100
+  epoch: 101
   description: "Pocket ID Kubernetes operator built from upstream source"
   copyright:
     - license: Apache-2.0
@@ -63,7 +63,12 @@ pipeline:
       # which would hide the app from grype).
       export CGO_ENABLED=0 GOTOOLCHAIN=local
       export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.27/bin"
-      go build -trimpath -buildvcs=false \
+      # GHSA-q7gw-24fr-5p69 (Medium): upstream embeds otel/trace v1.46.0;
+      # 1.47.0 is the patched release. 1.47 newly links the otel/log module
+      # upstream go.sum never listed, hence -mod=mod below (the readonly
+      # build refuses to fill the missing go.sum entry itself).
+      go get go.opentelemetry.io/otel/trace@v1.47.0
+      go build -mod=mod -trimpath -buildvcs=false \
         -ldflags "-s -w" \
         -o manager ./cmd
       install -D -m 0755 manager "${{targets.destdir}}/manager"

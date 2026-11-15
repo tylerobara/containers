@@ -17,7 +17,7 @@
 package:
   name: metallb-speaker
   version: 0.16.2
-  epoch: 100
+  epoch: 101
   description: "MetalLB speaker built from upstream source"
   copyright:
     - license: Apache-2.0
@@ -29,9 +29,9 @@ vars:
   sha256: c61cce2272a8416f6eca558b6375646ccca98a83d8833e21359eaa03ed1676a3
   # Vulnerable Go module pins raised before compiling — see the comment in
   # metallb-controller.yaml (same tarball, same build list): x/net 0.60.0,
-  # otel 1.45.0, grpc 1.83.2.
+  # otel 1.47.0, grpc 1.83.2.
   xnet_version: 0.60.0
-  otel_version: 1.45.0
+  otel_version: 1.47.0
   grpc_version: 1.83.2
 
 environment:

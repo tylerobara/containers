@@ -14,7 +14,7 @@
 package:
   name: metallb-controller
   version: 0.16.2
-  epoch: 100
+  epoch: 101
   description: "MetalLB controller built from upstream source"
   copyright:
     - license: Apache-2.0
@@ -26,15 +26,17 @@ vars:
   sha256: c61cce2272a8416f6eca558b6375646ccca98a83d8833e21359eaa03ed1676a3
   # Upstream 0.16.1 pinned vulnerable Go modules (grype Critical/High in
   # x/net <0.60.0; High in grpc <1.83.1/1.83.2 (GHSA-2v4p-qf9q-27wj,
-  # GHSA-vp52-pcj8-j9qc); Low GHSA-8wmf-6v46-5gfg in otel <=1.44.0); we
+  # GHSA-vp52-pcj8-j9qc); Low GHSA-8wmf-6v46-5gfg in otel <=1.44.0; Medium
+  # GHSA-q7gw-24fr-5p69 in otel sdk/trace <1.47.0); we
   # FLOOR them to the patched releases before compiling — see bump_floor
   # in the build step. A bare `go get mod@ver` is a selection, not a
   # floor: pinning grpc@1.83.2 on 0.16.2 downgraded upstream's own 1.84.0
   # and cascaded a frr-k8s 0.0.27->0.0.26 downgrade (no as-path-prepend
-  # API, compile fail). 0.16.2 ships >= every floor, so these are pure
-  # no-ops now; retire them if upstream ever drops one further still.
+  # API, compile fail). 0.16.2 ships >= every floor except otel (it ships
+  # 1.45.0, so the 1.47.0 floor fires); retire the pins once upstream
+  # catches up.
   xnet_version: 0.60.0
-  otel_version: 1.45.0
+  otel_version: 1.47.0
   grpc_version: 1.83.2
 
 environment:
