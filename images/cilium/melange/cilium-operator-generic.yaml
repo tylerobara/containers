@@ -14,7 +14,7 @@
 package:
   name: cilium-operator-generic
   version: 1.20.4
-  epoch: 102
+  epoch: 103
   description: "Cilium operator (generic IPAM variant), built from upstream source"
   copyright:
     - license: Apache-2.0
@@ -30,10 +30,12 @@ vars:
   # untouched). Retire once upstream's vendor tree ships >= this.
   gojose_version: 4.1.6
   # Vendored floors for the scanned Go deps (see swap step): GO-2026-6865
-  # (klauspost/compress zstd panic, High) and GHSA-358w-w75h-x6rx
-  # (gopacket, Medium). Keep in step with the anchors in the swap step.
+  # (klauspost/compress zstd panic, High), GHSA-358w-w75h-x6rx
+  # (gopacket, Medium) and GHSA-q7gw-24fr-5p69 (otel/trace <1.47.0,
+  # Medium). Keep in step with the anchors in the swap step.
   compress_version: "1.20.2"
   gopacket_version: "1.7.2"
+  otel_trace_version: "1.47.0"
 
 environment:
   contents:
@@ -114,6 +116,11 @@ pipeline:
       }
       swap github.com/klauspost/compress v1.18.7 "v${{vars.compress_version}}" 1.25
       swap github.com/gopacket/gopacket v1.6.1 "v${{vars.gopacket_version}}" 1.25.0
+      # GHSA-q7gw-24fr-5p69 (Medium): trace 1.47.0's only non-test require
+      # addition is xxhash v2.3.0, already vendored; its otel v1.47.0
+      # require is exercised by test code only — the vendored build compiles
+      # against the vendored otel 1.45.0 (replay-confirmed).
+      swap go.opentelemetry.io/otel/trace v1.45.0 "v${{vars.otel_trace_version}}" 1.26.0
 
   - working-directory: /home/build/cilium-${{package.version}}
     runs: |
@@ -143,7 +150,8 @@ pipeline:
       [ "$gjver" = "v${{vars.gojose_version}}" ] \
         || { echo "go-jose/v4 is '$gjver' in the binary, want v${{vars.gojose_version}}"; exit 1; }
       for spec in "github.com/klauspost/compress:v${{vars.compress_version}}" \
-                  "github.com/gopacket/gopacket:v${{vars.gopacket_version}}"; do
+                  "github.com/gopacket/gopacket:v${{vars.gopacket_version}}" \
+                  "go.opentelemetry.io/otel/trace:v${{vars.otel_trace_version}}"; do
         mod=${spec%:*}; want=${spec##*:}
         got=$(go version -m "${{targets.destdir}}/usr/bin/cilium-operator-generic" \
           | awk -F'\t' -v m="$mod" '$3==m{print $4; exit}')
