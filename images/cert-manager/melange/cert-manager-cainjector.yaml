@@ -13,7 +13,7 @@
 package:
   name: cert-manager-cainjector
   version: 1.21.3
-  epoch: 101
+  epoch: 102
   description: "cert-manager cainjector built from upstream source"
   copyright:
     - license: Apache-2.0
@@ -27,10 +27,12 @@ vars:
   # build so the startup banner (version/git_commit) matches it.
   git_commit: ea04791b027b1ddd1884a02043ee8c9c097fc3ac
   # Upstream 1.21.2 pins vulnerable Go modules (grype Critical/High in
-  # x/net <0.60.0; cainjector's dep graph has no otel, so no otel pin
-  # here). go get only raises requirements (MVS never downgrades), so
-  # once upstream ships >= this the bump is a no-op — retire it then.
+  # x/net <0.60.0; Medium GHSA-q7gw-24fr-5p69 in otel/trace <1.47.0,
+  # pulled in via controller-runtime — only trace links, no sdk). go get
+  # only raises requirements (MVS never downgrades), so once upstream
+  # ships >= these the bumps are no-ops — retire them then.
   xnet_version: 0.60.0
+  otel_version: 1.47.0
 
 environment:
   contents:
@@ -67,7 +69,8 @@ pipeline:
       # Raise the vulnerable x/net pin (vars.xnet_version); MVS never
       # downgrades, so this is a no-op once upstream ships >= that version.
       # (GOFLAGS=-trimpath stays on `go build` only — `go get` rejects it.)
-      go get golang.org/x/net@v${{vars.xnet_version}}
+      go get golang.org/x/net@v${{vars.xnet_version}} \
+        go.opentelemetry.io/otel/trace@v${{vars.otel_version}}
       GOFLAGS=-trimpath go build -buildvcs=false \
         -ldflags "-w -s \
           -X github.com/cert-manager/cert-manager/pkg/util.AppVersion=v${{package.version}} \
@@ -91,3 +94,7 @@ pipeline:
         | awk -F'\t' '$3=="golang.org/x/net"{print $4; exit}')
       [ "$(printf '%s\n%s\n' "$xn" "v${{vars.xnet_version}}" | sort -V | head -1)" = "v${{vars.xnet_version}}" ] \
         || { echo "embedded golang.org/x/net is '$xn', want >= v${{vars.xnet_version}}"; exit 1; }
+      ot=$(go version -m "${{targets.destdir}}/usr/bin/cert-manager-cainjector" \
+        | awk -F'\t' '$3=="go.opentelemetry.io/otel/trace"{print $4; exit}')
+      [ "$(printf '%s\n%s\n' "$ot" "v${{vars.otel_version}}" | sort -V | head -1)" = "v${{vars.otel_version}}" ] \
+        || { echo "embedded go.opentelemetry.io/otel/trace is '$ot', want >= v${{vars.otel_version}}"; exit 1; }

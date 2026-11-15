@@ -14,16 +14,17 @@
 # /statuscleaner is the Deployment of the same image. Upstream ships no
 # ENTRYPOINT (every consumer passes an explicit command) so neither do we.
 #
-# Go deps at 0.0.27 need one preemptive bump: the build list carries
-# golang.org/x/net v0.57.0 (Critical/High advisories fixed in 0.60.0), so we
-# `go get` it up before compiling (otel is already at a clean 1.45.0). Like
-# the metallb pair, go get only raises requirements, so this is a no-op once
-# upstream ships >= 0.60.0 — retire the pin then.
+# Go deps at 0.0.27 need two preemptive bumps: the build list carries
+# golang.org/x/net v0.57.0 (Critical/High advisories fixed in 0.60.0) and
+# otel sdk/trace v1.45.0 (Medium GHSA-q7gw-24fr-5p69, fixed in 1.47.0), so
+# we `go get` them up before compiling. Like the metallb pair, go get only
+# raises requirements, so these are no-ops once upstream ships >= these —
+# retire the pins then.
 
 package:
   name: metallb-frr-k8s
   version: 0.0.27
-  epoch: 100
+  epoch: 101
   description: "frr-k8s (MetalLB's FRR integration) built from upstream source"
   copyright:
     - license: Apache-2.0
@@ -35,6 +36,8 @@ vars:
   sha256: 4dca9e2e5aa2a0e18f60a3caf278a9be1053714f43662dc15d75eea2ffdfa346
   # patched x/net release (see header)
   xnet_version: 0.60.0
+  # patched otel release (see header)
+  otel_version: 1.47.0
 
 environment:
   contents:
@@ -77,8 +80,13 @@ pipeline:
         fi
       }
       bump_floor golang.org/x/net ${{vars.xnet_version}}
+      bump_floor go.opentelemetry.io/otel/sdk ${{vars.otel_version}}
+      bump_floor go.opentelemetry.io/otel/trace ${{vars.otel_version}}
       D="${{targets.destdir}}"
-      go build -o frr-k8s ./cmd/frr-k8s-controller
+      # -mod=mod: otel 1.47 newly links the otel/log module, absent from
+      # upstream go.sum; this first build fills the missing entries (the
+      # later builds of this module then pass readonly again).
+      go build -mod=mod -o frr-k8s ./cmd/frr-k8s-controller
       install -D -m 0755 frr-k8s "$D/frr-k8s"
       go build -o frr-metrics ./cmd/metrics
       install -D -m 0755 frr-metrics "$D/frr-metrics"
@@ -109,3 +117,9 @@ pipeline:
         | awk -F'\t' '$3=="golang.org/x/net"{print $4; exit}')
       [ "$(printf '%s\n%s\n' "$ver" "v${{vars.xnet_version}}" | sort -V | head -1)" = "v${{vars.xnet_version}}" ] \
         || { echo "golang.org/x/net is '$ver' in the binary, want >= v${{vars.xnet_version}}"; exit 1; }
+      for m in go.opentelemetry.io/otel/sdk go.opentelemetry.io/otel/trace; do
+        ver=$(go version -m "${{targets.destdir}}/frr-k8s" \
+          | awk -F'\t' -v m="$m" '$3==m{print $4; exit}')
+        [ "$(printf '%s\n%s\n' "$ver" "v${{vars.otel_version}}" | sort -V | head -1)" = "v${{vars.otel_version}}" ] \
+          || { echo "$m is '$ver' in the binary, want >= v${{vars.otel_version}}"; exit 1; }
+      done

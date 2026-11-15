@@ -13,7 +13,7 @@
 package:
   name: cert-manager-controller
   version: 1.21.3
-  epoch: 102
+  epoch: 103
   description: "cert-manager controller built from upstream source"
   copyright:
     - license: Apache-2.0
@@ -27,16 +27,17 @@ vars:
   # build so the startup banner (version/git_commit) matches it.
   git_commit: ea04791b027b1ddd1884a02043ee8c9c097fc3ac
   # Upstream 1.21.2 pins vulnerable Go modules (grype Critical/High in
-  # x/net <0.60.0; Low GHSA-8wmf-6v46-5gfg in otel <=1.44.0); we `go get`
-  # them up to the patched releases before compiling. go get only raises
-  # requirements (MVS never downgrades), so once upstream ships >= these
-  # the bumps are no-ops — retire the pins then.
+  # x/net <0.60.0; Low GHSA-8wmf-6v46-5gfg in otel <=1.44.0; Medium
+  # GHSA-q7gw-24fr-5p69 in otel sdk/trace <1.47.0); we `go get` them up to
+  # the patched releases before compiling. go get only raises requirements
+  # (MVS never downgrades), so once upstream ships >= these the bumps are
+  # no-ops — retire the pins then.
   # x/net 0.62.0 additionally covers GO-2026-6860 / CVE-2026-78661
   # (x/net/html quadratic-complexity DoS, published Oct 27); go-jose/v4
   # 4.1.6 covers GHSA-mgcc-cww5-fp2q / CVE-2026-116587 (JWK RSA parse DoS
   # — the ACME client links it; webhook/cainjector don't, 0 findings).
   xnet_version: 0.62.0
-  otel_version: 1.45.0
+  otel_version: 1.47.0
   gojose_version: 4.1.6
 
 environment:
@@ -81,7 +82,11 @@ pipeline:
         go.opentelemetry.io/otel/trace@v${{vars.otel_version}} \
         go.opentelemetry.io/otel/exporters/otlp/otlptrace@v${{vars.otel_version}} \
         go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v${{vars.otel_version}}
-      GOFLAGS=-trimpath go build -buildvcs=false \
+      # -mod=mod: otel 1.47 links new modules (otel/log, and via the k8s
+      # chain go-openapi swag/pools) that upstream go.sum never listed; the
+      # go-get selections alone leave those go.sum entries missing and the
+      # readonly build refuses to add them.
+      GOFLAGS=-trimpath go build -mod=mod -buildvcs=false \
         -ldflags "-w -s \
           -X github.com/cert-manager/cert-manager/pkg/util.AppVersion=v${{package.version}} \
           -X github.com/cert-manager/cert-manager/pkg/util.AppGitCommit=${{vars.git_commit}}" \
@@ -104,6 +109,7 @@ pipeline:
           "golang.org/x/net v${{vars.xnet_version}}" \
           "github.com/go-jose/go-jose/v4 v${{vars.gojose_version}}" \
           "go.opentelemetry.io/otel/sdk v${{vars.otel_version}}" \
+          "go.opentelemetry.io/otel/trace v${{vars.otel_version}}" \
           "go.opentelemetry.io/otel/exporters/otlp/otlptrace v${{vars.otel_version}}" \
           "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v${{vars.otel_version}}"; do
         set -- $spec
