@@ -25,7 +25,7 @@ on:
       - images/kubernetes-reflector/**
       - .github/workflows/kubernetes-reflector.yml
   schedule:
-    - cron: '55 6 * * *' # daily, staggered off the other image families
+    - cron: '55 23 * * *' # daily, staggered off the other image families
   workflow_dispatch:
     inputs:
       ref:

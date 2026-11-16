@@ -34,7 +34,11 @@ on:
       - images/cloudnative-pg/**
       - .github/workflows/postgres.yml
   schedule:
-    - cron: '0 6 * * *' # daily — republishes tags so Wolfi CVE patches land within a day
+    # Wave head (was 06:00Z; whole fleet shifted -7h to 23:00-01:20Z on
+    # 2026-11-16: GitHub's schedule dispatcher had been delivering the
+    # 06:0x-08:2xZ crons 8-9h late, so the wave lands near-real-time in a
+    # less-loaded window). Keep the relative stagger when editing.
+    - cron: '0 23 * * *' # daily — republishes tags so Wolfi CVE patches land within a day
   workflow_dispatch:
     inputs:
       ref:

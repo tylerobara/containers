@@ -28,7 +28,7 @@ on:
       - images/alpine-k8s/**
       - .github/workflows/alpine-k8s.yml
   schedule:
-    - cron: '40 7 * * *' # daily; the real security cadence — apko lock floats
+    - cron: '40 0 * * *' # daily; the real security cadence — apko lock floats
                          # to current Wolfi, so patches flow without a commit
                          # (helm only moves via a melange version bump)
   workflow_dispatch:

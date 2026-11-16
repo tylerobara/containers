@@ -25,7 +25,7 @@ on:
       - images/os-shell/**
       - .github/workflows/os-shell.yml
   schedule:
-    - cron: '15 6 * * *' # daily; the real security cadence — apko lock floats
+    - cron: '15 23 * * *' # daily; the real security cadence — apko lock floats
                          # to current Wolfi, so patches flow without a commit
   workflow_dispatch:
     inputs:

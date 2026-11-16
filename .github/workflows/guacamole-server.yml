@@ -25,7 +25,7 @@ on:
       - images/guacamole-server/**
       - .github/workflows/guacamole-server.yml
   schedule:
-    - cron: '5 8 * * *' # daily, staggered off the 06:0x/07:0x pack + update-versions (07:30) + alpine-k8s (08:00)
+    - cron: '5 1 * * *' # daily, staggered off the 23:0x/00:0x pack + update-versions (00:30) + alpine-k8s (01:00)
   workflow_dispatch:
     inputs:
       ref:

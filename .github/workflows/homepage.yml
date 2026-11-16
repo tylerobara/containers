@@ -25,7 +25,7 @@ on:
       - images/homepage/**
       - .github/workflows/homepage.yml
   schedule:
-    - cron: '10 7 * * *' # daily, staggered off postgres + operator
+    - cron: '10 0 * * *' # daily, staggered off postgres + operator
   workflow_dispatch:
     inputs:
       ref:

@@ -32,7 +32,7 @@ on:
       - images/bitnami-postgres/**
       - .github/workflows/bitnami-postgres.yml
   schedule:
-    - cron: '45 7 * * *' # daily — republishes tags so Wolfi CVE patches land within a day
+    - cron: '45 0 * * *' # daily — republishes tags so Wolfi CVE patches land within a day
   workflow_dispatch:
     inputs:
       ref:

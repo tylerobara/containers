@@ -24,7 +24,7 @@ on:
       - images/openbao/**
       - .github/workflows/openbao.yml
   schedule:
-    - cron: '10 6 * * *' # daily, staggered off postgres + operator
+    - cron: '10 23 * * *' # daily, staggered off postgres + operator
   workflow_dispatch:
     inputs:
       ref:

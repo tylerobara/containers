@@ -25,7 +25,7 @@ on:
       - images/cert-manager/**
       - .github/workflows/cert-manager.yml
   schedule:
-    - cron: '35 6 * * *' # daily, staggered after cilium (06:30)
+    - cron: '35 23 * * *' # daily, staggered after cilium (23:30)
   workflow_dispatch:
     inputs:
       ref:

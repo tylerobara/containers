@@ -26,7 +26,7 @@ on:
       - images/k8s-sidecar/**
       - .github/workflows/k8s-sidecar.yml
   schedule:
-    - cron: '45 6 * * *' # daily, staggered after metallb (06:40)
+    - cron: '45 23 * * *' # daily, staggered after metallb (23:40)
   workflow_dispatch:
     inputs:
       ref:
