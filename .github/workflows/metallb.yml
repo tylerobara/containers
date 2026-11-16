@@ -26,7 +26,7 @@ on:
       - images/metallb/**
       - .github/workflows/metallb.yml
   schedule:
-    - cron: '40 6 * * *' # daily, staggered after cert-manager (06:35)
+    - cron: '40 23 * * *' # daily, staggered after cert-manager (23:35)
   workflow_dispatch:
     inputs:
       ref:

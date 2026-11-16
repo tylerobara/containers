@@ -25,7 +25,7 @@ on:
       - images/cloudnative-pg-operator/**
       - .github/workflows/cloudnative-pg-operator.yml
   schedule:
-    - cron: '5 6 * * *' # daily, staggered off postgres — Pages deploys stay serialized
+    - cron: '5 23 * * *' # daily, staggered off postgres — Pages deploys stay serialized
   workflow_dispatch:
     inputs:
       ref:

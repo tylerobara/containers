@@ -24,7 +24,7 @@ on:
       - images/valkey/**
       - .github/workflows/valkey.yml
   schedule:
-    - cron: '35 7 * * *' # daily, staggered off the 06:0x pack + update-versions (07:30)
+    - cron: '35 0 * * *' # daily, staggered off the 23:0x pack + update-versions (00:30)
   workflow_dispatch:
     inputs:
       ref:

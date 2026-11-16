@@ -22,7 +22,7 @@ name: update-versions
 
 on:
   schedule:
-    - cron: '30 7 * * *' # after the 06:00 daily rebuild
+    - cron: '30 0 * * *' # after the 23:00 daily rebuild
   workflow_dispatch:
     inputs:
       only:

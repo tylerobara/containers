@@ -26,7 +26,7 @@ on:
       - images/keycloak/**
       - .github/workflows/keycloak.yml
   schedule:
-    - cron: '0 8 * * *' # daily, staggered off the 06:0x/07:0x pack + update-versions (07:30)
+    - cron: '0 1 * * *' # daily, staggered off the 23:0x/00:0x pack + update-versions (00:30)
   workflow_dispatch:
     inputs:
       ref:

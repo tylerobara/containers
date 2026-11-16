@@ -25,7 +25,7 @@ on:
       - images/local-path-provisioner/**
       - .github/workflows/local-path-provisioner.yml
   schedule:
-    - cron: '25 7 * * *' # daily, staggered off the other image families
+    - cron: '25 0 * * *' # daily, staggered off the other image families
   workflow_dispatch:
     inputs:
       ref:

@@ -25,7 +25,7 @@ on:
       - images/grafana-image-renderer/**
       - .github/workflows/grafana-image-renderer.yml
   schedule:
-    - cron: '25 6 * * *' # daily, staggered off postgres + operator + openbao + os-shell + dokuwiki
+    - cron: '25 23 * * *' # daily, staggered off postgres + operator + openbao + os-shell + dokuwiki
   workflow_dispatch:
     inputs:
       ref:

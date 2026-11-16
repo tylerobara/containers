@@ -24,7 +24,7 @@ on:
       - images/frr/**
       - .github/workflows/frr.yml
   schedule:
-    - cron: '0 7 * * *' # daily, staggered after the other image workflows
+    - cron: '0 0 * * *' # daily, staggered after the other image workflows
   workflow_dispatch:
     inputs:
       ref:

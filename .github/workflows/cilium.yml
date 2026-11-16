@@ -24,7 +24,7 @@ on:
       - images/cilium/**
       - .github/workflows/cilium.yml
   schedule:
-    - cron: '30 6 * * *' # daily, staggered after grafana-image-renderer (06:25)
+    - cron: '30 23 * * *' # daily, staggered after grafana-image-renderer (23:25)
   workflow_dispatch:
     inputs:
       ref:

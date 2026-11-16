@@ -24,7 +24,7 @@ on:
       - images/dozzle/**
       - .github/workflows/dozzle.yml
   schedule:
-    - cron: '50 6 * * *' # daily, last in the stagger
+    - cron: '50 23 * * *' # daily, last in the stagger
   workflow_dispatch:
     inputs:
       ref:

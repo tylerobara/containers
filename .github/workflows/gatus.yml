@@ -25,7 +25,7 @@ on:
       - images/gatus/**
       - .github/workflows/gatus.yml
   schedule:
-    - cron: '15 7 * * *' # daily, staggered off the 06:0x pack + update-versions (07:30)
+    - cron: '15 0 * * *' # daily, staggered off the 23:0x pack + update-versions (00:30)
   workflow_dispatch:
     inputs:
       ref:

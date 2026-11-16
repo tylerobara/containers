@@ -23,7 +23,7 @@ on:
       - images/dokuwiki/**
       - .github/workflows/dokuwiki.yml
   schedule:
-    - cron: '20 6 * * *' # daily, staggered off postgres/operator/openbao/os-shell
+    - cron: '20 23 * * *' # daily, staggered off postgres/operator/openbao/os-shell
   workflow_dispatch:
     inputs:
       ref:

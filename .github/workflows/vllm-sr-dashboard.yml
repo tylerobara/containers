@@ -26,7 +26,7 @@ on:
       - images/semantic-router/**
       - .github/workflows/vllm-sr-dashboard.yml
   schedule:
-    - cron: '20 8 * * *' # daily, staggered off the 06:0x/07:0x pack and the 08:0x tail
+    - cron: '20 1 * * *' # daily, staggered off the 23:0x/00:0x pack and the 01:0x tail
   workflow_dispatch:
     inputs:
       ref:

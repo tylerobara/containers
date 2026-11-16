@@ -33,7 +33,7 @@ on:
       - images/traefik-fips/**
       - .github/workflows/traefik.yml
   schedule:
-    - cron: '20 7 * * *' # daily, staggered off postgres + operator
+    - cron: '20 0 * * *' # daily, staggered off postgres + operator
   workflow_dispatch:
     inputs:
       ref:

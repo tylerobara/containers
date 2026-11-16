@@ -27,7 +27,7 @@ on:
       - images/web-check/**
       - .github/workflows/web-check.yml
   schedule:
-    - cron: '50 7 * * *' # daily, staggered off postgres + operator + homepage
+    - cron: '50 0 * * *' # daily, staggered off postgres + operator + homepage
   workflow_dispatch:
     inputs:
       ref:

@@ -26,7 +26,7 @@ on:
       - images/cloudflared/**
       - .github/workflows/cloudflared.yml
   schedule:
-    - cron: '55 7 * * *' # daily, staggered off the 06:0x/07:0x pack + update-versions (07:30)
+    - cron: '55 0 * * *' # daily, staggered off the 23:0x/00:0x pack + update-versions (00:30)
   workflow_dispatch:
     inputs:
       ref:
