@@ -101,6 +101,10 @@ pipeline:
       # pnpm 12 install --lockfile-only. All guards below write a single
       # combined "overrides:" block (a duplicate key would break
       # pnpm-workspace.yaml).
+      # next security patch (same mechanism, same deal): the upstream 2.8.0
+      # lock pins 16.4.1 — GHSA-mfr8-8qww-v76h (Medium), fixed in 16.4.5 and
+      # disclosed Nov 17 after 2.8.0 had already scanned clean; same-major
+      # override.
       ov=""
       undici_cur=$(grep -m1 -oE '^  undici@[0-9]+\.[0-9]+\.[0-9]+' pnpm-lock.yaml | cut -d@ -f2)
       if [ "$(printf '%s\n%s\n' "$undici_cur" 8.12.2 | sort -V | head -1)" = "$undici_cur" ] && [ "$undici_cur" != "8.12.2" ]; then
@@ -122,6 +126,11 @@ pipeline:
         echo "patching fast-xml-parser $fxp_cur -> 5.12.0 (1 advisory)"
         ov="${ov}  fast-xml-parser: 5.12.0\n"
       fi
+      next_cur=$(grep -m1 -oE '^  next@[0-9]+\.[0-9]+\.[0-9]+' pnpm-lock.yaml | cut -d@ -f2)
+      if [ "$(printf '%s\n%s\n' "$next_cur" 16.4.5 | sort -V | head -1)" = "$next_cur" ] && [ "$next_cur" != "16.4.5" ]; then
+        echo "patching next $next_cur -> 16.4.5 (1 advisory)"
+        ov="${ov}  next: 16.4.5\n"
+      fi
       if [ -n "$ov" ]; then
         printf "overrides:\n$ov" >> pnpm-workspace.yaml
         pnpm install --lockfile-only
@@ -139,6 +148,9 @@ pipeline:
       fxp_final=$(grep -m1 -oE '^  fast-xml-parser@[0-9]+\.[0-9]+\.[0-9]+' pnpm-lock.yaml | cut -d@ -f2)
       [ "$(printf '%s\n%s\n' "$fxp_final" 5.12.0 | sort -V | head -1)" = "5.12.0" ] \
         || { echo "fast-xml-parser $fxp_final still below the 5.12.0 fix"; exit 1; }
+      next_final=$(grep -m1 -oE '^  next@[0-9]+\.[0-9]+\.[0-9]+' pnpm-lock.yaml | cut -d@ -f2)
+      [ "$(printf '%s\n%s\n' "$next_final" 16.4.5 | sort -V | head -1)" = "16.4.5" ] \
+        || { echo "next $next_final still below the 16.4.5 fix"; exit 1; }
       NEXT_TELEMETRY_DISABLED=1 \
       NEXT_PUBLIC_BUILDTIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
       NEXT_PUBLIC_VERSION=v${{package.version}} \
