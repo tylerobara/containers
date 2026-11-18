@@ -4,7 +4,7 @@
 # (frr-10.4/10.5/10.6 in wolfi-dev/os); those configs moved to
 # enterprise-packages, so this build resurrects the proven configure flags,
 # build deps and runtime deps from the archived frr-10.4.yaml. The old
-# published apks `provides: frr=`, so epoch 100 + provider-priority 100 are
+# published apks `provides: frr=`, so epoch 100+ + provider-priority 100 are
 # what keep OUR package winning resolution.
 #
 # Bump `version` + `vars.sha256` on each release
@@ -14,18 +14,23 @@
 package:
   name: frr
   version: 10.7.1
-  epoch: 100
+  epoch: 101
   description: "FRRouting Protocol Suite built from upstream source"
   copyright:
     - license: GPL-2.0-only
   dependencies:
     provider-priority: 100
     # bash: docker-start/frrcommon.sh; iproute2: watchfrr/frr tooling;
-    # python-3.11: frr-reload.py shebang (same runtime set Wolfi shipped).
+    # python-3.14: frr-reload.py shebang (stdlib-only, env-python3). Not
+    # 3.11 like the archived wolfi config was: Wolfi stopped patching its
+    # 3.11 line (frozen at 3.11.18-r1, 11 open Low+ forever), while 3.14 is
+    # the actively patched series. Its remaining 4 findings are brand-new
+    # CPython CVEs (Nov 2026) with no upstream fix in ANY series yet —
+    # unsigned until CPython+Wolfi ship, then the daily wave signs itself.
     runtime:
       - bash
       - iproute2
-      - python-3.11
+      - python-3.14
 
 vars:
   # SHA256 of the GitHub release tarball (tag frr-<version>)
@@ -66,7 +71,7 @@ environment:
       - patch
       - pcre2-dev
       - protobuf-c-dev
-      - python-3.11-dev
+      - python-3.14-dev
       - readline-dev
       - rtrlib-dev
 
