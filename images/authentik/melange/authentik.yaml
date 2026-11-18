@@ -182,7 +182,10 @@ pipeline:
       install -m644 "$S/uv.lock" "$D/uv.lock"
       cp -a "$S/web/dist" "$D/web/dist"
       cp -a "$S/web/authentik" "$D/web/authentik"
-      install -m644 "$S/authentik/sources/kerberos/krb5.conf" "$D/etc/krb5.conf"
+      # upstream ships this as /etc/krb5.conf; Wolfi's krb5-conf (pulled
+      # via krb5-libs) owns that path, so keep ours beside it and point
+      # KRB5_CONFIG at it from apko.
+      install -m644 "$S/authentik/sources/kerberos/krb5.conf" "$D/etc/authentik-krb5.conf"
       ln -s /media "$D/data/media"
 
   - runs: |
@@ -194,7 +197,7 @@ pipeline:
         'import django, psycopg, xmlsec, kadmin, geoip2, ldap3, rest_framework'
       ./usr/bin/authentik --help >/dev/null 2>&1 || ./usr/bin/authentik --version >/dev/null
       head -1 lifecycle/ak | grep -q '#!/usr/bin/env bash'
-      test -f etc/krb5.conf
+      test -f etc/authentik-krb5.conf
       # vite builds per-app bundles (no top-level index.html) — the dirs
       # wireit declares + the artifact cargo embeds are the real contract
       test -d web/dist/admin && test -d web/dist/user && test -d web/dist/flow

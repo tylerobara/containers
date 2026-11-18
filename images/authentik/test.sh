@@ -34,7 +34,7 @@ check "web dist + krb5 + package symlinks" \
   docker run --rm --entrypoint sh "$IMAGE" -c \
   "test -d /web/dist/admin && test -d /web/dist/user && test -d /web/dist/flow \
    && test -f /web/dist/standalone/loading/startup.html \
-   && test -f /etc/krb5.conf \
+   && test -f /etc/authentik-krb5.conf \
    && [ \"\$(readlink /packages)\" = /ak-root/packages ] \
    && [ \"\$(readlink /data/media)\" = /media ] && test -d /geoip"
 

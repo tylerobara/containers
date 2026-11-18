@@ -25,6 +25,7 @@ instead, keeping its pins: python 3.14 (`requires-python ==3.14.*`), rust
 | `ak server` / `ak worker` / `ak healthcheck` roles | Same; CMD defaults to `server` (upstream relies on compose passing it) |
 | GeoIP DBs baked in when a MaxMind key is provided | `/geoip` ships empty — degrades off, same as a license-less upstream build |
 | `/tests` tree for the debug path | Not shipped |
+| kerberos tuning baked as `/etc/krb5.conf` | Same file at `/etc/authentik-krb5.conf`, selected via `KRB5_CONFIG` (Wolfi's `krb5-conf` owns the default path) |
 
 No `HEALTHCHECK` (apko has none): run `docker exec <c> ak healthcheck` or use
 it as a liveness command.

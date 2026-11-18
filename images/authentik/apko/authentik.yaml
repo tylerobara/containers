@@ -53,6 +53,9 @@ environment:
   VENV_PATH: /ak-root/.venv
   TMPDIR: /dev/shm/
   HOME: /authentik
+  # upstream bakes its krb5 tuning as /etc/krb5.conf; Wolfi's krb5-conf
+  # owns that path, so ours ships as /etc/authentik-krb5.conf (see melange).
+  KRB5_CONFIG: /etc/authentik-krb5.conf
   PYTHONDONTWRITEBYTECODE: "1"
   PYTHONUNBUFFERED: "1"
 
