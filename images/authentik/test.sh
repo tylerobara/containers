@@ -14,7 +14,7 @@ check() { # <label> <cmd...>
 PY=/ak-root/.venv/bin/python
 
 # 1. The venv imports the native-heavy locked deps (psycopg/xmlsec/
-#    kadmin_rs/geoip2 link against the shipped Wolfi libs; a missing
+#    kadmin/geoip2 link against the shipped Wolfi libs; a missing
 #    libsoname fails here, not in a customer's worker).
 check "venv imports (django/psycopg/xmlsec/kadmin/geoip2/ldap3)" \
   docker run --rm --entrypoint "$PY" "$IMAGE" -c \
@@ -32,7 +32,9 @@ check "authentik core binary --help" \
 # 4. Upstream final-image layout: UI bundle, kerberos config, symlinks.
 check "web dist + krb5 + package symlinks" \
   docker run --rm --entrypoint sh "$IMAGE" -c \
-  "find /web/dist -name index.html | grep -q . && test -f /etc/krb5.conf \
+  "test -d /web/dist/admin && test -d /web/dist/user && test -d /web/dist/flow \
+   && test -f /web/dist/standalone/loading/startup.html \
+   && test -f /etc/krb5.conf \
    && [ \"\$(readlink /packages)\" = /ak-root/packages ] \
    && [ \"\$(readlink /data/media)\" = /media ] && test -d /geoip"
 

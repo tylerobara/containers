@@ -192,8 +192,10 @@ pipeline:
       ./bin/authentik --help >/dev/null 2>&1 || ./bin/authentik --version >/dev/null
       head -1 lifecycle/ak | grep -q '#!/usr/bin/env bash'
       test -f etc/krb5.conf
-      find web/dist -name index.html | grep -q . \
-        || { echo "web/dist has no index.html"; exit 1; }
+      # vite builds per-app bundles (no top-level index.html) — the dirs
+      # wireit declares + the artifact cargo embeds are the real contract
+      test -d web/dist/admin && test -d web/dist/user && test -d web/dist/flow
+      test -f web/dist/standalone/loading/startup.html
       test -f ak-root/packages/ak-guardian/pyproject.toml
       [ "$(readlink packages)" = /ak-root/packages ]
       [ "$(readlink data/media)" = /media ]
