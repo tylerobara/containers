@@ -13,7 +13,7 @@
 
 package:
   name: cilium-operator-generic
-  version: 1.20.4
+  version: 1.20.5
   epoch: 103
   description: "Cilium operator (generic IPAM variant), built from upstream source"
   copyright:
@@ -23,7 +23,7 @@ package:
 
 vars:
   # SHA256 of the GitHub release tarball (same tarball as cilium.yaml)
-  sha256: 90e4f8796db57542eed10f34e0a70d47b2e03f2d3767785adb5fdd66621ca7ec
+  sha256: 2a299a5a5eeacc678812fcacc0165466324574b7989d2d1abc73f87f8921256e
   # Vendored go-jose uplift — see the patch step below (GHSA-mgcc-cww5-fp2q
   # / CVE-2026-116587 JWK parse DoS; the operator links it via registry
   # auth, the agent binary doesn't — 0 findings there, so cilium.yaml is
