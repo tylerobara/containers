@@ -27,7 +27,7 @@ check "ak startup config probe" \
 
 # 3. Rust core binary (what ak execs for server/worker) is runnable.
 check "authentik core binary --help" \
-  docker run --rm --entrypoint /bin/authentik "$IMAGE" --help
+  docker run --rm --entrypoint /usr/bin/authentik "$IMAGE" --help
 
 # 4. Upstream final-image layout: UI bundle, kerberos config, symlinks.
 check "web dist + krb5 + package symlinks" \
