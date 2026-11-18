@@ -43,40 +43,45 @@ package:
 
 environment:
   contents:
-    - wolfi-baselayout
-    - build-base
-    - busybox
-    - ca-certificates-bundle
-    - bash
-    - git
-    - pkgconf
-    # App interpreter + locked deps (uv is Wolfi's own; 3.14 is the only
-    # line upstream's pyproject allows).
-    - python-3.14
-    - python-3.14-dev
-    - uv
-    # Angular UI (upstream node-builder stage).
-    - nodejs-26
-    - npm
-    # Rust core binary: rust-1.97 is upstream's exact pin; clang/cmake/
-    # go/perl are aws-lc-sys' build requirements (upstream installs the
-    # same set: cmake clang golang).
-    - rust-1.97
-    - clang
-    - cmake
-    - go-1.26
-    - perl
-    # sdist fallbacks for the locked python deps (wheels cover most;
-    # these headers keep uv from failing on the rest, mirroring
-    # upstream's apt build-dep list: libpq-dev, libxslt-dev, libkrb5-dev,
-    # libffi-dev, libltdl-dev).
-    - postgresql-18-dev
-    - libxml2-dev
-    - libxslt-dev
-    - libffi-dev
-    - libtool
-    - krb5-dev
-    - openssl-dev
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - wolfi-baselayout
+      - build-base
+      - busybox
+      - ca-certificates-bundle
+      - bash
+      - git
+      - pkgconf
+      # App interpreter + locked deps (uv is Wolfi's own; 3.14 is the only
+      # line upstream's pyproject allows).
+      - python-3.14
+      - python-3.14-dev
+      - uv
+      # Angular UI (upstream node-builder stage).
+      - nodejs-26
+      - npm
+      # Rust core binary: rust-1.97 is upstream's exact pin; clang/cmake/
+      # go/perl are aws-lc-sys' build requirements (upstream installs the
+      # same set: cmake clang golang).
+      - rust-1.97
+      - clang
+      - cmake
+      - go-1.26
+      - perl
+      # sdist fallbacks for the locked python deps (wheels cover most;
+      # these headers keep uv from failing on the rest, mirroring
+      # upstream's apt build-dep list: libpq-dev, libxslt-dev, libkrb5-dev,
+      # libffi-dev, libltdl-dev).
+      - postgresql-18-dev
+      - libxml2-dev
+      - libxslt-dev
+      - libffi-dev
+      - libtool
+      - krb5-dev
+      - openssl-dev
   environment:
     HOME: /home/build
     NPM_CONFIG_PREFIX: /home/build/npm
@@ -92,10 +97,14 @@ vars:
   pnpm_version: "11.20.0"
 
 pipeline:
-  - fetch:
-      url: https://github.com/goauthentik/authentik/archive/refs/tags/version%2F${{package.version}}.tar.gz
-      sha256: ${{vars.sha256}}
-      expected: authentik-version-${{package.version}}
+  - runs: |
+      mkdir -p /home/build
+      curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors \
+        "https://github.com/goauthentik/authentik/archive/refs/tags/version%2F${{package.version}}.tar.gz" \
+        -o /home/build/authentik.tar.gz
+      echo "${{vars.sha256}}  /home/build/authentik.tar.gz" | sha256sum -c -
+      cd /home/build
+      tar xf authentik.tar.gz && rm authentik.tar.gz
 
   - working-directory: /home/build/authentik-version-${{package.version}}
     runs: |
