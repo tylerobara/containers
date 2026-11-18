@@ -38,6 +38,8 @@ package:
       - libpq-18
       - libmaxminddb
       - libxslt
+      # the xmlsec python ext links Wolfi's libxmlsec (built against it)
+      - xmlsec
       - libtool
       - krb5-libs
 
@@ -79,6 +81,9 @@ environment:
       - postgresql-18-dev
       - libxml2-dev
       - libxslt-dev
+      # xmlsec's sdist probes the xmlsec1 binary + headers at build time.
+      - xmlsec-dev
+      - xmlsec
       - libffi-dev
       - libtool
       - krb5-dev

@@ -37,6 +37,7 @@ contents:
     - libpq-18
     - libmaxminddb
     - libxslt
+    - xmlsec
     - libtool
     - krb5-libs
 
