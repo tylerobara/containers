@@ -22,7 +22,7 @@
 
 package:
   name: cilium
-  version: 1.20.4
+  version: 1.20.5
   epoch: 102
   description: "Cilium CNI (cilium-agent + tooling), built from upstream source"
   copyright:
@@ -32,7 +32,7 @@ package:
 
 vars:
   # SHA256 of the GitHub release tarball
-  sha256: 90e4f8796db57542eed10f34e0a70d47b2e03f2d3767785adb5fdd66621ca7ec
+  sha256: 2a299a5a5eeacc678812fcacc0165466324574b7989d2d1abc73f87f8921256e
   # images/runtime/build-cni.sh pins containernetworking/plugins v1.9.1
   cni_version: "1.9.1"
   cni_sha256: 34bd82d47e981940751619c9cc44c095bb90bfcaf8d71865cbb822c37690a764
@@ -91,6 +91,11 @@ pipeline:
       export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
       swap() {
         mod=$1 old=$2 new=$3 newgo=$4
+        # Once upstream merges the floor (1.20.5 vendored all of these at
+        # exactly our targets), the swap is a no-op — skip it. The
+        # go version -m asserts in the verify step still gate the binary.
+        grep -q "^# $mod $new$" vendor/modules.txt \
+          && { echo "$mod already vendored at $new; skipping swap"; return; }
         grep -q "^# $mod $old$" vendor/modules.txt \
           || { echo "vendor/modules.txt no longer pins $mod $old; revisit this patch"; exit 1; }
         go mod download "$mod@$new"

@@ -69,10 +69,13 @@ jobs:
             #                   moves to the new version with the bump
             #   GIT_COMMIT_REPO owner/repo whose v<latest> tag sha is stamped
             #                   into the config's `^  git_commit:` var
+            #   PAIR_YAML       second melange yaml (same tarball+sha) that the
+            #                   family's version guard locks to this one —
+            #                   bumped on the SAME branch, never as a lone half
             # shellcheck disable=SC2154
             local name=$1 yaml=$2 latest=$3 url=$4 wf=$5
-            local pin=${PIN_FILE:-} gc_repo=${GIT_COMMIT_REPO:-}
-            unset PIN_FILE GIT_COMMIT_REPO
+            local pin=${PIN_FILE:-} gc_repo=${GIT_COMMIT_REPO:-} pair_yaml=${PAIR_YAML:-}
+            unset PIN_FILE GIT_COMMIT_REPO PAIR_YAML
             local cur branch sha gc extra
             cur=$(awk '/^  version:/{print $2; exit}' "$yaml")
             # only ever move forward (guards against ftp page noise)
@@ -119,6 +122,15 @@ jobs:
               fi
               extra+=("$pin")
             fi
+            if [ -n "$pair_yaml" ]; then
+              sed -i "0,/^  version: /s/^  version: .*/  version: $latest/" "$pair_yaml"
+              sed -i "0,/^  sha256: /s/^  sha256: .*/  sha256: $sha/" "$pair_yaml"
+              if [ "$(awk '/^  version:/{print $2; exit}' "$pair_yaml")" != "$latest" ] || [ "$(awk '/^  sha256:/{print $2; exit}' "$pair_yaml")" != "$sha" ]; then
+                echo "::error::$name: paired yaml edit did not land in $pair_yaml"
+                FAILED=1; git checkout -- "$yaml" "$pair_yaml"; return 0
+              fi
+              extra+=("$pair_yaml")
+            fi
 
             branch="bump/$name-$latest"
             git switch -c "$branch"
@@ -134,6 +146,7 @@ jobs:
                 --body "**$name** \`$cur\` -> \`$latest\` (detected by the update-versions bot).
 
           - melange config: \`$yaml\` (\`version\` + \`vars.sha256\` bumped; \`epoch: 100\` untouched — it stays above any Wolfi -rN)
+          ${pair_yaml:+- paired melange config bumped in lockstep: \`$pair_yaml\`}
           - upstream tarball hashed into the config: <$url>
           - \`sha256\`: \`$sha\`
 
@@ -267,8 +280,10 @@ jobs:
               FAILED=1
             else
               url="https://github.com/cilium/cilium/archive/refs/tags/v${latest}.tar.gz"
-              bump_row cilium images/cilium/melange/cilium.yaml "$latest" "$url" cilium
-              bump_row cilium-operator-generic images/cilium/melange/cilium-operator-generic.yaml "$latest" "$url" cilium
+              # One PR for both: the family's version guard requires
+              # cilium == cilium-operator-generic, so half-bumps can never merge.
+              PAIR_YAML=images/cilium/melange/cilium-operator-generic.yaml \
+                bump_row cilium images/cilium/melange/cilium.yaml "$latest" "$url" cilium
             fi
           fi
 
