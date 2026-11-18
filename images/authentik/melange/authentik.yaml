@@ -38,8 +38,10 @@ package:
       - libpq-18
       - libmaxminddb
       - libxslt
-      # the xmlsec python ext links Wolfi's libxmlsec (built against it)
+      # the xmlsec python ext links Wolfi's libxmlsec + crypto plugin
+      # (shared libs live in xmlsec / xmlsec-openssl)
       - xmlsec
+      - xmlsec-openssl
       - libtool
       - krb5-libs
 
@@ -81,9 +83,11 @@ environment:
       - postgresql-18-dev
       - libxml2-dev
       - libxslt-dev
-      # xmlsec's sdist probes the xmlsec1 binary + headers at build time.
+      # xmlsec's sdist probes the xmlsec1 binary + headers at build time;
+      # the openssl crypto SHARED lib ships in its own subpackage.
       - xmlsec-dev
       - xmlsec
+      - xmlsec-openssl
       - libffi-dev
       - libtool
       - krb5-dev
@@ -143,6 +147,10 @@ pipeline:
       # Wolfi's static libxmlsec1*.a are not -fPIC (aarch64 dangerous
       # relocation); drop them so ld resolves the shared libs instead.
       rm -f /usr/lib/libxmlsec1*.a
+      # ensure -lxmlsec1-openssl has an unversioned link to resolve to
+      for f in /usr/lib/libxmlsec1-openssl.so.1*; do
+        [ -e "$f" ] && ln -sfn "$f" /usr/lib/libxmlsec1-openssl.so && break
+      done
       uv sync --locked --no-install-project
       .venv/bin/python -c 'import sys; assert sys.version_info[:2] == (3, 14), sys.version'
 

@@ -38,6 +38,7 @@ contents:
     - libmaxminddb
     - libxslt
     - xmlsec
+    - xmlsec-openssl
     - libtool
     - krb5-libs
 
