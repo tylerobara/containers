@@ -16,9 +16,9 @@ PY=/ak-root/.venv/bin/python
 # 1. The venv imports the native-heavy locked deps (psycopg/xmlsec/
 #    kadmin_rs/geoip2 link against the shipped Wolfi libs; a missing
 #    libsoname fails here, not in a customer's worker).
-check "venv imports (django/psycopg/xmlsec/kadmin_rs/geoip2/ldap3)" \
+check "venv imports (django/psycopg/xmlsec/kadmin/geoip2/ldap3)" \
   docker run --rm --entrypoint "$PY" "$IMAGE" -c \
-  "import django, psycopg, xmlsec, kadmin_rs, geoip2, ldap3, rest_framework"
+  "import django, psycopg, xmlsec, kadmin, geoip2, ldap3, rest_framework"
 
 # 2. The exact config probe `ak` runs at startup (imports authentik.lib
 #    from the shipped source tree, cwd=/).
