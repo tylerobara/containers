@@ -18,7 +18,7 @@
 
 package:
   name: kubernetes-reflector
-  version: 10.0.78
+  version: 10.0.79
   epoch: 100
   description: "Kubernetes Reflector built from upstream source"
   copyright:
@@ -28,7 +28,7 @@ package:
 
 vars:
   # SHA256 of the GitHub release tarball
-  sha256: e8838460cb6cd1dac6c24f61058d41a3ebbc1dea390db8b8b4850efaebde4455
+  sha256: d866d1fd3d0a8c26c888f8c2c19c93a2e7cfee2b618f027b20b439d2075c1a5b
 
 environment:
   contents:
