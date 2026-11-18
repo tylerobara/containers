@@ -1,0 +1,115 @@
+# apko config for ghcr.io/tylerobara/containers/authentik
+# (goauthentik/authentik — the IDaaS server). The app tree, venv and Rust
+# core binary come from melange (../melange/authentik.yaml); everything
+# else is Wolfi. No Dockerfile.
+#
+# Reference contract: ghcr.io/goauthentik/server —
+#   ENTRYPOINT ["dumb-init","--","ak"] (ak = /lifecycle/ak), USER 1000,
+#   PATH=/ak-root/.venv/bin:/lifecycle:..., TMPDIR=/dev/shm/, and roles
+#   passed as commands: `ak server` / `ak worker` / `ak healthcheck`.
+# We default CMD to "server" (upstream relies on compose passing it).
+# Deviations: no FIPS python, no bundled GeoIP DBs, no HEALTHCHECK
+# (apko has no HEALTHCHECK; run `ak healthcheck` as a docker health-cmd
+# if needed). /data + /media must be writable volumes, same as upstream.
+
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  packages:
+    # Base filesystem + debug shell (repo-wide convention: busybox-only,
+    # no apk-tools).
+    - wolfi-baselayout
+    - busybox
+    - ca-certificates-bundle
+
+    # Interpreter for the melange-built venv + bash for the ak script
+    # (pipefail — busybox ash can't); listed explicitly so neither floats.
+    - python-3.14
+    - bash
+
+    # PID-1 reaper, same binary upstream puts in the ENTRYPOINT.
+    - dumb-init
+
+    # Runtime libs upstream's final stage installs for the locked python
+    # deps (psycopg→libpq, maxminddb, xmlsec→libxslt+libltdl, kadmin→krb5).
+    - libpq-18
+    - libmaxminddb
+    - libxslt
+    - libtool
+    - krb5-libs
+
+    # The authentik app (source tree + venv + Rust core binary), built by
+    # melange from the release tarball; supplied via --repository-append.
+    - authentik
+
+environment:
+  # Mirrors upstream's final stage (VENV_PATH is read by ak). GOFIPS is
+  # deliberately absent — non-FIPS build, see melange yaml.
+  PATH: /ak-root/.venv/bin:/lifecycle:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  VENV_PATH: /ak-root/.venv
+  TMPDIR: /dev/shm/
+  HOME: /authentik
+  PYTHONDONTWRITEBYTECODE: "1"
+  PYTHONUNBUFFERED: "1"
+
+accounts:
+  groups:
+    - groupname: authentik
+      gid: 1000
+  users:
+    # Upstream: adduser --system --uid 1000 --group --home /authentik authentik
+    - username: authentik
+      uid: 1000
+      gid: 1000
+      shell: /bin/bash
+  run-as: 1000
+
+paths:
+  # Writable at runtime as uid 1000 (upstream chowns these at startup when
+  # it can; we run unprivileged from the start, so ownership is baked in).
+  - path: /authentik
+    type: directory
+    uid: 1000
+    gid: 1000
+    permissions: 0o750
+  - path: /authentik/.ssh
+    type: directory
+    uid: 1000
+    gid: 1000
+    permissions: 0o700
+  - path: /certs
+    type: directory
+    uid: 1000
+    gid: 1000
+    permissions: 0o750
+  - path: /data
+    type: directory
+    uid: 1000
+    gid: 1000
+    permissions: 0o770
+  - path: /media
+    type: directory
+    uid: 1000
+    gid: 1000
+    permissions: 0o770
+
+entrypoint:
+  # apko splits this into ["dumb-init","--","/lifecycle/ak"] — the ak
+  # script then execs the Rust core binary for server/worker roles.
+  command: /usr/bin/dumb-init -- /lifecycle/ak
+
+cmd: server
+
+annotations:
+  org.opencontainers.image.title: "authentik"
+  org.opencontainers.image.description: "Minimal authentik IDaaS server (SAML/OIDC/LDAP) image built on Wolfi with daily CVE patches"
+  org.opencontainers.image.url: "https://github.com/tylerobara/containers"
+  org.opencontainers.image.source: "https://github.com/tylerobara/containers/tree/main/images/authentik"
+  org.opencontainers.image.licenses: "MIT"
+  io.wolfi.os.apko: "true"
+
+archs:
+  - x86_64
+  - aarch64

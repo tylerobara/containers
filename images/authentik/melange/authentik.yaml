@@ -1,0 +1,172 @@
+# Melange build for authentik (github.com/goauthentik/authentik) — the
+# IDaaS server (SAML/OIDC/LDAP). Reproduces upstream's own final-image
+# recipe (lifecycle/container/Dockerfile) from the release tarball: the
+# Angular UI via pnpm, the Rust `authentik` core binary that `ak` execs
+# for server/worker, the locked uv venv, and the app tree laid out exactly
+# where upstream puts it (/authentik, /web/dist, /ak-root/.venv, /bin).
+# Upstream pins enforced here: python ==3.14.* (pyproject), rust 1.97.1
+# (rust-toolchain.toml == Wolfi rust-1.97), pnpm 11.20.0 (package.json
+# packageManager), uv lockfile (--locked).
+#
+# Deliberate deviations from the official image:
+#   - no FIPS base: upstream builds on fips-python + GOFIPS=1; Wolfi has
+#     no FIPS-certified python, so this uses stock python-3.14 (upstream's
+#     non-FIPS builds are the documented default outside FedRAMP shops).
+#   - no GeoIP DB: upstream's geoip stage needs a MaxMind license secret
+#     and already tolerates failure; /geoip ships empty, GeoIP degrades
+#     off exactly like a license-less upstream build.
+#   - no /tests copy (upstream ships it only for its debug/CI path).
+#
+# Bump `version` + `vars.sha256` on each release — upstream tags are
+# `version/<x.y.z>` (the update-versions bot covers this row).
+
+package:
+  name: authentik
+  version: 2026.8.5
+  epoch: 0
+  description: "authentik IDaaS server (SAML/OIDC/LDAP provider), built from upstream source"
+  copyright:
+    - license: MIT
+  dependencies:
+    # The venv is self-contained except the base interpreter and the
+    # native libs upstream's final stage installs (libpq5→libpq-18,
+    # libmaxminddb0, libxslt1.1, libltdl7→libtool, MIT kadm5→krb5-libs).
+    # bash: the ak entrypoint script (shebang + pipefail).
+    runtime:
+      - python-3.14
+      - bash
+      - libpq-18
+      - libmaxminddb
+      - libxslt
+      - libtool
+      - krb5-libs
+
+environment:
+  contents:
+    - wolfi-baselayout
+    - build-base
+    - busybox
+    - ca-certificates-bundle
+    - bash
+    - git
+    - pkgconf
+    # App interpreter + locked deps (uv is Wolfi's own; 3.14 is the only
+    # line upstream's pyproject allows).
+    - python-3.14
+    - python-3.14-dev
+    - uv
+    # Angular UI (upstream node-builder stage).
+    - nodejs-26
+    - npm
+    # Rust core binary: rust-1.97 is upstream's exact pin; clang/cmake/
+    # go/perl are aws-lc-sys' build requirements (upstream installs the
+    # same set: cmake clang golang).
+    - rust-1.97
+    - clang
+    - cmake
+    - go-1.26
+    - perl
+    # sdist fallbacks for the locked python deps (wheels cover most;
+    # these headers keep uv from failing on the rest, mirroring
+    # upstream's apt build-dep list: libpq-dev, libxslt-dev, libkrb5-dev,
+    # libffi-dev, libltdl-dev).
+    - postgresql-18-dev
+    - libxml2-dev
+    - libxslt-dev
+    - libffi-dev
+    - libtool
+    - krb5-dev
+    - openssl-dev
+  environment:
+    HOME: /home/build
+    NPM_CONFIG_PREFIX: /home/build/npm
+    UV_PYTHON_DOWNLOADS: "0"
+    UV_LINK_MODE: copy
+    CARGO_HOME: /home/build/.cargo
+    GOTOOLCHAIN: local
+
+vars:
+  # SHA256 of the GitHub release tarball (tag version/<version>)
+  sha256: 6d323d958154e70b8fe7e9c81232bce91840d7a88292153dc9ffcc47d033bd37
+  # root package.json `packageManager` — upstream pins it in its Dockerfile
+  pnpm_version: "11.20.0"
+
+pipeline:
+  - fetch:
+      url: https://github.com/goauthentik/authentik/archive/refs/tags/version%2F${{package.version}}.tar.gz
+      sha256: ${{vars.sha256}}
+      expected: authentik-version-${{package.version}}
+
+  - working-directory: /home/build/authentik-version-${{package.version}}
+    runs: |
+      # Stage: webui (upstream node-builder). web/ carries its own
+      # pnpm-workspace.yaml, so installing from there never resolves
+      # website/ deps — same isolation upstream's mounts achieve.
+      export PATH="/home/build/npm/bin:$PATH" NODE_ENV=production
+      npm install -g pnpm@${{vars.pnpm_version}}
+      cd web
+      pnpm install --frozen-lockfile
+      pnpm run build
+      pnpm run build:sfe
+
+  - working-directory: /home/build/authentik-version-${{package.version}}
+    runs: |
+      # Stage: Rust core binary (upstream rust-builder) — the process
+      # supervisor ak execs for server/worker/healthcheck. build.rs embeds
+      # the three web artifacts, so it must run after the UI build.
+      export PATH="/usr/lib/go/bin:/usr/lib/go-1.26/bin:$PATH"
+      cargo build --package authentik --no-default-features --features core --locked --release
+      test -x target/release/authentik
+
+  - working-directory: /home/build/authentik-version-${{package.version}}
+    runs: |
+      # Stage: locked dependency venv (upstream python-deps). The project
+      # itself is deliberately NOT installed — upstream ships the source
+      # tree and runs manage.py from it. Path deps (packages/ak-guardian,
+      # django-channels-postgres, ...) resolve from the tarball copy.
+      uv sync --locked --no-install-project
+      .venv/bin/python -c 'import sys; assert sys.version_info[:2] == (3, 14), sys.version'
+
+  - runs: |
+      # Install exactly upstream's final-image layout under destdir.
+      S=/home/build/authentik-version-${{package.version}}
+      D=${{targets.destdir}}
+      mkdir -p "$D/bin" "$D/ak-root" "$D/web" "$D/geoip" "$D/data" "$D/media" \
+        "$D/certs" "$D/etc" "$D/authentik" "$D/locale" "$D/blueprints"
+      install -Dm755 "$S/target/release/authentik" "$D/bin/authentik"
+      cp -a "$S/.venv" "$D/ak-root/.venv"
+      # Force absolute interpreter links (same /usr/bin/python3.14 that the
+      # python-3.14 runtime dep provides) so the moved venv can't dangle.
+      for l in python python3 python3.14; do
+        ln -sfn /usr/bin/python3.14 "$D/ak-root/.venv/bin/$l"
+      done
+      cp -a "$S/authentik/." "$D/authentik"
+      cp -a "$S/schemas" "$D/schemas"
+      cp -a "$S/locale" "$D/locale"
+      cp -a "$S/blueprints" "$D/blueprints"
+      cp -a "$S/lifecycle" "$D/lifecycle"
+      cp -a "$S/packages" "$D/ak-root/packages"
+      ln -s /ak-root/packages "$D/packages"
+      install -m644 "$S/manage.py" "$D/manage.py"
+      install -m644 "$S/pyproject.toml" "$D/pyproject.toml"
+      install -m644 "$S/uv.lock" "$D/uv.lock"
+      cp -a "$S/web/dist" "$D/web/dist"
+      cp -a "$S/web/authentik" "$D/web/authentik"
+      install -m644 "$S/authentik/sources/kerberos/krb5.conf" "$D/etc/krb5.conf"
+      ln -s /media "$D/data/media"
+
+  - runs: |
+      # Fail loudly on anything the runtime would discover instead.
+      D=${{targets.destdir}}
+      cd "$D"
+      ./ak-root/.venv/bin/python -m authentik.lib.config debugger >/dev/null
+      ./ak-root/.venv/bin/python -c \
+        'import django, psycopg, xmlsec, kadmin_rs, geoip2, ldap3, rest_framework'
+      ./bin/authentik --help >/dev/null 2>&1 || ./bin/authentik --version >/dev/null
+      head -1 lifecycle/ak | grep -q '#!/usr/bin/env bash'
+      test -f etc/krb5.conf
+      find web/dist -name index.html | grep -q . \
+        || { echo "web/dist has no index.html"; exit 1; }
+      test -f ak-root/packages/ak-guardian/pyproject.toml
+      [ "$(readlink packages)" = /ak-root/packages ]
+      [ "$(readlink data/media)" = /media ]

@@ -4,7 +4,8 @@ name: update-versions
 # this repo's image families. Checks upstream (PGDG ftp for each tracked
 # postgresql-<major>.yaml, GitHub releases for the operator, openbao, homepage,
 # dokuwiki, grafana-image-renderer, cilium, cert-manager, frr-k8s, k8s-sidecar,
-# local-path-provisioner, gatus and web-check (GitHub TAGS, not releases —
+# authentik (tags are version/<x.y.z>), local-path-provisioner, gatus and
+# web-check (GitHub TAGS, not releases —
 # upstream's releases/latest lags its tag list);
 # cilium-envoy follows cilium's own images/cilium/Dockerfile pin and gets its
 # payload shas re-extracted; metallb's controller + speaker configs are bumped
@@ -372,6 +373,19 @@ jobs:
                   git switch -C scratch-"$branch" origin/main >/dev/null 2>&1
                 fi
               fi
+            fi
+          fi
+
+          # --- authentik: releases are tagged version/<x.y.z>; the archive
+          # URL needs the tag slash percent-encoded (version%2F) ---
+          if want authentik; then
+            latest=$(gh api repos/goauthentik/authentik/releases/latest --jq '.tag_name | ltrimstr("version/")')
+            if [ -z "$latest" ]; then
+              echo "::error::authentik: no release found upstream"
+              FAILED=1
+            else
+              url="https://github.com/goauthentik/authentik/archive/refs/tags/version%2F${latest}.tar.gz"
+              bump_row authentik images/authentik/melange/authentik.yaml "$latest" "$url" authentik
             fi
           fi
 
