@@ -76,16 +76,22 @@ pipeline:
       # version is no longer what this patch was written against.
       export GOTOOLCHAIN=local
       export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
-      grep -q '^# github.com/go-jose/go-jose/v4 v4.1.4$' vendor/modules.txt \
-        || { echo "vendor/modules.txt no longer pins go-jose v4.1.4; revisit this patch"; exit 1; }
-      go mod download github.com/go-jose/go-jose/v4@v${{vars.gojose_version}}
-      src="$(go env GOMODCACHE)/github.com/go-jose/go-jose/v4@v${{vars.gojose_version}}"
-      dst="vendor/github.com/go-jose/go-jose/v4"
-      rm -rf "$dst"
-      cp -R "$src" "$dst"
-      chmod -R u+w "$dst"
-      go mod edit -require=github.com/go-jose/go-jose/v4@v${{vars.gojose_version}}
-      sed -i "s|^# github.com/go-jose/go-jose/v4 v4.1.4\$|# github.com/go-jose/go-jose/v4 v${{vars.gojose_version}}|" vendor/modules.txt
+      # 1.20.5 vendored go-jose at exactly our floor — self-skip on that
+      # stamp; the anchor still fail-loudlies on any other drift.
+      if grep -q '^# github.com/go-jose/go-jose/v4 v${{vars.gojose_version}}$' vendor/modules.txt; then
+        echo "go-jose already vendored at v${{vars.gojose_version}}; skipping swap"
+      else
+        grep -q '^# github.com/go-jose/go-jose/v4 v4.1.4$' vendor/modules.txt \
+          || { echo "vendor/modules.txt no longer pins go-jose v4.1.4; revisit this patch"; exit 1; }
+        go mod download github.com/go-jose/go-jose/v4@v${{vars.gojose_version}}
+        src="$(go env GOMODCACHE)/github.com/go-jose/go-jose/v4@v${{vars.gojose_version}}"
+        dst="vendor/github.com/go-jose/go-jose/v4"
+        rm -rf "$dst"
+        cp -R "$src" "$dst"
+        chmod -R u+w "$dst"
+        go mod edit -require=github.com/go-jose/go-jose/v4@v${{vars.gojose_version}}
+        sed -i "s|^# github.com/go-jose/go-jose/v4 v4.1.4\$|# github.com/go-jose/go-jose/v4 v${{vars.gojose_version}}|" vendor/modules.txt
+      fi
 
   - working-directory: /home/build/cilium-${{package.version}}
     runs: |
@@ -100,6 +106,11 @@ pipeline:
       export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
       swap() {
         mod=$1 old=$2 new=$3 newgo=$4
+        # Once upstream merges the floor (1.20.5 vendored all of these at
+        # exactly our targets), the swap is a no-op — skip it. The
+        # go version -m asserts in the verify step still gate the binary.
+        grep -q "^# $mod $new$" vendor/modules.txt \
+          && { echo "$mod already vendored at $new; skipping swap"; return; }
         grep -q "^# $mod $old$" vendor/modules.txt \
           || { echo "vendor/modules.txt no longer pins $mod $old; revisit this patch"; exit 1; }
         go mod download "$mod@$new"
