@@ -168,24 +168,32 @@ pipeline:
           importlib.invalidate_caches()
           from packaging.version import Version
       import importlib.metadata as md
+      def ver(p):
+          try:
+              return md.version(p)
+          except md.PackageNotFoundError:
+              return None
       FLOORS = {
           "aiohttp": "3.14.4", "autobahn": "26.7.1", "black": "26.10.1",
           "djangorestframework": "3.18.2", "dnspython": "2.9.2",
           "msgpack": "1.2.3", "multidict": "6.9.1", "oauthlib": "4.0.1",
+          # otel sdk pins api==exact, so bump the family together;
+          # dists absent from the venv (proto often is) are skipped
           "opentelemetry-api": "1.45.2", "opentelemetry-sdk": "1.45.2",
           "opentelemetry-proto": "1.45.2", "pyasn1": "0.6.5",
           "setuptools": "84.1.0", "twisted": "26.10.0rc1", "urllib3": "2.8.0",
       }
-      need = [f"{p}=={f}" for p, f in FLOORS.items()
-              if Version(md.version(p)) < Version(f)]
+      have = {p: f for p, f in FLOORS.items() if ver(p)}
+      need = [f"{p}=={f}" for p, f in have.items()
+              if Version(ver(p)) < Version(f)]
       if need:
           print("flooring:", " ".join(need))
           subprocess.run(["uv", "pip", "install", "--prerelease=allow", *need],
                          check=True)
       else:
           print("all floors already vendored by upstream lock; skipping")
-      for p, f in FLOORS.items():
-          got = md.version(p)
+      for p, f in have.items():
+          got = ver(p)
           assert Version(got) >= Version(f), f"{p}: {got} < floor {f}"
       EOF
       .venv/bin/python -c 'import sys; assert sys.version_info[:2] == (3, 14), sys.version'
@@ -232,7 +240,7 @@ pipeline:
       ./ak-root/.venv/bin/python -c \
         'import django, psycopg, xmlsec, kadmin, geoip2, ldap3, rest_framework'
       # the floor bumps below change these majors; import-check them too
-      ./ak-root/.venv/bin/python -c 'import oauthlib.oauth2, twisted.internet.reactor, aiohttp, urllib3, dns.resolver, multidict, msgpack, opentelemetry.sdk.trace'
+      ./ak-root/.venv/bin/python -c 'import oauthlib.oauth2, twisted.internet.reactor, aiohttp, urllib3, dns.resolver, multidict, msgpack, opentelemetry.trace'
       ./usr/bin/authentik --help >/dev/null 2>&1 || ./usr/bin/authentik --version >/dev/null
       head -1 lifecycle/ak | grep -q '#!/usr/bin/env bash'
       test -f etc/authentik-krb5.conf
