@@ -93,12 +93,15 @@ pipeline:
       # own main already bumped v4), so pin the fix build-side here. When
       # this block can go: once an openbao release ships v4.1.6 — the guard
       # stops firing at >= 4.1.6 and the assert then names the block.
-      # Residual kept honest: go-jose/v3 v3.0.5 is UNFIXABLE by us — the
-      # jwt credential pulls it via github.com/hashicorp/cap/jwt, whose
-      # latest release and main still import v3 (go mod why); no patched v3
-      # exists (module archived, advisories patched=null). Its 1 High +
-      # 2 Medium stay, so this image REMAINS UNSIGNED (gate = 0 Low+) until
-      # hashicorp/cap moves. Nothing here may touch it.
+      # go-jose/v3 was the last v3 link (2.7.2's graph, verified with
+      # go mod why): hashicorp/cap/jwt (jwt auth method) and the okta MFA
+      # sdk's private-key-JWT signer both imported it. cap v0.16.0 dropped
+      # v3 for v4 (floored just above), and okta never drops it (even v5
+      # pins v3), so its two jose files are vendor-patched onto v4 below —
+      # the only v3->v4 API delta in that surface is
+      # jwt.Builder.CompactSerialize -> Serialize (cilium's swap precedent).
+      # When this whole v3 story can go: an openbao release whose graph has
+      # no linked go-jose/v3 (cap v0.16+ and an okta sdk on v4 upstream).
       gijose_cur=$(awk '$1=="github.com/go-jose/go-jose/v4"{print $2; exit}' go.mod)
       if [ -z "$gijose_cur" ] || { [ "$gijose_cur" != "v4.1.6" ] && [ "$(printf '%s\n%s\n' "$gijose_cur" v4.1.6 | sort -V | head -1)" = "$gijose_cur" ]; }; then
         echo "patching go-jose/v4 ${gijose_cur:-unpinned} -> v4.1.6 (GHSA-mgcc-cww5-fp2q)"
@@ -124,6 +127,22 @@ pipeline:
       bump_floor go.opentelemetry.io/otel 1.47.0
       bump_floor go.opentelemetry.io/otel/sdk 1.47.0
       bump_floor go.opentelemetry.io/otel/trace 1.47.0
+      # cap v0.16.0 is the go-jose/v3 story's other half (see comment
+      # above); 2.7.2 ships v0.14.0, whose jwt package still imports v3.
+      bump_floor github.com/hashicorp/cap 0.16.0
+      okta_mod=$(awk '$1=="github.com/okta/okta-sdk-golang/v2"{print $2; exit}' go.mod)
+      if [ -n "$okta_mod" ]; then
+        echo "vendor-patching okta-sdk $okta_mod onto go-jose/v4"
+        go mod download github.com/okta/okta-sdk-golang/v2
+        rm -rf .patches/okta-sdk && mkdir -p .patches/okta-sdk
+        cp -R "$(go env GOMODCACHE)/github.com/okta/okta-sdk-golang/v2@$okta_mod/." .patches/okta-sdk/
+        chmod -R u+w .patches/okta-sdk
+        sed -i 's|github.com/go-jose/go-jose/v3|github.com/go-jose/go-jose/v4|g' \
+          .patches/okta-sdk/okta/requestExecutor.go .patches/okta-sdk/okta/config.go
+        sed -i 's/jwtBuilder\.CompactSerialize()/jwtBuilder.Serialize()/' \
+          .patches/okta-sdk/okta/requestExecutor.go
+        go mod edit -replace github.com/okta/okta-sdk-golang/v2=./.patches/okta-sdk
+      fi
       mkdir -p internal/http/web_ui  # Makefile's static-assets-dir
       # Bootstrap the exact pnpm pinned in ui/package.json packageManager
       # (Wolfi pnpm is node-22+, see env comment; upstream CI runs this same
@@ -158,6 +177,12 @@ pipeline:
         | awk '$2=="github.com/go-jose/go-jose/v4"{print $3; exit}')
       [ "$gijose_bin" = "v4.1.6" ] \
         || { echo "shipped bao embeds go-jose/v4 '${gijose_bin:-none}', want exactly v4.1.6 (GHSA-mgcc-cww5-fp2q)"; exit 1; }
+      # No linked go-jose/v3 may survive the cap bump + okta patch above —
+      # its 1 High + 2 Medium are what kept this image unsigned.
+      if go version -m "${{targets.destdir}}/usr/bin/bao" | grep -q "github.com/go-jose/go-jose/v3"; then
+        echo "shipped bao still links go-jose/v3 — cap bump or okta patch regressed"
+        exit 1
+      fi
       for spec in "github.com/klauspost/compress v1.20.2" \
                   "go.opentelemetry.io/otel/sdk v1.47.0" \
                   "go.opentelemetry.io/otel/trace v1.47.0"; do
