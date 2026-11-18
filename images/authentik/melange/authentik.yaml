@@ -139,6 +139,10 @@ pipeline:
       # itself is deliberately NOT installed — upstream ships the source
       # tree and runs manage.py from it. Path deps (packages/ak-guardian,
       # django-channels-postgres, ...) resolve from the tarball copy.
+      # xmlsec's setup links whatever xmlsec1-config --libs names, and
+      # Wolfi's static libxmlsec1*.a are not -fPIC (aarch64 dangerous
+      # relocation); drop them so ld resolves the shared libs instead.
+      rm -f /usr/lib/libxmlsec1*.a
       uv sync --locked --no-install-project
       .venv/bin/python -c 'import sys; assert sys.version_info[:2] == (3, 14), sys.version'
 
