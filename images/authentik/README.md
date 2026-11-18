@@ -26,6 +26,7 @@ instead, keeping its pins: python 3.14 (`requires-python ==3.14.*`), rust
 | GeoIP DBs baked in when a MaxMind key is provided | `/geoip` ships empty — degrades off, same as a license-less upstream build |
 | `/tests` tree for the debug path | Not shipped |
 | kerberos tuning baked as `/etc/krb5.conf` | Same file at `/etc/authentik-krb5.conf`, selected via `KRB5_CONFIG` (Wolfi's `krb5-conf` owns the default path) |
+| `uv.lock` pins honored exactly | Floor-pins for Nov-2026 python advisories the lock predates (aiohttp, twisted, oauthlib, …); self-skips per package once upstream's lock catches up. The 4 `python-3.14` Low+ findings wait on Wolfi's CPython patch — daily wave signs automatically |
 
 No `HEALTHCHECK` (apko has none): run `docker exec <c> ak healthcheck` or use
 it as a liveness command.
