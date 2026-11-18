@@ -22,13 +22,13 @@ contents:
     - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
   packages:
     # busybox: shell + chown/pgrep helpers; bash: docker-start/frrcommon.sh;
-    # iproute2 + python-3.11: the runtime deps of the melange package;
+    # iproute2 + python-3.14: the runtime deps of the melange package;
     # ca-certificates for RPKI TLS; tini: PID-1 init, like upstream.
     - busybox
     - ca-certificates-bundle
     - bash
     - iproute2
-    - python-3.11
+    - python-3.14
     - tini
     # Built by melange; supplied via --repository-append at build time.
     # Exact-version world pin, not bare "frr": Wolfi's retired frr-10.4/10.5/
@@ -36,7 +36,7 @@ contents:
     # apko's resolver ranks version above provider-priority, so a bare "frr"
     # resolves to wolfi frr-10.6 despite our k:100. Keep in sync with the
     # melange version+epoch (the update-versions bot rewrites this line).
-    - frr=10.7.1-r100
+    - frr=10.7.1-r101
 
 accounts:
   groups:
