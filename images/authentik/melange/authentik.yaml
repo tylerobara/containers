@@ -52,6 +52,7 @@ environment:
       - build-base
       - busybox
       - ca-certificates-bundle
+      - curl
       - bash
       - git
       - pkgconf
