@@ -23,7 +23,7 @@
 package:
   name: authentik
   version: 2026.8.5
-  epoch: 0
+  epoch: 1  # autobahn floor 26.7.1 -> 26.10.1 (GHSA-pjh6-c8mg-3x7m)
   description: "authentik IDaaS server (SAML/OIDC/LDAP provider), built from upstream source"
   copyright:
     - license: MIT
@@ -174,7 +174,7 @@ pipeline:
           except md.PackageNotFoundError:
               return None
       FLOORS = {
-          "aiohttp": "3.14.4", "autobahn": "26.7.1", "black": "26.10.1",
+          "aiohttp": "3.14.4", "autobahn": "26.10.1", "black": "26.10.1",
           "djangorestframework": "3.18.2", "dnspython": "2.9.2",
           "msgpack": "1.2.3", "multidict": "6.9.1", "oauthlib": "4.0.1",
           # otel sdk pins api==exact, so bump the family together;
