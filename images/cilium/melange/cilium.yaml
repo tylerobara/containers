@@ -91,6 +91,11 @@ pipeline:
       export PATH="$PATH:/usr/lib/go/bin:/usr/lib/go-1.26/bin"
       swap() {
         mod=$1 old=$2 new=$3 newgo=$4
+        # Once upstream merges the floor (1.20.5 vendored all of these at
+        # exactly our targets), the swap is a no-op — skip it. The
+        # go version -m asserts in the verify step still gate the binary.
+        grep -q "^# $mod $new$" vendor/modules.txt \
+          && { echo "$mod already vendored at $new; skipping swap"; return; }
         grep -q "^# $mod $old$" vendor/modules.txt \
           || { echo "vendor/modules.txt no longer pins $mod $old; revisit this patch"; exit 1; }
         go mod download "$mod@$new"
