@@ -397,6 +397,18 @@
       "description": "The Pocket ID operator that reconciles instances, users, groups and OIDC clients from CRDs, compiled from the upstream release tarball by melange and assembled by apko on Wolfi. Same /manager entrypoint and nonroot uid as upstream's image."
     },
     {
+      "name": "authentik",
+      "display_name": "Authentik",
+      "dir": "authentik",
+      "apko": "authentik.yaml",
+      "workflow": "authentik.yml",
+      "category": "Security & Secrets",
+      "primary_package": "authentik",
+      "upstream_url": "https://github.com/goauthentik/authentik",
+      "summary": "Goauthentik identity provider (Django web app + Rust core), built from upstream source.",
+      "description": "goauthentik built from the upstream release tarball by melange — pnpm web bundles, uv-managed Django venv and the Rust core binary — and assembled by apko on Wolfi. Mirrors upstream's final container layout (ak entrypoint, /authentik, /ak-root/.venv) minus the FIPS base, baked GeoIP DB and test tree."
+    },
+    {
       "name": "external-secrets",
       "display_name": "External Secrets Operator",
       "dir": "external-secrets",
