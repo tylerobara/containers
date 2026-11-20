@@ -22,7 +22,7 @@
 
 package:
   name: authentik
-  version: 2026.8.5
+  version: 2026.8.6
   epoch: 1  # autobahn floor 26.7.1 -> 26.10.1 (GHSA-pjh6-c8mg-3x7m)
   description: "authentik IDaaS server (SAML/OIDC/LDAP provider), built from upstream source"
   copyright:
@@ -102,7 +102,7 @@ environment:
 
 vars:
   # SHA256 of the GitHub release tarball (tag version/<version>)
-  sha256: 6d323d958154e70b8fe7e9c81232bce91840d7a88292153dc9ffcc47d033bd37
+  sha256: 9c751e4182951cf0774cec83e3e79e29a042a66ab18236b832e4f1c52db7bdcf
   # root package.json `packageManager` — upstream pins it in its Dockerfile
   pnpm_version: "11.20.0"
 
