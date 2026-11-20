@@ -2,7 +2,7 @@
 # rtvkiz/minimal images/postgres-slim: apko + Wolfi packages, no Dockerfile,
 # CVE patches within 24-48h via Wolfi.
 #
-# Template: @@MAJOR@@ is replaced with the PostgreSQL major (15|16|17|18) by
+# Template: @@MAJOR@@ is replaced with the PostgreSQL major (15|16|17|18|19) by
 # the build workflow. libicu78/icu78-data-full track Wolfi's current ICU; all
 # postgres majors there link the same ICU.
 #

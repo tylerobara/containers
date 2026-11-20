@@ -28,7 +28,7 @@ CNPG contract covered (see [image requirements](https://cloudnative-pg.github.io
 
 ## Majors & tags
 
-`apko/postgresql.yaml.tpl` is rendered per major (**15, 16, 17, 18**); the exact
+`apko/postgresql.yaml.tpl` is rendered per major (**15, 16, 17, 18, 19**); the exact
 `MAJOR.MINOR` is the `version:` in `melange/postgresql-<major>.yaml` — the one
 source of truth. Each build publishes four tags pointing at one digest:
 
