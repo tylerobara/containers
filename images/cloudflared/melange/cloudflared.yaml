@@ -56,6 +56,10 @@ vars:
   # requirements (MVS never downgrades), so once upstream ships >= this the
   # bump is a no-op — retire the pin then.
   gojose_version: 4.1.9
+  # Upstream 2026.11.2 pins gobwas/ws v1.2.1 (GO-2026-6940: ws.ReadFrame
+  # allocates the peer-declared payload length before reading any payload —
+  # unauthenticated remote DoS; fixed in v1.5.0); raised the same way.
+  ws_version: 1.5.0
 
 environment:
   contents:
@@ -95,7 +99,8 @@ pipeline:
       # Raise the vulnerable dep pin (see vars; no-op once upstream ships
       # >= this — gatus pattern; only `go build` takes build flags, `go get`
       # rejects them).
-      go get github.com/go-jose/go-jose/v4@v${{vars.gojose_version}}
+      go get github.com/go-jose/go-jose/v4@v${{vars.gojose_version}} \
+        github.com/gobwas/ws@v${{vars.ws_version}}
       BUILD_TIME=$(date -u -r RELEASE_NOTES '+%Y-%m-%d-%H:%M UTC')
       go build -trimpath -buildvcs=false -mod=readonly \
         -ldflags "-X main.Version=${{package.version}} -X \"main.BuildTime=${BUILD_TIME}\" -X github.com/cloudflare/cloudflared/metrics.Runtime=virtual" \
@@ -139,6 +144,11 @@ pipeline:
         '$3=="github.com/go-jose/go-jose/v4"{print $4; exit}')
       [ "$(printf '%s\n%s\n' "$gjver" "v${{vars.gojose_version}}" | sort -V | head -1)" = "v${{vars.gojose_version}}" ] \
         || { echo "go-jose is '$gjver' in the binary, want >= v${{vars.gojose_version}}"; exit 1; }
+      # …and the gobwas/ws bump (GO-2026-6940 gone only if it landed).
+      wsver=$(go version -m "$bin" | awk -F'\t' \
+        '$3=="github.com/gobwas/ws"{print $4; exit}')
+      [ "$(printf '%s\n%s\n' "$wsver" "v${{vars.ws_version}}" | sort -V | head -1)" = "v${{vars.ws_version}}" ] \
+        || { echo "gobwas/ws is '$wsver' in the binary, want >= v${{vars.ws_version}}"; exit 1; }
 
 test:
   environment:
