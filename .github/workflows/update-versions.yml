@@ -925,6 +925,9 @@ jobs:
                   echo "go-deps $mod: no ${var}_version var in $yaml, skip"; continue
                 fi
                 case $cur in *-*) echo "go-deps $mod: pseudo-version pin ($cur), skip"; continue ;; esac
+                # Documented floors survive the sweep: a `bot:skip` marker on
+                # the var line means upstream-latest provably breaks the build.
+                grep -q "${var}_version:.*bot:skip" "$yaml" && { echo "go-deps $mod: ${var}_version marked bot:skip, skip"; continue; }
                 if ! latest=$(curl -fsSL --retry 3 "https://proxy.golang.org/${mod}/@latest" | jq -r '.Version // empty'); then
                   echo "::error::go-deps $mod: proxy lookup failed"; dep_failed=1; continue
                 fi
