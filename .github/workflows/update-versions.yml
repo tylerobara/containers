@@ -27,7 +27,7 @@ on:
   workflow_dispatch:
     inputs:
       only:
-        description: "Comma-separated rows to check, e.g. postgresql-16,bitnami-postgresql-16,operator,openbao,cilium,cilium-envoy,metallb,frr-k8s,k8s-sidecar,local-path-provisioner,gatus,homepage,web-check (blank = all)"
+        description: "Comma-separated rows to check, e.g. postgresql-16,bitnami-postgresql-16,operator,openbao,cilium,cilium-envoy,metallb,frr-k8s,k8s-sidecar,local-path-provisioner,gatus,homepage,web-check,go-deps (blank = all)"
         required: false
         default: ""
 
@@ -900,6 +900,74 @@ jobs:
                 "https://dist.apache.org/repos/dist/release/guacamole/${latest}/source/guacamole-server-${latest}.tar.gz" \
                 guacamole-server
             fi
+          fi
+
+          # --- go-deps: generic dependency-floor bumps for the vendored-Go
+          # `go get <module>@v${{vars.<name>_version}}` pins (traefik go-jose/
+          # x/net/otel, cert-manager, cilium-operator, gatus/openbao/pocket-id
+          # go-jose...). No per-dep rows: the configs are their own manifest,
+          # the go module proxy is the version oracle. Pseudo-version pins
+          # (knative fix-commits) are intentional — skipped both directions.
+          # Floors only ever rise (MVS) and each build asserts the pin landed
+          # in the binary, so a bad bump fails the PR's validate run, not the
+          # fleet. One PR for all files; validate per touched family. ---
+          if want go-deps; then
+            dep_yamls="" dep_rows="" dep_failed=0
+            for yaml in images/*/melange/*.yaml; do
+              pairs=$(grep -oE '[A-Za-z0-9._-]+\.[A-Za-z0-9./_-]+@v\$\{\{vars\.[A-Za-z0-9_]+_version\}\}' "$yaml" \
+                | sed -E 's/@v\$\{\{vars\.([A-Za-z0-9_]+)_version\}\}$/ \1/' | sort -u) || true
+              [ -n "$pairs" ] || continue
+              while read -r mod var; do
+                [ -n "$mod" ] || continue
+                cur=$(awk -v k="${var}_version:" '$1==k{print $2; exit}' "$yaml")
+                cur=${cur//\"/}
+                if [ -z "$cur" ]; then
+                  echo "go-deps $mod: no ${var}_version var in $yaml, skip"; continue
+                fi
+                case $cur in *-*) echo "go-deps $mod: pseudo-version pin ($cur), skip"; continue ;; esac
+                if ! latest=$(curl -fsSL --retry 3 "https://proxy.golang.org/${mod}/@latest" | jq -r '.Version // empty'); then
+                  echo "::error::go-deps $mod: proxy lookup failed"; dep_failed=1; continue
+                fi
+                latest=${latest#v}
+                if [ -z "$latest" ]; then
+                  echo "::error::go-deps $mod: proxy returned no version"; dep_failed=1; continue
+                fi
+                case $latest in *-*) echo "go-deps $mod: upstream latest is a pseudo-version, skip"; continue ;; esac
+                [ "$(printf '%s\n%s\n' "$cur" "$latest" | sort -V | tail -1)" = "$latest" ] && [ "$cur" != "$latest" ] || continue
+                sed -i "s/^  ${var}_version: .*/  ${var}_version: $latest/" "$yaml"
+                if [ "$(awk -v k="${var}_version:" '$1==k{print $2; exit}' "$yaml")" != "$latest" ]; then
+                  echo "::error::go-deps $mod: yaml edit did not land as expected"
+                  git checkout -- "$yaml"; dep_failed=1; continue
+                fi
+                dep_yamls="$dep_yamls $yaml"
+                dep_rows="$dep_rows$(printf '          - `%s` `%s` -> `%s` (`%s`)\n' "$mod" "$cur" "$latest" "$yaml")"
+                echo "go-deps: $mod $cur -> $latest" >> "$GITHUB_STEP_SUMMARY"
+              done <<< "$pairs"
+            done
+            dep_yamls=$(tr ' ' '\n' <<< "$dep_yamls" | grep -v '^$' | sort -u || true)
+            if [ -n "$dep_yamls" ]; then
+              branch="bump/go-deps-$(date -u +%Y%m%d)"
+              git switch -c "$branch"
+              for y in $dep_yamls; do git add "$y"; done
+              git commit -m "chore(go-deps): raise vendored go dependency floors"
+              git push -f origin "$branch"
+              if [ -n "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+                echo "go-deps: pushed update to existing PR for $branch"
+              else
+                fams=$(tr ' ' '\n' <<< "$dep_yamls" | sed -E 's#^images/([^/]+)/.*#\1#' | grep -v '^$' | sort -u | tr '\n' ',' | sed 's/,$//')
+                gh pr create --head "$branch" --base main \
+                  --title "chore(go-deps): raise vendored go dependency floors" \
+                  --body "Vendored Go dep floors detected by the update-versions bot (go module proxy \`@latest\`), raised in the melange configs' \`go get\` pins:
+
+          $dep_rows
+          Families touched: $fams. These are \`go get\` floor raises — MVS never downgrades, upstream's own pin still wins if it's higher, and each config's build asserts the floor landed in the binary (\`go version -m\`), so an incompatible release fails the validate run instead of shipping.
+
+          Bot PRs don't get automatic CI checks. To validate before merging, run **each touched family's workflow → Run workflow** with \`ref=$branch\` and **validate_only** checked. The merge push to main then publishes the touched images." || FAILED=1
+              fi
+              echo "go-deps: opened/updated bump PR ($(tr '\n' ' ' <<< "$dep_yamls"))" >> "$GITHUB_STEP_SUMMARY"
+              git switch -C scratch-"$branch" origin/main >/dev/null 2>&1
+            fi
+            [ "$dep_failed" = 1 ] && FAILED=1
           fi
 
           exit $FAILED
