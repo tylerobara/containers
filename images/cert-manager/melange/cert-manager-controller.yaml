@@ -36,9 +36,9 @@ vars:
   # (x/net/html quadratic-complexity DoS, published Oct 27); go-jose/v4
   # 4.1.6 covers GHSA-mgcc-cww5-fp2q / CVE-2026-116587 (JWK RSA parse DoS
   # — the ACME client links it; webhook/cainjector don't, 0 findings).
-  xnet_version: 0.62.0
+  xnet_version: 0.63.0
   otel_version: 1.47.0
-  gojose_version: 4.1.6
+  gojose_version: 4.1.9
 
 environment:
   contents:

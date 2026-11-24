@@ -38,8 +38,8 @@ vars:
   sha256: f8cffb3f7b4d5b388952e03c399ffdffaa11699033c157d7b4b4e9762d63e0c7
   # Same dependency raises as images/traefik (grype 0-findings gate applies
   # to this image too); no-ops once upstream ships >= these.
-  xnet_version: 0.62.0
-  gojose_version: 4.1.6
+  xnet_version: 0.63.0
+  gojose_version: 4.1.9
   knative_pkg_version: 0.0.0-20260531000007-52dbd5ece63f
   # Select knative.dev/networking explicitly (v3.7.17 go.mod's own pin): the
   # pkg raise re-resolves the module graph, and `go get` prunes networking

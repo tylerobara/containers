@@ -33,7 +33,7 @@ vars:
   # x/net <0.60.0); we raise the requirement and re-vendor before compiling.
   # go get only raises requirements (MVS never downgrades), so once upstream
   # ships >= these the bump is a no-op — retire the pin then.
-  xnet_version: 0.60.0
+  xnet_version: 0.63.0
 
 environment:
   contents:
