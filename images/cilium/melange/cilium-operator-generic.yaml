@@ -81,8 +81,8 @@ pipeline:
       if grep -q '^# github.com/go-jose/go-jose/v4 v${{vars.gojose_version}}$' vendor/modules.txt; then
         echo "go-jose already vendored at v${{vars.gojose_version}}; skipping swap"
       else
-        grep -q '^# github.com/go-jose/go-jose/v4 v4.1.4$' vendor/modules.txt \
-          || { echo "vendor/modules.txt no longer pins go-jose v4.1.4; revisit this patch"; exit 1; }
+        grep -q '^# github.com/go-jose/go-jose/v4 v4.1.6$' vendor/modules.txt \
+          || { echo "vendor/modules.txt no longer pins go-jose v4.1.6; revisit this patch"; exit 1; }
         go mod download github.com/go-jose/go-jose/v4@v${{vars.gojose_version}}
         src="$(go env GOMODCACHE)/github.com/go-jose/go-jose/v4@v${{vars.gojose_version}}"
         dst="vendor/github.com/go-jose/go-jose/v4"
@@ -90,7 +90,7 @@ pipeline:
         cp -R "$src" "$dst"
         chmod -R u+w "$dst"
         go mod edit -require=github.com/go-jose/go-jose/v4@v${{vars.gojose_version}}
-        sed -i "s|^# github.com/go-jose/go-jose/v4 v4.1.4\$|# github.com/go-jose/go-jose/v4 v${{vars.gojose_version}}|" vendor/modules.txt
+        sed -i "s|^# github.com/go-jose/go-jose/v4 v4.1.6\$|# github.com/go-jose/go-jose/v4 v${{vars.gojose_version}}|" vendor/modules.txt
       fi
 
   - working-directory: /home/build/cilium-${{package.version}}
