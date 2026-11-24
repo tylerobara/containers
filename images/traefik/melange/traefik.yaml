@@ -48,8 +48,8 @@ vars:
   # unbounded request-body memory exhaustion in admission webhooks — linked
   # via the Knative ingress provider; fix commit knative/pkg#3363, upstream
   # 3.7.16 still pins the 2025-12-16 snapshot).
-  xnet_version: 0.62.0
-  gojose_version: 4.1.6
+  xnet_version: 0.63.0
+  gojose_version: 4.1.9
   otelsdklog_version: 1.47.0
   knative_pkg_version: 0.0.0-20260531000007-52dbd5ece63f
   # Select knative.dev/networking explicitly (v3.7.17 go.mod's own pin): the

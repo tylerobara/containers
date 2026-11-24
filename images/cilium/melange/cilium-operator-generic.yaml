@@ -28,7 +28,7 @@ vars:
   # / CVE-2026-116587 JWK parse DoS; the operator links it via registry
   # auth, the agent binary doesn't — 0 findings there, so cilium.yaml is
   # untouched). Retire once upstream's vendor tree ships >= this.
-  gojose_version: 4.1.6
+  gojose_version: 4.1.9
   # Vendored floors for the scanned Go deps (see swap step): GO-2026-6865
   # (klauspost/compress zstd panic, High), GHSA-358w-w75h-x6rx
   # (gopacket, Medium) and GHSA-q7gw-24fr-5p69 (otel/trace <1.47.0,

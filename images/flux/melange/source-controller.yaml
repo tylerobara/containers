@@ -34,7 +34,7 @@ vars:
   #
   # klauspost/compress: GO-2026-6865 (High), fixed in 1.20.2; upstream
   # 1.10.1 still selects 1.20.1.
-  klauspost_compress_version: 1.20.2
+  klauspost_compress_version: 1.20.5
   # The other current match, GO-2026-6225 in
   # github.com/chrismellard/docker-credential-acr-env, has NO fix version
   # and the repo is archived (last commit Mar 2023) — it arrives through

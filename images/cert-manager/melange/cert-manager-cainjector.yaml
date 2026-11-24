@@ -31,7 +31,7 @@ vars:
   # pulled in via controller-runtime — only trace links, no sdk). go get
   # only raises requirements (MVS never downgrades), so once upstream
   # ships >= these the bumps are no-ops — retire them then.
-  xnet_version: 0.60.0
+  xnet_version: 0.63.0
   otel_version: 1.47.0
 
 environment:

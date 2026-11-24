@@ -55,7 +55,7 @@ vars:
   # up before compiling — the gatus dep-pin pattern. go get only raises
   # requirements (MVS never downgrades), so once upstream ships >= this the
   # bump is a no-op — retire the pin then.
-  gojose_version: 4.1.6
+  gojose_version: 4.1.9
 
 environment:
   contents:

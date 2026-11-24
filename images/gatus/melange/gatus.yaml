@@ -52,12 +52,12 @@ vars:
   # 0.57.0 (fixes the High CVE-2026-39821) and eat the Unknown match.
   # GO-2026-6888 (Critical, brotli crafted-zstd panic) is fixed in 1.2.7;
   # its go.mod is unchanged across 1.2.1->1.2.7.
-  xnet_version: 0.60.0
-  xcrypto_version: 0.57.0
-  brotli_version: 1.2.7
-  otel_version: 1.45.0
-  grpc_version: 1.83.2
-  gojose_version: 4.1.6
+  xnet_version: 0.63.0
+  xcrypto_version: 0.59.0
+  brotli_version: 1.3.0
+  otel_version: 1.47.0
+  grpc_version: 1.85.0
+  gojose_version: 4.1.9
 
 environment:
   contents:
