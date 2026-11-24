@@ -20,7 +20,7 @@
 
 package:
   name: traefik
-  version: 3.7.19
+  version: 3.8.0
   epoch: 103
   description: "Traefik reverse proxy built from upstream source"
   copyright:
@@ -30,7 +30,7 @@ package:
 
 vars:
   # SHA256 of the GitHub release tarball
-  sha256: a9fe96056045a1ba8d7fadcaab0862bc9c9eec6975ecdccb85a2dd7e77a290fb
+  sha256: 9c3a5a5aefd7d77cc2c7052b47cba3bb88764a81e07e5504aa9a7f0445e908a0
   # Upstream 3.7.14 pins a vulnerable Go module (grype Critical/High in
   # x/net <0.60.0); we `go get` them up to the patched releases before
   # compiling. go get only raises requirements (MVS never downgrades), so
