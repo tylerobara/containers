@@ -903,7 +903,7 @@ jobs:
           fi
 
           # --- go-deps: generic dependency-floor bumps for the vendored-Go
-          # `go get <module>@v${{vars.<name>_version}}` pins (traefik go-jose/
+          # `go get <module>@v<vars>_version` pins (traefik go-jose/
           # x/net/otel, cert-manager, cilium-operator, gatus/openbao/pocket-id
           # go-jose...). No per-dep rows: the configs are their own manifest,
           # the go module proxy is the version oracle. Pseudo-version pins
