@@ -27,7 +27,7 @@
 
 package:
   name: valkey
-  version: 9.2.0
+  version: 9.2.1
   epoch: 100
   description: "Advanced key-value store built from upstream source"
   copyright:
@@ -41,7 +41,7 @@ package:
 
 vars:
   # SHA256 of the GitHub release tarball (tag <version>, no v prefix)
-  sha256: a02cb44db1269b699629e419d4949e6e51e984b1f0e9a984e8ee1e1b3b7cc36f
+  sha256: fec5d34ac6f5c7f35cddcaae368734d8a789f1af2f7c29853e790f093d848d71
 
 environment:
   contents:
